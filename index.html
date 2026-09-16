@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>鱼儿乐水族馆 · V0.2 (清晰纯白标题版)</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #d7f0f4;
+    color: #24353a;
+  }
+
+  .app {
+    width: 100vw; 
+    height: 100vh;
+    display: flex; 
+    align-items: center; 
+    justify-content: center;
+    padding: 0;
+  }
+
+  .tank {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: linear-gradient(to bottom, #8bcbd9 0%, #9dd4dc 66%, #a9d6ce 100%);
+    isolation: isolate;
+    cursor: default;
+    user-select: none;
+    touch-action: none;
+  }
+
+  .water-glow, .sand, .plant, .leaf {
+    pointer-events: none !important;
+  }
+
+  .water-glow {
+    position: absolute; inset: 0; z-index: 0;
+    background:
+      radial-gradient(ellipse at 50% 18%, rgba(255,255,255,.16), transparent 42%),
+      linear-gradient(to bottom, transparent 65%, rgba(83,142,130,.10));
+  }
+
+  /* 升级版海报标题：纯白高对比度 + 立体阴影浮雕感 */
+  .poster-title {
+    position: absolute;
+    top: 5.5%;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    margin: 0;
+    font-size: clamp(32px, 5.5vw, 54px);
+    font-weight: 900;
+    letter-spacing: 0.22em;
+    padding-left: 0.22em; /* 居中校正 letter-spacing 的偏移 */
+    pointer-events: none;
+    
+    /* 改为纯白实色，增强清晰度 */
+    color: #ffffff;
+    
+    /* 强对比水体阴影，确保在任何水色背景下都极为清晰 */
+    filter: drop-shadow(0 2px 8px rgba(16, 52, 60, 0.45))
+            drop-shadow(0 0 20px rgba(255, 255, 255, 0.4));
+    
+    will-change: transform, opacity, filter;
+  }
+
+  /* 泡泡破裂消散动画 */
+  .poster-title.bubble-dissolve {
+    animation: bubbleUpDissolve 0.85s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+  }
+
+  /* 泡泡生成淡入恢复动画 */
+  .poster-title.bubble-appear {
+    animation: bubbleIn 0.75s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  @keyframes bubbleUpDissolve {
+    0% {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0) scale(1);
+      filter: drop-shadow(0 2px 8px rgba(16, 52, 60, 0.45)) blur(0px);
+    }
+    50% {
+      opacity: 0.7;
+      filter: drop-shadow(0 4px 12px rgba(255, 255, 255, 0.8)) blur(2px);
+    }
+    100% {
+      opacity: 0;
+      transform: translateX(-50%) translateY(-55px) scale(1.3);
+      filter: drop-shadow(0 0 15px rgba(255, 255, 255, 0)) blur(8px);
+    }
+  }
+
+  @keyframes bubbleIn {
+    0% {
+      opacity: 0;
+      transform: translateX(-50%) translateY(20px) scale(0.85);
+      filter: blur(6px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0) scale(1);
+      filter: drop-shadow(0 2px 8px rgba(16, 52, 60, 0.45)) drop-shadow(0 0 20px rgba(255, 255, 255, 0.4)) blur(0px);
+    }
+  }
+
+  .sand {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 19%; z-index: 2;
+    background:
+      radial-gradient(circle at 15% 35%, rgba(151,121,68,.10) 0 1px, transparent 2px),
+      radial-gradient(circle at 72% 65%, rgba(151,121,68,.08) 0 1px, transparent 2px),
+      #dfcb92;
+    background-size: 38px 31px, 47px 39px, auto;
+  }
+
+  .plant { position: absolute; bottom: 10.5%; width: 100px; height: 25%; z-index: 3; }
+  .plant.left { left: 5%; }
+  .plant.right { right: 5%; transform: scaleX(-1); }
+
+  .leaf {
+    position: absolute; bottom: 0; width: 14px; height: 72%;
+    border-radius: 100% 0 100% 0; background: #4f8c6e; transform-origin: bottom center;
+  }
+  .leaf:nth-child(1) { left: 10px; transform: rotate(-28deg); height: 66%; }
+  .leaf:nth-child(2) { left: 30px; transform: rotate(-5deg); height: 92%; }
+  .leaf:nth-child(3) { left: 50px; transform: rotate(29deg); height: 58%; }
+  .leaf:nth-child(4) { left: 25px; transform: rotate(20deg); height: 46%; opacity: .9; }
+
+  .fish {
+    position: absolute; left: 0; top: 0; width: 116px; height: 70px;
+    transform-origin: 50% 50%; z-index: 5; cursor: pointer; will-change: transform;
+  }
+
+  .fish-body {
+    position: absolute; left: 5px; top: 15px; width: 77px; height: 42px;
+    border-radius: 58% 48% 48% 56%; background: #f39b68;
+    box-shadow: inset -8px -5px 0 rgba(206, 104, 65, .16);
+    overflow: hidden;
+  }
+
+  .fish-body::before {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 50%;
+    background: linear-gradient(to top, #ffffff 60%, rgba(255, 255, 255, 0) 100%);
+    border-radius: 0 0 50% 50%;
+  }
+
+  .fish-body::after {
+    content: ""; position: absolute; left: 12px; top: 10px;
+    width: 9px; height: 9px; border-radius: 50%; background: #243c42;
+    box-shadow: 0 0 0 2px #ffffff;
+    z-index: 2;
+  }
+
+  .fish-tail {
+    position: absolute; left: 76px; top: 21px; width: 36px; height: 31px;
+    background: #df7850; clip-path: polygon(0 50%, 100% 0, 88% 100%); 
+    transform-origin: 0% 50%;
+    will-change: transform;
+  }
+
+  .fish-fin {
+    position: absolute; left: 40px; top: 2px; width: 27px; height: 28px;
+    border-radius: 100% 0 100% 0; background: #e77e58; 
+    transform-origin: bottom left;
+    will-change: transform;
+  }
+
+  .fish.small { width: 74px; height: 46px; }
+  .fish.small .fish-body { left: 3px; top: 10px; width: 49px; height: 28px; }
+  .fish.small .fish-body::after { left: 8px; top: 6px; width: 6px; height: 6px; box-shadow: 0 0 0 1.5px #ffffff; }
+  .fish.small .fish-tail { left: 48px; top: 14px; width: 24px; height: 21px; }
+  .fish.small .fish-fin { left: 26px; top: 1px; width: 18px; height: 18px; }
+
+  .feed-pellet {
+    position: absolute; width: 14px; height: 14px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #ffffff, #f39b68);
+    box-shadow: 0 0 8px rgba(0,0,0,0.4); z-index: 99;
+    pointer-events: none; transform: translate(-50%, -50%);
+  }
+  .feed-pellet.eaten {
+    transition: all .15s ease-out; opacity: 0; transform: translate(-50%, -50%) scale(0.1);
+  }
+
+  /* 圆形水泡计时器 */
+  .timer {
+    position: absolute; z-index: 1000; left: 50%; top: 53%;
+    transform: translate(-50%, -50%);
+    width: min(260px, 70vw); 
+    height: min(260px, 70vw);
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    
+    background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.85) 0%, rgba(240, 250, 252, 0.65) 50%, rgba(180, 225, 235, 0.45) 100%);
+    box-shadow: 
+      inset -10px -10px 20px rgba(255, 255, 255, 0.9),
+      inset 10px 10px 20px rgba(70, 130, 140, 0.25),
+      0 12px 35px rgba(36, 68, 75, 0.18);
+    backdrop-filter: blur(6px);
+    border: 1.5px solid rgba(255, 255, 255, 0.6);
+    text-align: center;
+
+    animation: bubbleFloat 4s ease-in-out infinite alternate;
+  }
+
+  .timer::before {
+    content: "";
+    position: absolute;
+    top: 14%;
+    left: 20%;
+    width: 25%;
+    height: 12%;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.65);
+    transform: rotate(-35deg);
+    pointer-events: none;
+  }
+
+  @keyframes bubbleFloat {
+    0% { transform: translate(-50%, -50%) translateY(0px); }
+    100% { transform: translate(-50%, -50%) translateY(-10px); }
+  }
+
+  .mode { font-size: 13px; letter-spacing: .1em; color: #435b60; margin-bottom: 4px; }
+  .time { display: block; font-size: clamp(38px, 5.5vw, 52px); line-height: 1; font-weight: 700; color: #101b1e; cursor: ns-resize; margin: 4px 0; }
+  .time-sub { font-size: 11px; color: #5a7378; max-width: 85%; }
+
+  .start, .end {
+    margin-top: 10px; border: 0; border-radius: 20px; padding: 7px 18px;
+    background: #4d8a8c; color: white; font-size: 13px; cursor: pointer;
+    box-shadow: 0 4px 10px rgba(77, 138, 140, 0.3);
+    transition: transform .1s ease, background .2s ease;
+  }
+  .start:hover, .end:hover { transform: scale(1.05); }
+  .end { display: none; background: #667f82; }
+
+  .modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; z-index: 1001; background: rgba(22, 46, 50, .20); }
+  .modal.show { display: flex; }
+  .modal-card { width: min(340px, calc(100vw - 40px)); padding: 27px; border-radius: 22px; background: #f6fbfb; text-align: center; }
+  .modal-actions { display: flex; gap: 10px; justify-content: center; margin-top: 20px; }
+  .modal-actions button { border: 0; border-radius: 11px; padding: 10px 18px; font-size: 15px; cursor: pointer; }
+  .continue { background: #e1eeee; color: #3d5559; }
+  .confirm { background: #5a8588; color: white; }
+</style>
+</head>
+
+<body>
+<div class="app">
+  <main class="tank" id="tank">
+    <div class="water-glow"></div>
+    
+    <!-- 纯白清晰海报标题 -->
+    <h1 class="poster-title" id="appTitle">鱼儿乐水族馆</h1>
+
+    <div class="plant left"><span class="leaf"></span><span class="leaf"></span><span class="leaf"></span><span class="leaf"></span></div>
+    <div class="plant right"><span class="leaf"></span><span class="leaf"></span><span class="leaf"></span><span class="leaf"></span></div>
+    <div class="sand" id="sand"></div>
+
+    <div class="fish" id="fish1"><div class="fish-body"></div><div class="fish-fin"></div><div class="fish-tail"></div></div>
+    <div class="fish small" id="fish2"><div class="fish-body"></div><div class="fish-fin"></div><div class="fish-tail"></div></div>
+    <div class="fish small" id="fish3"><div class="fish-body"></div><div class="fish-fin"></div><div class="fish-tail"></div></div>
+
+    <section class="timer" id="timer">
+      <div class="mode" id="mode">准备专注</div>
+      <div class="time" id="time">25:00</div>
+      <div class="time-sub" id="hint">点击开始专注后解锁投喂</div>
+      <button class="start" id="start">开始专注</button>
+      <button class="end" id="end">结束专注</button>
+    </section>
+  </main>
+</div>
+
+<div class="modal" id="modal">
+  <div class="modal-card">
+    <div>确定结束专注？</div>
+    <div class="modal-actions">
+      <button class="continue" id="continue">继续专注</button>
+      <button class="confirm" id="confirm">确定结束</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const tank = document.getElementById("tank");
+  const appTitle = document.getElementById("appTitle");
+  const timeEl = document.getElementById("time");
+  const modeEl = document.getElementById("mode");
+  const hintEl = document.getElementById("hint");
+  const startBtn = document.getElementById("start");
+  const endBtn = document.getElementById("end");
+  const modal = document.getElementById("modal");
+  const continueBtn = document.getElementById("continue");
+  const confirmBtn = document.getElementById("confirm");
+
+  let minutes = 25, remaining = minutes * 60, running = false, startedAt = 0, durationSeconds = minutes * 60, timerFrame = 0;
+
+  function renderTime() {
+    timeEl.textContent = `${String(Math.floor(remaining / 60)).padStart(2, "0")}:${String(remaining % 60).padStart(2, "0")}`;
+  }
+
+  timeEl.addEventListener("wheel", (e) => {
+    if (running) return;
+    e.preventDefault();
+    minutes = Math.max(10, Math.min(60, minutes + (e.deltaY < 0 ? 1 : -1)));
+    remaining = minutes * 60;
+    renderTime();
+  }, { passive: false });
+
+  startBtn.onclick = () => {
+    running = true; 
+    startedAt = Date.now(); 
+    durationSeconds = minutes * 60;
+
+    // 清除现有的呈现动画类，触发泡泡向上浮动消散动画
+    appTitle.classList.remove("bubble-appear");
+    appTitle.classList.add("bubble-dissolve");
+    
+    setTimeout(() => {
+      if (running) appTitle.style.visibility = "hidden";
+    }, 800);
+
+    modeEl.textContent = "专注中"; 
+    hintEl.textContent = "点击水面投喂，点击鱼儿加速";
+    startBtn.style.display = "none"; 
+    endBtn.style.display = "inline-block";
+
+    const loop = () => {
+      if (!running) return;
+      remaining = Math.max(0, Math.ceil(durationSeconds - (Date.now() - startedAt) / 1000));
+      renderTime();
+      if (remaining > 0) {
+        timerFrame = requestAnimationFrame(loop);
+      } else {
+        resetFocus(true);
+      }
+    };
+    loop();
+  };
+
+  endBtn.onclick = () => modal.classList.add("show");
+  continueBtn.onclick = () => modal.classList.remove("show");
+  confirmBtn.onclick = () => {
+    modal.classList.remove("show"); 
+    resetFocus(false);
+  };
+
+  function resetFocus(completed) {
+    running = false;
+
+    // 显示标题并播放泡泡淡入生成动画
+    appTitle.style.visibility = "visible";
+    appTitle.classList.remove("bubble-dissolve");
+    
+    // 强制重绘，确保重新触发 CSS 动画
+    void appTitle.offsetWidth; 
+    appTitle.classList.add("bubble-appear");
+
+    modeEl.textContent = completed ? "专注完成" : "准备专注"; 
+    hintEl.textContent = completed ? "棒极了！点击开始开启下次专注" : "点击开始专注后解锁投喂";
+    startBtn.style.display = "inline-block"; 
+    endBtn.style.display = "none";
+    remaining = minutes * 60; 
+    renderTime();
+  }
+
+  const fishStates = [
+    { 
+      el: document.getElementById("fish1"), 
+      tailEl: document.getElementById("fish1").querySelector(".fish-tail"),
+      finEl: document.getElementById("fish1").querySelector(".fish-fin"),
+      x: 200, y: 200, speed: 2.0, burstSpeed: 0, radius: 32, eatDist: 38, eatCooldown: 0, 
+      facingLeft: true, swimTime: Math.random() * 100 
+    },
+    { 
+      el: document.getElementById("fish2"), 
+      tailEl: document.getElementById("fish2").querySelector(".fish-tail"),
+      finEl: document.getElementById("fish2").querySelector(".fish-fin"),
+      x: 400, y: 300, speed: 2.5, burstSpeed: 0, radius: 22, eatDist: 28, eatCooldown: 0, 
+      facingLeft: true, swimTime: Math.random() * 100 
+    },
+    { 
+      el: document.getElementById("fish3"), 
+      tailEl: document.getElementById("fish3").querySelector(".fish-tail"),
+      finEl: document.getElementById("fish3").querySelector(".fish-fin"),
+      x: 300, y: 400, speed: 2.3, burstSpeed: 0, radius: 22, eatDist: 28, eatCooldown: 0, 
+      facingLeft: true, swimTime: Math.random() * 100 
+    }
+  ];
+
+  let pellets = [];
+
+  fishStates.forEach(fish => {
+    fish.el.addEventListener("pointerdown", (e) => {
+      if (!running) return;
+      e.stopPropagation();
+      fish.burstSpeed = 6.0;
+    });
+  });
+
+  tank.addEventListener("pointerdown", (e) => {
+    if (!running) return; 
+    if (e.target.closest(".timer, .modal")) return;
+
+    const rect = tank.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const waterBottom = rect.height * 0.81;
+
+    if (py >= waterBottom) return;
+
+    const pelletEl = document.createElement("div");
+    pelletEl.className = "feed-pellet";
+    pelletEl.style.left = px + "px";
+    pelletEl.style.top = py + "px";
+    tank.appendChild(pelletEl);
+
+    pellets.push({ x: px, y: py, el: pelletEl, eaten: false });
+  });
+
+  function clamp(val, min, max) {
+    return Math.max(min, Math.min(max, val));
+  }
+
+  window.addEventListener("resize", () => {
+    const rect = tank.getBoundingClientRect();
+    const waterBottom = rect.height * 0.81;
+
+    pellets = pellets.filter(p => {
+      const isOutOfBounds = p.x > rect.width || p.y > waterBottom;
+      if (isOutOfBounds) {
+        if (p.el && p.el.parentNode) p.el.remove();
+        return false;
+      }
+      return true;
+    });
+
+    fishStates.forEach(fish => {
+      fish.x = clamp(fish.x, fish.radius, rect.width - fish.radius);
+      fish.y = clamp(fish.y, fish.radius, waterBottom - fish.radius);
+
+      if (fish.targetX > rect.width || fish.targetY > waterBottom) {
+        fish.targetX = fish.radius + Math.random() * (rect.width - fish.radius * 2);
+        fish.targetY = fish.radius + Math.random() * (waterBottom - fish.radius * 2);
+      }
+    });
+  });
+
+  function animate() {
+    const rect = tank.getBoundingClientRect();
+    const waterBottom = rect.height * 0.81; 
+
+    pellets.forEach(p => {
+      if (!p.eaten && p.y < waterBottom) {
+        p.y += 0.9; 
+        p.el.style.top = p.y + "px";
+      }
+    });
+
+    fishStates.forEach(fish => {
+      let targetX = fish.x, targetY = fish.y;
+      let hasFood = false;
+
+      if (fish.eatCooldown > 0) fish.eatCooldown--;
+
+      if (pellets.length > 0 && fish.eatCooldown <= 0) {
+        let nearest = null, minDist = Infinity;
+        pellets.forEach(p => {
+          if (!p.eaten) {
+            const d = Math.hypot(p.x - fish.x, p.y - fish.y);
+            if (d < minDist) { minDist = d; nearest = p; }
+          }
+        });
+
+        if (nearest) {
+          targetX = nearest.x; 
+          targetY = nearest.y; 
+          hasFood = true;
+
+          if (minDist < fish.eatDist) {
+            nearest.eaten = true;
+            nearest.el.classList.add("eaten");
+            const elemToRemove = nearest.el;
+            setTimeout(() => elemToRemove.remove(), 150);
+
+            fish.eatCooldown = 60;
+            fish.targetX = fish.radius + Math.random() * (rect.width - fish.radius * 2);
+            fish.targetY = fish.radius + Math.random() * (waterBottom - fish.radius * 2);
+          }
+        }
+      }
+
+      if (!hasFood) {
+        if (!fish.targetX || Math.hypot(fish.targetX - fish.x, fish.targetY - fish.y) < 30) {
+          fish.targetX = fish.radius + Math.random() * (rect.width - fish.radius * 2);
+          fish.targetY = fish.radius + Math.random() * (waterBottom - fish.radius * 2);
+        }
+        targetX = fish.targetX; 
+        targetY = fish.targetY;
+      }
+
+      const dx = targetX - fish.x;
+      const dy = targetY - fish.y;
+      const dist = Math.hypot(dx, dy);
+
+      const currentSpeed = fish.speed + fish.burstSpeed;
+
+      if (dist > 1) {
+        fish.x += (dx / dist) * currentSpeed;
+        fish.y += (dy / dist) * currentSpeed;
+      }
+
+      if (fish.burstSpeed > 0) {
+        fish.burstSpeed *= 0.92;
+        if (fish.burstSpeed < 0.1) fish.burstSpeed = 0;
+      }
+
+      fish.x = clamp(fish.x, fish.radius, rect.width - fish.radius);
+      fish.y = clamp(fish.y, fish.radius, waterBottom - fish.radius + 10);
+
+      if (dx < -2) fish.facingLeft = true;
+      if (dx > 2) fish.facingLeft = false;
+
+      const slope = clamp(dy / (Math.abs(dx) + 0.1), -0.5, 0.5); 
+      let pitchDeg = slope * 30;
+
+      if (fish.facingLeft) {
+        fish.el.style.transform = `translate(${fish.x}px, ${fish.y}px) translate(-50%, -50%) rotate(${pitchDeg}deg) scaleX(1)`;
+      } else {
+        fish.el.style.transform = `translate(${fish.x}px, ${fish.y}px) translate(-50%, -50%) rotate(${-pitchDeg}deg) scaleX(-1)`;
+      }
+
+      fish.swimTime += 0.15 + (fish.burstSpeed * 0.05);
+      const tailSwing = Math.sin(fish.swimTime) * (16 + fish.burstSpeed * 2);
+      const finSwing = Math.cos(fish.swimTime) * 8;
+
+      if (fish.tailEl) fish.tailEl.style.transform = `rotate(${tailSwing}deg)`;
+      if (fish.finEl) fish.finEl.style.transform = `rotate(${26 + finSwing}deg)`;
+    });
+
+    pellets = pellets.filter(p => !p.eaten);
+
+    requestAnimationFrame(animate);
+  }
+
+  renderTime();
+  requestAnimationFrame(animate);
+})();
+</script>
+</body>
+</html>
