@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>鱼儿乐水族馆 · V0.11</title>
+<title>鱼儿乐水族馆 · V0.2</title>
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
@@ -265,7 +265,7 @@
     box-shadow:0 14px 45px rgba(36,68,75,.22),0 0 45px rgba(255,255,255,.42);
     backdrop-filter:blur(10px); text-align:center; opacity:0; pointer-events:none;
   }
-  .completion-flash.show { animation:completionFlash 2.8s cubic-bezier(.2,.8,.2,1) forwards; }
+  .completion-flash.show { opacity:1; pointer-events:auto; animation:none; }
   .completion-main { font-size:clamp(22px,4vw,30px); font-weight:800; letter-spacing:.08em; color:#24353a; }
   .completion-sub { margin-top:7px; font-size:12px; color:#5a7378; }
   .timer.complete-pulse { animation:completionPulse 1.05s ease-in-out 3; }
@@ -380,6 +380,382 @@
   .audio-settings { top: calc(100% + 6px); right: 0; width: min(270px, calc(100vw - 24px)); }
 }
 
+
+
+/* ===== v0.2 商店与数据系统 ===== */
+.v02-topbar{position:absolute;left:18px;top:18px;z-index:1000;display:flex;align-items:center;gap:10px;}
+.v02-bubbles,.v02-shop-btn{border:1px solid rgba(255,255,255,.58);background:rgba(30,80,95,.35);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 3px 12px rgba(0,0,0,.12);color:#fff;border-radius:999px;font-family:inherit;}
+.v02-bubbles{padding:9px 14px;font-size:13px;letter-spacing:.05em;}
+.v02-shop-btn{padding:10px 16px;cursor:pointer;font-size:13px;}
+.v02-shop-btn:hover{background:rgba(255,255,255,.16)}
+.v02-shop{position:fixed;inset:0;z-index:2000;display:none;align-items:center;justify-content:center;background:rgba(22,46,50,.28);padding:24px;}
+.v02-shop.show{display:flex;}
+  .v02-shop-card{width:min(900px,calc(100vw - 32px));height:min(760px,calc(100vh - 48px));overflow:hidden;display:flex;flex-direction:column;background:rgba(246,251,251,.96);border:1px solid rgba(255,255,255,.95);border-radius:26px;box-shadow:0 18px 60px rgba(20,50,55,.24);padding:0;}
+  .v02-shop-header{flex:0 0 auto;padding:22px 22px 0;background:rgba(246,251,251,.98);position:relative;z-index:3;}
+  .v02-shop-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;}
+.v02-shop-title{font-size:20px;font-weight:800;color:#24353a;letter-spacing:.08em;}
+.v02-shop-sub{font-size:12px;color:#6a8185;margin-top:4px;}
+.v02-close{border:0;background:#e1eeee;color:#40595e;border-radius:999px;width:36px;height:36px;cursor:pointer;font-size:18px;}
+.v02-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 15px;padding-bottom:2px;}
+.v02-tab{border:1px solid #d4e2e2;background:#fff;color:#587174;border-radius:999px;padding:7px 13px;font:700 12px inherit;cursor:pointer;transition:.15s ease;}
+.v02-tab:hover{background:#f2f7f6}
+.v02-tab.active{background:#5a8588;color:#fff;border-color:#5a8588;box-shadow:0 3px 9px rgba(60,100,102,.18);}
+  .v02-shop-content{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding:0 22px 18px;scrollbar-width:thin;scrollbar-color:rgba(77,138,140,.55) rgba(223,238,238,.7);}
+  .v02-shop-content::-webkit-scrollbar{width:8px;}
+  .v02-shop-content::-webkit-scrollbar-track{background:rgba(223,238,238,.7);border-radius:999px;margin:4px 0;}
+  .v02-shop-content::-webkit-scrollbar-thumb{background:rgba(77,138,140,.55);border:2px solid rgba(223,238,238,.7);border-radius:999px;}
+  .v02-shop-content::-webkit-scrollbar-thumb:hover{background:rgba(77,138,140,.78);}
+  .v02-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
+.v02-item{border:1px solid #d9e8e9;border-radius:18px;padding:12px;background:#fff;}
+.v02-preview{height:120px;border-radius:13px;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;overflow:hidden;background:linear-gradient(135deg,#a9dfe8,#d9f2ef);}
+.v02-preview:hover{filter:brightness(1.03);box-shadow:inset 0 0 0 2px rgba(77,138,140,.25)}
+.v02-preview-fish{font-size:48px;filter:drop-shadow(0 5px 4px rgba(0,0,0,.12));}
+.v02-preview-plant{font-size:50px}.v02-preview-bg{width:100%;height:100%;background:linear-gradient(to bottom,#4e8fa8,#9fd7d7 70%,#dfcb92 71%)}
+.v02-preview-bg.night{background:linear-gradient(to bottom,#274c68,#427f91 68%,#6d6751 69%)}
+.v02-preview-sand{width:100%;height:100%;background:linear-gradient(to bottom,#9dd4dc 0 70%,#dfcb92 71%)}
+.v02-preview-sand.dark{background:linear-gradient(to bottom,#9dd4dc 0 70%,#b8a477 71%)}
+.v02-preview-sound{font-size:42px}
+.v02-item-name{margin-top:10px;font-weight:700;color:#2d464b}.v02-item-meta{margin-top:4px;font-size:11px;color:#71878b;min-height:28px}
+.v02-item-name{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  flex-wrap:wrap;
+}
+.v02-item-name-text{
+  display:inline;
+}
+.v02-item-name .v02-member-badge{
+  display:inline-flex;
+  align-items:center;
+  line-height:1;
+  margin:0;
+  padding:3px 6px;
+  border-radius:5px;
+  white-space:nowrap;
+  font-size:10px;
+}
+.v02-description{
+  display:block;
+  margin-top:5px;
+  line-height:1.45;
+  color:#68777a;
+  font-size:12px;
+}
+.v02-item-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px}.v02-price{font-size:12px;color:#537075}.v02-buy{border:0;border-radius:12px;padding:8px 12px;background:#5a8588;color:#fff;cursor:pointer;font-family:inherit}.v02-buy:disabled{background:#c6d5d7;color:#718184;cursor:not-allowed}.v02-owned{font-size:11px;color:#5a8588;white-space:nowrap}
+.v02-dress,.v02-quantity button{border:0;border-radius:10px;padding:7px 11px;background:#5a8588;color:#fff;cursor:pointer;font:700 12px inherit}.v02-dress:disabled{background:#c6d5d7;color:#718184;cursor:not-allowed}.v02-quantity{display:flex;align-items:center;gap:8px}.v02-quantity button{width:28px;height:28px;padding:0;font-size:17px;line-height:1}.v02-quantity span{min-width:16px;text-align:center;font-weight:700;color:#40595e}
+.v02-footer{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:16px;padding-top:14px;border-top:1px solid #dfeaec}.v02-save{border:0;border-radius:13px;padding:10px 18px;background:#4d8a8c;color:#fff;cursor:pointer;font-family:inherit}.v02-cancel{border:0;border-radius:13px;padding:10px 18px;background:#e1eeee;color:#40595e;cursor:pointer;font-family:inherit}.v02-message{margin-right:auto;font-size:12px;color:#667d81;min-height:18px}
+.v02-settlement{margin-right:auto;min-height:18px;font-size:12px;color:#537075;font-weight:700}
+@media(max-width:700px){.v02-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.v02-shop{padding:12px}.v02-shop-header{padding:16px 16px 0}.v02-shop-content{padding-left:16px;padding-right:16px}.v02-preview{height:100px}}
+@media(max-width:480px){.v02-grid{grid-template-columns:1fr}.v02-topbar{left:12px;top:12px}.v02-bubbles{display:none}.v02-shop-btn{padding:9px 13px}}
+
+/* ===== 商店固定操作栏 ===== */
+#shopModal .v02-shop-body{
+  padding-bottom:88px !important;
+}
+#shopModal .v02-shop-actions,
+#shopModal .shop-actions,
+#shopModal .v02-actions{
+  position:sticky;
+  bottom:0;
+  z-index:120;
+  margin-left:-20px;
+  margin-right:-20px;
+  margin-bottom:-20px;
+  padding:12px 20px 14px;
+  background:rgba(255,253,248,.96);
+  border-top:1px solid rgba(80,110,112,.18);
+  box-shadow:0 -7px 18px rgba(40,70,72,.08);
+  backdrop-filter:blur(6px);
+}
+@media(max-width:600px){
+  #shopModal .v02-shop-actions,
+  #shopModal .shop-actions,
+  #shopModal .v02-actions{
+    margin-left:-12px;margin-right:-12px;margin-bottom:-12px;padding-left:12px;padding-right:12px;
+  }
+}
+
+/* ===== 会员商品标记 ===== */
+.v02-member-badge{
+  display:inline-flex;
+  align-items:center;
+  gap:3px;
+  margin-right:5px;
+  padding:2px 6px;
+  border-radius:999px;
+  background:#f0e4c8;
+  color:#7a6131;
+  font-size:9px;
+  font-weight:800;
+  vertical-align:middle;
+}
+
+/* ===== 两种独立 CSS 小鱼 ===== */
+.v02-fish-css{
+  position:relative;
+  width:76px;
+  height:42px;
+  margin:auto;
+  transform-origin:center;
+}
+.v02-fish-css .fish-body{
+  position:absolute;
+  left:12px;top:7px;
+  width:50px;height:29px;
+  border-radius:58% 48% 48% 58%;
+  box-shadow:inset -5px -4px 0 rgba(0,0,0,.10), inset 4px 3px 0 rgba(255,255,255,.16);
+}
+.v02-fish-css .fish-tail{
+  position:absolute;
+  right:1px;top:6px;
+  width:0;height:0;
+  border-top:15px solid transparent;
+  border-bottom:15px solid transparent;
+  border-right:0;
+  border-left:22px solid currentColor;
+  transform:rotate(180deg);
+  filter:brightness(.92);
+}
+.v02-fish-css .fish-eye{
+  position:absolute;
+  left:20px;top:14px;
+  width:7px;height:7px;border-radius:50%;
+  background:#fff;
+  box-shadow:inset 2px 1px 0 #222;
+  z-index:2;
+}
+.v02-fish-css .fish-fin{
+  position:absolute;
+  left:35px;top:2px;
+  width:20px;height:13px;
+  background:currentColor;
+  border-radius:70% 10% 70% 10%;
+  transform:rotate(-15deg);
+  opacity:.9;
+}
+.v02-fish-blue .fish-body{background:#4d91d9;}
+.v02-fish-blue .fish-tail,
+.v02-fish-blue .fish-fin{color:#2769ad;}
+.v02-fish-gold .fish-body{background:#e7ad35;}
+.v02-fish-gold .fish-tail,
+.v02-fish-gold .fish-fin{color:#c37a16;}
+
+/* ===== 两种独立 CSS 水草 ===== */
+.v02-plant-css{
+  position:relative;
+  width:70px;height:64px;margin:auto;
+}
+.v02-plant-css i{
+  position:absolute;
+  bottom:0;
+  display:block;
+  width:9px;
+  border-radius:90% 10% 90% 10%;
+  transform-origin:bottom;
+}
+.v02-plant-green i:nth-child(1){left:18px;height:55px;background:#4f8064;transform:rotate(-18deg);}
+.v02-plant-green i:nth-child(2){left:30px;height:63px;background:#6b9870;transform:rotate(3deg);}
+.v02-plant-green i:nth-child(3){left:43px;height:49px;background:#3f725a;transform:rotate(19deg);}
+.v02-plant-tall i:nth-child(1){left:17px;height:60px;background:#3f765f;transform:rotate(-25deg);}
+.v02-plant-tall i:nth-child(2){left:28px;height:72px;background:#79a86e;transform:rotate(-3deg);}
+.v02-plant-tall i:nth-child(3){left:40px;height:66px;background:#4c8d66;transform:rotate(15deg);}
+.v02-plant-red i:nth-child(1){left:18px;height:54px;background:#a45c48;transform:rotate(-22deg);}
+.v02-plant-red i:nth-child(2){left:30px;height:68px;background:#c2774e;transform:rotate(1deg);}
+.v02-plant-red i:nth-child(3){left:43px;height:58px;background:#8f4e45;transform:rotate(21deg);}
+
+
+/* ===== 商店底部操作栏固定 ===== */
+#shopModal .v02-shop-card{position:relative}
+#shopModal .v02-grid{padding-bottom:92px}
+#shopModal .v02-footer{
+  position:relative;
+  flex:0 0 auto;
+  z-index:200;
+  margin-top:0;
+  padding:13px 22px 14px;
+  background:rgba(255,253,248,.97);
+  box-shadow:0 -8px 18px rgba(40,70,72,.08);
+  backdrop-filter:blur(7px);
+}
+@media(max-width:700px){
+  #shopModal .v02-footer{padding-left:16px;padding-right:16px;}
+}
+
+
+/* ===== 鱼缸内鱼类：沿用原有鱼 CSS，仅用颜色区分商品 ===== */
+/* 原始 .fish / .fish.small 的形状、尾巴、鳍和朝向逻辑全部保留。
+   fish002 / fish003 只改变颜色，不改变鱼的几何结构。 */
+.fish.small.aq-blue .fish-body{
+  background:#4b9ed8;
+  box-shadow:inset -8px -5px 0 rgba(35,92,145,.16);
+}
+.fish.small.aq-blue .fish-tail{background:#3278b5;}
+.fish.small.aq-blue .fish-fin{background:#3b86c1;}
+
+.fish.small.aq-gold .fish-body{
+  background:#e7ad3b;
+  box-shadow:inset -8px -5px 0 rgba(166,103,20,.16);
+}
+.fish.small.aq-gold .fish-tail{background:#c9831f;}
+.fish.small.aq-gold .fish-fin{background:#d99425;}
+
+/* ===== 鱼缸内独立水草资源 ===== */
+.aq-plant{
+  position:absolute;
+  left:8%;
+  bottom:19%;
+  width:78px;
+  height:96px;
+  z-index:1;
+  pointer-events:none;
+  transform:none!important;
+}
+.aq-plant i{
+  position:absolute;
+  bottom:0;
+  display:block;
+  transform-origin:bottom;
+  border-radius:90% 10% 90% 10%;
+}
+.aq-plant-green i:nth-child(1){left:17px;width:9px;height:62px;background:#477c5c;transform:rotate(-18deg)}
+.aq-plant-green i:nth-child(2){left:31px;width:10px;height:77px;background:#6a986c;transform:rotate(2deg)}
+.aq-plant-green i:nth-child(3){left:45px;width:9px;height:58px;background:#3d7055;transform:rotate(18deg)}
+.aq-plant-tall i:nth-child(1){left:14px;width:7px;height:72px;background:#3b745a;transform:rotate(-27deg)}
+.aq-plant-tall i:nth-child(2){left:29px;width:8px;height:90px;background:#72a76b;transform:rotate(-4deg)}
+.aq-plant-tall i:nth-child(3){left:44px;width:7px;height:79px;background:#4a8c61;transform:rotate(17deg)}
+.aq-plant-red i:nth-child(1){left:16px;width:10px;height:66px;background:#a65445;transform:rotate(-23deg)}
+.aq-plant-red i:nth-child(2){left:29px;width:11px;height:84px;background:#c36f4c;transform:rotate(2deg)}
+.aq-plant-red i:nth-child(3){left:45px;width:10px;height:71px;background:#8e4942;transform:rotate(22deg)}
+
+
+/* ===== v0.2 商品差异化预览 ===== */
+.v02-preview-fish.blue{filter:hue-rotate(165deg) saturate(1.35) drop-shadow(0 3px 2px rgba(0,0,0,.12))}
+.v02-preview-fish.gold{filter:hue-rotate(335deg) saturate(1.65) brightness(1.08) drop-shadow(0 3px 2px rgba(0,0,0,.12))}
+.v02-preview-plant.tall{transform:scaleY(1.18) rotate(-4deg)}
+.v02-preview-plant.red{filter:hue-rotate(300deg) saturate(1.8) brightness(.9);transform:scale(1.08) rotate(5deg)}
+.v02-preview-bg.coral{background:linear-gradient(180deg,#b6d9df 0%,#7caeb1 56%,#e4a36e 100%)!important}
+
+/* ===== DEV 测试工具 ===== */
+.dev-toggle{
+  position:fixed;right:18px;bottom:18px;z-index:3500;
+  border:1px solid rgba(70,105,108,.35);background:rgba(255,255,255,.92);
+  color:#48686b;border-radius:10px;padding:8px 11px;font:700 11px/1 inherit;
+  cursor:pointer;box-shadow:0 5px 16px rgba(25,55,60,.16);
+}
+.dev-panel{
+  position:fixed;right:18px;bottom:58px;z-index:3501;width:280px;
+  background:#fffdf8;color:#34484b;border:1px solid rgba(70,105,108,.25);
+  border-radius:12px;padding:14px;box-shadow:0 16px 42px rgba(20,50,55,.25);
+  display:none;font-family:inherit;
+}
+.dev-panel.show{display:block}
+.dev-title{font-weight:800;font-size:14px;margin-bottom:4px}
+.dev-sub{font-size:10px;color:#809092;margin-bottom:12px}
+.dev-status{background:#f3f5f2;border-radius:8px;padding:9px;margin-bottom:10px;font-size:11px;line-height:1.7}
+.dev-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.dev-actions button{
+  border:1px solid #c8d3d0;background:#fff;border-radius:7px;padding:7px 6px;
+  color:#405a5d;font:700 11px inherit;cursor:pointer;
+}
+.dev-actions button:hover{background:#f1f5f3}
+.dev-danger{margin-top:9px!important}
+.dev-danger button{grid-column:span 2}
+@media(max-width:480px){
+  .dev-toggle{right:10px;bottom:10px}
+  .dev-panel{right:10px;bottom:50px;width:calc(100vw - 44px)}
+}
+
+/* ===== v0.2 购买小票弹窗 ===== */
+.v02-receipt{position:fixed;inset:0;z-index:3200;display:none;align-items:center;justify-content:center;background:rgba(22,46,50,.28);padding:20px;}
+.v02-receipt.show{display:flex;}
+.v02-receipt-card{
+  width:min(330px,calc(100vw - 36px));
+  background:#fffdf7;
+  color:#34484b;
+  padding:24px 22px 20px;
+  border-radius:4px;
+  box-shadow:0 18px 55px rgba(20,50,55,.28);
+  position:relative;
+  clip-path:polygon(0 0,100% 0,100% 97%,97% 100%,94% 97%,91% 100%,88% 97%,85% 100%,82% 97%,79% 100%,76% 97%,73% 100%,70% 97%,67% 100%,64% 97%,61% 100%,58% 97%,55% 100%,52% 97%,49% 100%,46% 97%,43% 100%,40% 97%,37% 100%,34% 97%,31% 100%,28% 97%,25% 100%,22% 97%,19% 100%,16% 97%,13% 100%,10% 97%,7% 100%,4% 97%,0 100%);
+}
+.v02-receipt-card::before{content:"";position:absolute;left:22px;right:22px;top:14px;border-top:1px dashed #b9c5c3;}
+.v02-receipt-head{text-align:center;font-weight:800;font-size:18px;letter-spacing:.16em;padding-top:8px;}
+.v02-receipt-sub{text-align:center;font-size:11px;color:#809092;margin-top:5px;}
+.v02-receipt-line{border-top:1px dashed #c9d1cf;margin:15px 0 12px;}
+.v02-receipt-row{display:flex;justify-content:space-between;gap:16px;font-size:13px;line-height:1.8;}
+.v02-receipt-row.total{font-weight:800;font-size:15px;margin-top:4px;}
+.v02-receipt-note{text-align:center;font-size:11px;color:#7a898a;margin-top:12px;}
+.v02-receipt-adjust,
+.v02-receipt-close{
+  width:100%;
+  height:40px;
+  margin:16px auto 0;
+  border:0;
+  border-radius:10px;
+  padding:0 22px;
+  color:#fff;
+  cursor:pointer;
+  font-family:inherit;
+  font-weight:700;
+  box-sizing:border-box;
+}
+.v02-receipt-adjust{
+  display:none;
+  background:#d85c5c;
+}
+.v02-receipt-close{
+  display:block;
+  background:#5a8588;
+}
+
+
+/* ===== 专注完成确认弹窗 ===== */
+.completion-flash{
+  position:fixed!important;
+  left:50%!important;top:50%!important;
+  z-index:5000!important;
+  transform:translate(-50%,-50%)!important;
+  min-width:min(340px,calc(100vw - 40px))!important;
+  padding:26px 28px 22px!important;
+  border-radius:20px!important;
+  background:rgba(246,251,251,.98)!important;
+  border:1px solid rgba(255,255,255,.95)!important;
+  box-shadow:0 20px 60px rgba(20,45,48,.28)!important;
+  backdrop-filter:blur(12px);
+  text-align:center;
+  opacity:0!important;
+  pointer-events:none!important;
+  animation:none!important;
+}
+.completion-flash.show{
+  opacity:1!important;
+  pointer-events:auto!important;
+  animation:none!important;
+}
+.completion-reward{
+  margin-top:13px;
+  font-size:18px;
+  font-weight:800;
+  color:#4f7d80;
+}
+.completion-confirm{
+  margin-top:18px;
+  width:100%;
+  border:0;
+  border-radius:10px;
+  padding:10px 18px;
+  background:#5a8588;
+  color:#fff;
+  font:700 14px inherit;
+  cursor:pointer;
+}
+.v02-focus-blocker{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:5001;background:rgba(22,46,50,.2)}
+.v02-focus-blocker.show{display:flex}
+.v02-focus-blocker-card{width:min(320px,calc(100vw - 40px));padding:25px 24px 20px;border-radius:20px;background:#f6fbfb;box-shadow:0 18px 55px rgba(20,50,55,.25);text-align:center;color:#34484b}
+.v02-focus-blocker-message{font-size:16px;font-weight:700}
+.v02-focus-blocker-confirm{margin-top:18px;border:0;border-radius:10px;padding:10px 25px;background:#5a8588;color:#fff;font:700 14px inherit;cursor:pointer}
+
 </style>
 </head>
 
@@ -388,6 +764,11 @@
 <div class="app">
 <main class="tank" id="tank">
   <div class="water-glow"></div>
+  <div class="v02-topbar">
+    <div class="v02-bubbles" id="bubbleDisplay">🫧 0</div>
+    <button type="button" class="v02-shop-btn" id="shopOpenBtn">装点鱼缸</button>
+  </div>
+
 
   <!-- 统一控制组包裹容器（移入鱼缸内部，并包含面板） -->
   <div class="audio-controls" id="audioControls">
@@ -430,11 +811,80 @@
       <button class="start" id="start">开始专注</button>
       <button class="end" id="end">结束专注</button>
     </section>
-    <section class="completion-flash" id="completionFlash" aria-live="polite">
+    <section class="completion-flash" id="completionFlash" aria-live="polite" aria-hidden="true">
       <div class="completion-main">专注完成</div>
+      <div class="completion-reward" id="completionReward">本次专注获得了 0 泡泡 🫧</div>
       <div class="completion-sub">这段时间，已经属于你自己了。</div>
+      <button class="completion-confirm" id="completionConfirm">确认</button>
     </section>
   </main>
+</div>
+
+
+<div class="v02-shop" id="shopModal" aria-hidden="true">
+  <div class="v02-shop-card">
+    <div class="v02-shop-header">
+    <div class="v02-shop-head">
+      <div><div class="v02-shop-title">装点鱼缸</div><div class="v02-shop-sub">点击商品预览图即可体验，保存时可一次结算当前鱼缸</div></div>
+      <button type="button" class="v02-close" id="shopCloseBtn" aria-label="关闭">×</button>
+    </div>
+    <div class="v02-tabs" id="shopTabs">
+        <button type="button" class="v02-tab active" data-category="all">全部</button>
+        <button type="button" class="v02-tab" data-category="fish">🐠 鱼</button>
+        <button type="button" class="v02-tab" data-category="decorations">🌿 鱼缸装饰</button>
+        <button type="button" class="v02-tab" data-category="backgrounds">🖼️ 背景</button>
+        <button type="button" class="v02-tab" data-category="sands">🏖️ 沙子</button>
+        <button type="button" class="v02-tab" data-category="sounds">🌊 白噪音</button>
+      </div>
+    </div>
+    <div class="v02-shop-content">
+      <div class="v02-grid" id="shopGrid"></div>
+    </div>
+    <div class="v02-footer">
+        <div class="v02-settlement" id="shopSettlement" aria-live="polite"></div>
+        <button type="button" class="v02-cancel" id="shopCancelBtn">清空预览</button>
+      <button type="button" class="v02-save" id="shopSaveBtn">保存鱼缸</button>
+    </div>
+  </div>
+</div>
+
+<button type="button" class="dev-toggle" id="devToggle">DEV</button>
+<div class="dev-panel" id="devPanel" aria-hidden="true">
+  <div class="dev-title">🛠 开发者测试工具</div>
+  <div class="dev-sub">仅用于 v0.2 开发测试，不属于正式游戏 UI</div>
+  <div class="dev-status" id="devStatus"></div>
+  <div class="dev-actions">
+    <button type="button" id="devAdd100">+100 🫧</button>
+    <button type="button" id="devAdd1000">+1000 🫧</button>
+    <button type="button" id="devAdd10000">+10000 🫧</button>
+    <button type="button" id="devMember">切换会员</button>
+    <button type="button" id="devResetBubble">泡泡归零</button>
+    <button type="button" id="devClearInventory">清空库存</button>
+    <button type="button" id="devResetSave">重置全部存档</button>
+  </div>
+</div>
+
+<div class="v02-receipt" id="purchaseReceipt" aria-hidden="true">
+  <div class="v02-receipt-card" role="dialog" aria-modal="true" aria-labelledby="receiptTitle">
+    <div class="v02-receipt-head" id="receiptTitle">购买成功</div>
+    <div class="v02-receipt-sub">鱼儿乐水族馆 · 购买凭证</div>
+    <div class="v02-receipt-line"></div>
+    <div id="receiptRows"></div>
+    <div class="v02-receipt-line"></div>
+    <div class="v02-receipt-row total" id="receiptPaidRow"><span>支付</span><span id="receiptPaid"></span></div>
+    <div class="v02-receipt-row total" id="receiptRefundRow" style="display:none"><span>返还</span><span id="receiptRefund"></span></div>
+    <div class="v02-receipt-row" id="receiptBalanceRow" style="display:none"><span>剩余泡泡</span><span id="receiptBalance"></span></div>
+    <div class="v02-receipt-note" id="receiptNote"></div>
+    <button type="button" class="v02-receipt-adjust" id="receiptAdjustBtn">返回调整</button>
+    <button type="button" class="v02-receipt-close" id="receiptCloseBtn">收好小票</button>
+  </div>
+</div>
+
+<div class="v02-focus-blocker" id="focusShopBlocker" aria-hidden="true">
+  <div class="v02-focus-blocker-card" role="dialog" aria-modal="true">
+    <div class="v02-focus-blocker-message">小鱼正在看着你，要专心哦</div>
+    <button type="button" class="v02-focus-blocker-confirm" id="focusShopBlockerConfirm">确认</button>
+  </div>
 </div>
 
 <div class="modal" id="modal">
@@ -461,6 +911,560 @@
   const modal = document.getElementById("modal");
   const continueBtn = document.getElementById("continue");
   const confirmBtn = document.getElementById("confirm");
+
+
+  // ==================== v0.2 Data / Save / Shop ====================
+  const SAVE_KEY = "fishtank_save";
+  const SAVE_VERSION = "0.2.0";
+  const LEGACY_AUDIO_KEYS = { bgm:"fishTank_bgmVolume", prompt:"fishTank_promptVolume", sfx:"fishTank_sfxVolume" };
+
+  const SHOP_ITEMS = [
+    { id:"fish001", category:"fish", name:"小丑鱼", description:"色彩明亮的小丑鱼，为鱼缸增添一点活泼的海洋气息。", previewImage:"assets/fish/fish001_preview.webp", price:30, resourcePath:"assets/fish/fish001.webp", isMemberOnly:false, maxInventory:50 },
+    { id:"fish002", category:"fish", name:"蓝尾鱼", description:"带着蓝色尾鳍的小鱼，游动时看起来清爽又灵巧。", previewImage:"assets/fish/fish002_preview.webp", price:35, resourcePath:"assets/fish/fish002.webp", isMemberOnly:false, maxInventory:50 },
+    { id:"fish003", category:"fish", name:"金色小鱼", description:"闪着金色光泽的小鱼，让鱼缸多一点温暖的亮色。", previewImage:"assets/fish/fish003_preview.webp", price:45, resourcePath:"assets/fish/fish003.webp", isMemberOnly:true, maxInventory:50 },
+
+    { id:"decoration001", category:"decorations", name:"水草", description:"柔软舒展的基础水草，适合打造自然的鱼缸底景。", previewImage:"assets/plants/plant001_preview.webp", price:20, resourcePath:"assets/plants/plant001.webp", isMemberOnly:false, maxInventory:1 },
+    { id:"decoration002", category:"decorations", name:"细叶水草", description:"细长挺拔的水草，让鱼缸拥有更丰富的层次。", previewImage:"assets/plants/plant002_preview.webp", price:30, resourcePath:"assets/plants/plant002.webp", isMemberOnly:false, maxInventory:1 },
+    { id:"decoration003", category:"decorations", name:"红色水草", description:"带有红色叶片的水草，为水下景色加入一抹醒目的颜色。", previewImage:"assets/plants/plant003_preview.webp", price:50, resourcePath:"assets/plants/plant003.webp", isMemberOnly:true, maxInventory:1 },
+
+    { id:"background001", category:"backgrounds", name:"浅海晨光", description:"明亮柔和的浅海背景，像阳光落在清澈的海水里。", previewImage:"assets/backgrounds/background001_preview.webp", price:30, resourcePath:"assets/backgrounds/background001.webp", isMemberOnly:false, maxInventory:1 },
+    { id:"background002", category:"backgrounds", name:"深海夜色", description:"深沉安静的海底夜色，适合营造宁静的晚间氛围。", previewImage:"assets/backgrounds/background002_preview.webp", price:60, resourcePath:"assets/backgrounds/background002.webp", isMemberOnly:true, maxInventory:1 },
+    { id:"background003", category:"backgrounds", name:"珊瑚黄昏", description:"带着珊瑚色调的黄昏海景，让鱼缸显得温暖而梦幻。", previewImage:"assets/backgrounds/background003_preview.webp", price:50, resourcePath:"assets/backgrounds/background003.webp", isMemberOnly:false, maxInventory:1 },
+
+    { id:"sand001", category:"sands", name:"暖色细沙", description:"温暖细腻的浅色沙地，适合作为基础鱼缸底景。", previewImage:"assets/sands/sand001_preview.webp", price:20, resourcePath:"assets/sands/sand001.webp", isMemberOnly:false, maxInventory:1 },
+    { id:"sand002", category:"sands", name:"深海黑沙", description:"沉静的深色沙地，让鱼缸整体显得更加深邃。", previewImage:"assets/sands/sand002_preview.webp", price:35, resourcePath:"assets/sands/sand002.webp", isMemberOnly:false, maxInventory:1 },
+
+    { id:"sound001", category:"sounds", name:"海水白噪音", description:"轻柔的水下环境声，让专注时的鱼缸更加安静。", previewImage:"assets/sounds/sound001_preview.webp", price:25, resourcePath:"assets/sounds/sound001.mp3", isMemberOnly:false, maxInventory:1 },
+    { id:"sound002", category:"sounds", name:"轻柔气泡声", description:"细碎轻盈的气泡声，为专注时光增加一点流动感。", previewImage:"assets/sounds/sound002_preview.webp", price:40, resourcePath:"assets/sounds/sound002.mp3", isMemberOnly:true, maxInventory:1 }
+  ];
+
+  function cloneData(v){ return JSON.parse(JSON.stringify(v)); }
+  // v0.2 初始状态
+  // 玩家第一次进入游戏时，默认拥有并装备：
+  // fish001 ×3、decoration001 ×1、background001 ×1、sand001 ×1、sound001 ×1
+  const INITIAL_AQUARIUM = {
+    background:"background001",
+    sand:"sand001",
+    decoration:"decoration001",
+    fish:[
+      {instanceId:"initial_fish_001",itemId:"fish001",x:200,y:200},
+      {instanceId:"initial_fish_002",itemId:"fish001",x:400,y:300},
+      {instanceId:"initial_fish_003",itemId:"fish001",x:300,y:400}
+    ],
+    ambientSound:"sound001"
+  };
+  const INITIAL_INVENTORY = {
+    fish:{fish001:3},
+    decorations:{decoration001:1},
+    backgrounds:{background001:1},
+    sands:{sand001:1},
+    sounds:{sound001:1}
+  };
+  function defaultAquarium(){
+    return cloneData(INITIAL_AQUARIUM);
+  }
+  function defaultPlayer(){
+    return { bubbles:0, isMember:false, inventory:cloneData(INITIAL_INVENTORY) };
+  }
+  function getDefaultSave(){
+    const a=defaultAquarium(), p=defaultPlayer();
+    return { saveVersion:SAVE_VERSION, PlayerData:p, AquariumData:a, Settings:{ audio:{
+      bgm:Number(localStorage.getItem(LEGACY_AUDIO_KEYS.bgm) ?? 100),
+      prompt:Number(localStorage.getItem(LEGACY_AUDIO_KEYS.prompt) ?? 100),
+      sfx:Number(localStorage.getItem(LEGACY_AUDIO_KEYS.sfx) ?? 100)
+    }}};
+  }
+  let SaveData;
+  try { SaveData=JSON.parse(localStorage.getItem(SAVE_KEY)||"null"); } catch(e){ SaveData=null; }
+  if(!SaveData || !SaveData.PlayerData || !SaveData.AquariumData) SaveData=getDefaultSave();
+  SaveData.saveVersion=SAVE_VERSION;
+  const PlayerData=SaveData.PlayerData;
+  const AquariumData=SaveData.AquariumData;
+  function migrateData(){
+    const inv=PlayerData.inventory=PlayerData.inventory||{};
+    if(inv.plants && !inv.decorations) inv.decorations=inv.plants;
+    delete inv.plants;
+    if(!inv.decorations) inv.decorations={decoration001:1};
+    if(AquariumData.plants && !AquariumData.decoration) AquariumData.decoration=AquariumData.plants;
+    delete AquariumData.plants;
+    const rename=id=>id&&id.replace(/^plant/,"decoration");
+    if(!AquariumData.decoration) AquariumData.decoration="decoration001";
+    if(!AquariumData.fish) AquariumData.fish=cloneData(INITIAL_AQUARIUM.fish);
+    if(inv.decorations) Object.keys(inv.decorations).forEach(id=>{ const next=rename(id); if(next!==id){ inv.decorations[next]=(inv.decorations[next]||0)+inv.decorations[id]; delete inv.decorations[id]; }});
+    AquariumData.decoration=rename(AquariumData.decoration);
+    (AquariumData.fish||[]).forEach((fish,index)=>{ fish.instanceId=fish.instanceId||`fish_instance_${index}_${Date.now()}`; });
+  }
+  migrateData();
+  let TempAquariumData=cloneData(AquariumData);
+  let shopOpen=false;
+  let trialSnapshot=cloneData(AquariumData);
+
+  function ensureInventory(){
+    const wasMissingInventory=!PlayerData.inventory;
+    PlayerData.inventory=PlayerData.inventory||{};
+    ["fish","decorations","backgrounds","sands","sounds"].forEach(k=>PlayerData.inventory[k]=PlayerData.inventory[k]||{});
+
+    // 新玩家的默认资源同时作为库存存在，因此商店会直接显示“已拥有”。
+    // 不覆盖已有存档，也不影响开发者“清空库存”的测试结果。
+    if(wasMissingInventory){
+      PlayerData.inventory.fish.fish001=3;
+      PlayerData.inventory.decorations.decoration001=1;
+      PlayerData.inventory.backgrounds.background001=1;
+      PlayerData.inventory.sands.sand001=1;
+      PlayerData.inventory.sounds.sound001=1;
+    }
+  }
+  ensureInventory();
+  function saveGame(){
+    SaveData.PlayerData=PlayerData; SaveData.AquariumData=AquariumData;
+    localStorage.setItem(SAVE_KEY,JSON.stringify(SaveData));
+  }
+  function getInv(item){ return Number((PlayerData.inventory[item.category]||{})[item.id]||0); }
+  function setInv(item,n){ ensureInventory(); PlayerData.inventory[item.category][item.id]=Math.max(0,n); }
+  function getItem(id){ return SHOP_ITEMS.find(x=>x.id===id); }
+  function getCurrentInventoryCount(item){ return getInv(item); }
+  function fishCountIn(data,id){ return (data.fish||[]).filter(f=>f.itemId===id).length; }
+  function getTargetIds(data){
+    const ids=[];
+    (data.fish||[]).forEach(f=>{ if(!ids.includes(f.itemId)) ids.push(f.itemId); });
+    [data.decoration,data.background,data.sand,data.ambientSound].forEach(id=>{if(id&&!ids.includes(id))ids.push(id);});
+    return ids;
+  }
+  function aquariumValue(data,item){
+    return item.category==="decorations"?data.decoration:item.category==="backgrounds"?data.background:item.category==="sands"?data.sand:item.category==="sounds"?data.ambientSound:null;
+  }
+  function buildSettlement(data){
+    let paid=0, refund=0, problems=[]; const rows=[];
+    const currentFish={}, targetFish={};
+    (AquariumData.fish||[]).forEach(f=>currentFish[f.itemId]=(currentFish[f.itemId]||0)+1);
+    (data.fish||[]).forEach(f=>targetFish[f.itemId]=(targetFish[f.itemId]||0)+1);
+    const ids=[...new Set([...Object.keys(currentFish),...Object.keys(targetFish),...getTargetIds(data)])];
+    ids.map(getItem).filter(Boolean).forEach(item=>{
+      const current=item.category==="fish"?(currentFish[item.id]||0):(aquariumValue(AquariumData,item)===item.id?1:0);
+      const target=item.category==="fish"?(targetFish[item.id]||0):(aquariumValue(data,item)===item.id?1:0);
+      const owned=getInv(item);
+      const buy=item.category==="fish"?Math.max(0,target-owned):(target&&owned<=0?1:0);
+      const sell=item.category==="fish"?Math.max(0,current-target):0;
+      if(buy){
+        if(item.isMemberOnly&&!PlayerData.isMember) problems.push(`${item.name}为会员限定商品`);
+        if(owned+buy>item.maxInventory) problems.push(`${item.name}已达拥有上限`);
+        paid+=buy*item.price; rows.push({name:item.name,qty:buy,price:buy*item.price,isMemberOnly:item.isMemberOnly});
+      }
+      if(sell){ refund+=sell*item.price; rows.push({name:`${item.name}返还`,qty:sell,price:-sell*item.price}); }
+    });
+    return {paid,refund,total:paid-refund,problems,rows};
+  }
+  function renderBubbles(){ document.getElementById("bubbleDisplay").textContent=`🫧 ${PlayerData.bubbles}`; }
+  function renderAquarium(data){
+    const tankEl=tank;
+    const bg=data.background==="background002"?"linear-gradient(to bottom,#274c68 0%,#427f91 66%,#6d6751 100%)":"linear-gradient(to bottom,#8bcbd9 0%,#9dd4dc 66%,#a9d6ce 100%)";
+    tankEl.style.background=bg;
+    const sandEl=document.getElementById("sand");
+    sandEl.style.background=data.sand==="sand001"?"radial-gradient(circle at 15% 35%, rgba(151,121,68,.10) 0 1px, transparent 2px),radial-gradient(circle at 72% 65%, rgba(151,121,68,.08) 0 1px, transparent 2px),#dfcb92":"#b8a477";
+    document.querySelectorAll(".plant").forEach(p=>{
+      p.style.display="none";
+    });
+    let aqPlant=document.getElementById("aquariumPlantResource");
+    if(!aqPlant){
+      aqPlant=document.createElement("div");
+      aqPlant.id="aquariumPlantResource";
+      tank.appendChild(aqPlant);
+    }
+    const plantId=data.decoration;
+    aqPlant.className="aq-plant "+(
+      plantId==="decoration002"?"aq-plant-tall":
+      plantId==="decoration003"?"aq-plant-red":
+      "aq-plant-green"
+    );
+    aqPlant.innerHTML="<i></i><i></i><i></i>";
+    aqPlant.style.display=plantId?"block":"none";
+    if(typeof rebuildFishFromData==="function") rebuildFishFromData(data);
+  }
+
+  function makeFishElement(state,id){
+    const el=document.createElement("div");
+    el.className="fish small";
+    el.dataset.instanceId=id;
+    el.innerHTML='<div class="fish-body"></div><div class="fish-tail"></div><div class="fish-fin"></div>';
+    tank.appendChild(el);
+    return el;
+  }
+
+  function fishClassForItem(itemId){
+    if(itemId==="fish002") return "fish small aq-blue";
+    if(itemId==="fish003") return "fish small aq-gold";
+    return "fish small";
+  }
+
+  // 鱼缸中的鱼继续使用原来的鱼模型与朝向/游动逻辑。
+  let rebuildFishFromData=function(data){
+    const existing=[...tank.querySelectorAll(".fish")];
+    existing.forEach((el,i)=>{ if(i>=data.fish.length) el.remove(); });
+    fishStates.length=0;
+
+    data.fish.forEach((f,i)=>{
+      let el=existing[i];
+      if(!el) el=makeFishElement(null,f.instanceId);
+
+      el.className=fishClassForItem(f.itemId);
+      el.dataset.instanceId=f.instanceId;
+      el.innerHTML='<div class="fish-body"></div><div class="fish-tail"></div><div class="fish-fin"></div>';
+
+      const state={
+        el,
+        tailEl:el.querySelector(".fish-tail"),
+        finEl:el.querySelector(".fish-fin"),
+        x:f.x||200,
+        y:f.y||200,
+        speed:i%2?2.5:2.2,
+        burstSpeed:0,
+        radius:i%2?22:32,
+        eatDist:i%2?28:38,
+        eatCooldown:0,
+        facingLeft:true,
+        swimTime:Math.random()*100,
+        targetX:null,
+        targetY:null
+      };
+
+      el.onpointerdown=(e)=>{
+        if(!running)return;
+        e.stopPropagation();
+        playFishStartleSound();
+        state.burstSpeed=6;
+      };
+      fishStates.push(state);
+    });
+  };
+
+  function applyTemp(){ renderAquarium(TempAquariumData); renderShop(); }
+  function previewItem(id){
+    const item=getItem(id); if(!item)return;
+    if(item.category==="fish"){
+      const base={instanceId:"fish_instance_"+Date.now()+"_"+Math.random().toString(36).slice(2,7),itemId:item.id,x:220+Math.random()*280,y:160+Math.random()*220};
+      TempAquariumData.fish.push(base);
+    } else if(item.category==="decorations") TempAquariumData.decoration=item.id;
+    else if(item.category==="backgrounds") TempAquariumData.background=item.id;
+    else if(item.category==="sands") TempAquariumData.sand=item.id;
+    else if(item.category==="sounds") TempAquariumData.ambientSound=item.id;
+    applyTemp(); setShopMessage(`正在预览「${item.name}」`);
+  }
+  function setShopMessage(t){
+    // 预览等非购买状态不再显示在商店底部，保留函数兼容现有调用。
+  }
+  function showPurchaseReceipt(title, rows, paid, note, options={}){
+    const modal=document.getElementById("purchaseReceipt");
+    const rowsEl=document.getElementById("receiptRows");
+    rowsEl.innerHTML="";
+    rows.forEach(row=>{
+      const div=document.createElement("div");
+      div.className="v02-receipt-row";
+      const quantity=Number(row.qty)||1;
+      const unitPrice=Math.abs(Number(row.price)||0)/quantity;
+      const qtyText=`${unitPrice} ×${quantity}`;
+      const memberMark=row.isMemberOnly?'<span class="v02-member-badge">★ 会员</span>':'';
+      const displayPrice=Math.abs(Number(row.price)||0);
+      div.innerHTML=`<span>${memberMark}${row.name} ${qtyText}</span><span>${displayPrice} 🫧</span>`;
+      rowsEl.appendChild(div);
+    });
+    document.getElementById("receiptTitle").textContent=title||"购买成功";
+    const paidAmount=typeof paid==="number"?paid:0;
+    const refundAmount=Number(options.refund||0);
+    const paidRow=document.getElementById("receiptPaidRow");
+    const refundRow=document.getElementById("receiptRefundRow");
+    paidRow.style.display=paidAmount>0?"flex":"none";
+    refundRow.style.display=refundAmount>0?"flex":"none";
+    document.getElementById("receiptPaid").textContent=`-${paidAmount} 🫧`;
+    document.getElementById("receiptRefund").textContent=`${refundAmount} 🫧`;
+    document.getElementById("receiptNote").textContent=note||"";
+    const adjustBtn=document.getElementById("receiptAdjustBtn");
+    const closeBtn=document.getElementById("receiptCloseBtn");
+    if(adjustBtn && closeBtn){
+      const failed=String(title||"").startsWith("无法");
+      adjustBtn.style.display=failed?"block":"none";
+      closeBtn.style.display=failed?"none":"block";
+    }
+    const balanceRow=document.getElementById("receiptBalanceRow");
+    if(balanceRow){
+      balanceRow.style.display=options.balance!==undefined?"flex":"none";
+      if(options.balance!==undefined) document.getElementById("receiptBalance").textContent=`${options.balance} 🫧`;
+    }
+    modal.classList.add("show");
+    modal.setAttribute("aria-hidden","false");
+  }
+  function closePurchaseReceipt(){
+    const modal=document.getElementById("purchaseReceipt");
+    modal.classList.remove("show");
+    modal.setAttribute("aria-hidden","true");
+  }
+  let shopCategory="all";
+  const SHOP_CATEGORY_LABELS={all:"全部",fish:"鱼",decorations:"鱼缸装饰",backgrounds:"背景",sands:"沙子",sounds:"白噪音"};
+
+  function renderSettlement(){
+    const settlement=buildSettlement(TempAquariumData);
+    const parts=[];
+    if(settlement.paid>0) parts.push(`需支付 ${settlement.paid} 🫧`);
+    if(settlement.refund>0) parts.push(`可返还 ${settlement.refund} 🫧`);
+    document.getElementById("shopSettlement").textContent=parts.join("　");
+  }
+
+  function renderShop(){
+    const grid=document.getElementById("shopGrid"); grid.innerHTML="";
+    document.querySelectorAll("#shopTabs .v02-tab").forEach(tab=>{
+      tab.classList.toggle("active",tab.dataset.category===shopCategory);
+    });
+    const visibleItems=shopCategory==="all"?SHOP_ITEMS:SHOP_ITEMS.filter(item=>item.category===shopCategory);
+    visibleItems.forEach(item=>{
+      const owned=getInv(item);
+      const previewCount=item.category==="fish"?fishCountIn(TempAquariumData,item.id):0;
+      const equipped=item.category==="fish"?previewCount>0: aquariumValue(TempAquariumData,item)===item.id;
+      const d=document.createElement("div"); d.className="v02-item";
+      let preview=`<div class="v02-preview" data-preview="${item.id}">`;
+      if(item.category==="fish"){
+        if(item.id==="fish002"){
+          preview+=`<div class="v02-preview-fish">🐟</div>`;
+        }else if(item.id==="fish003"){
+          preview+=`<div class="v02-preview-fish">🐠</div>`;
+        }else{
+          preview+=`<div class="v02-preview-fish">🐠</div>`;
+        }
+      }else if(item.category==="decorations"){
+        if(item.id==="decoration002"){
+          preview+=`<div class="v02-plant-css v02-plant-tall"><i></i><i></i><i></i></div>`;
+        }else if(item.id==="decoration003"){
+          preview+=`<div class="v02-plant-css v02-plant-red"><i></i><i></i><i></i></div>`;
+        }else{
+          preview+=`<div class="v02-plant-css v02-plant-green"><i></i><i></i><i></i></div>`;
+        }
+      }else if(item.category==="backgrounds"){
+        const bgClass=item.id==="background002"?"night":item.id==="background003"?"coral":"";
+        preview+=`<div class="v02-preview-bg ${bgClass}"></div>`;
+      }else if(item.category==="sands"){
+        preview+=`<div class="v02-preview-sand ${item.id==="sand002"?"dark":""}"></div>`;
+      }else{
+        preview+=`<div class="v02-preview-sound">🌊</div>`;
+      }
+      preview+=`</div>`;
+      let action="";
+      if(item.category==="fish"){
+        action=`<div class="v02-quantity"><button type="button" data-minus="${item.id}">−</button><span>${previewCount}</span><button type="button" data-plus="${item.id}">+</button></div>`;
+      }else{
+        action=`<button type="button" class="v02-dress" data-preview-action="${item.id}" ${equipped?'disabled':''}>${equipped?'装扮中':'装扮'}</button>`;
+      }
+      d.innerHTML=preview+
+        `<div class="v02-item-name"><span class="v02-item-name-text">${item.name}</span>${item.isMemberOnly?'<span class="v02-member-badge">★ 会员</span>':''}</div>`+
+        `<div class="v02-item-meta"><span class="v02-description">${item.description||""}</span></div>`+
+        `<div class="v02-item-actions"><span class="v02-price">${item.price} 🫧</span><span class="v02-owned">已拥有 ${owned}</span>${action}</div>`;
+      grid.appendChild(d);
+    });
+    grid.querySelectorAll('[data-preview]').forEach(el=>el.addEventListener('click',()=>{
+      const item=getItem(el.dataset.preview);
+      if(item && item.category!=="fish") previewItem(el.dataset.preview);
+    }));
+    grid.querySelectorAll('[data-preview-action]').forEach(el=>el.addEventListener('click',e=>{e.stopPropagation();previewItem(el.dataset.previewAction)}));
+    grid.querySelectorAll('[data-plus]').forEach(el=>el.addEventListener('click',e=>{e.stopPropagation();changePreviewFish(el.dataset.plus,1)}));
+    grid.querySelectorAll('[data-minus]').forEach(el=>el.addEventListener('click',e=>{e.stopPropagation();changePreviewFish(el.dataset.minus,-1)}));
+    renderSettlement();
+  }
+
+  function changePreviewFish(id,delta){
+    const item=getItem(id); if(!item)return;
+    const current=fishCountIn(TempAquariumData,id);
+    if(delta>0 && current>=item.maxInventory)return;
+    if(delta<0){
+      const index=TempAquariumData.fish.map(f=>f.itemId).lastIndexOf(id);
+      if(index>=0) TempAquariumData.fish.splice(index,1);
+    }else{
+      TempAquariumData.fish.push({instanceId:`fish_instance_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,itemId:id,x:220+Math.random()*280,y:160+Math.random()*220});
+    }
+    applyTemp();
+  }
+
+  function openShop(){
+    if(running){
+      const blocker=document.getElementById("focusShopBlocker");
+      blocker.classList.add("show");
+      blocker.setAttribute("aria-hidden","false");
+      return;
+    }
+    shopOpen=true;
+    trialSnapshot=cloneData(AquariumData);
+    TempAquariumData=cloneData(AquariumData);
+    shopCategory="all";
+    document.getElementById("shopModal").classList.add("show");
+    document.getElementById("shopModal").setAttribute("aria-hidden","false");
+    renderShop();
+  }
+
+  function closeShop(keep=false){
+    if(!keep){TempAquariumData=cloneData(trialSnapshot);Object.assign(AquariumData,cloneData(trialSnapshot));renderAquarium(AquariumData);}
+    shopOpen=false;
+    document.getElementById("shopModal").classList.remove("show");
+    document.getElementById("shopModal").setAttribute("aria-hidden","true");
+  }
+
+  function saveAquarium(){
+    const result=buildSettlement(TempAquariumData);
+    const detailRows=result.rows;
+
+    if(result.problems.length){
+      showPurchaseReceipt(
+        "无法保存",
+        detailRows.length?detailRows:[{name:"当前鱼缸",qty:1,price:0}],
+        result.paid,
+        result.problems.join("；"),
+        {refund:result.refund}
+      );
+      return;
+    }
+
+    if(PlayerData.bubbles+result.refund<result.paid){
+      showPurchaseReceipt(
+        "无法保存",
+        detailRows.length?detailRows:[{name:"当前鱼缸",qty:1,price:0}],
+        result.paid,
+        `泡泡不足，本次需支付 ${result.paid} 🫧，返还 ${result.refund} 🫧，当前拥有 ${PlayerData.bubbles} 🫧。`,
+        {refund:result.refund}
+      );
+      return;
+    }
+
+    result.rows.forEach(row=>{
+      const item=SHOP_ITEMS.find(candidate=>row.name===candidate.name || row.name===`${candidate.name}返还`);
+      if(!item)return;
+      const amount=row.name.endsWith("返还")?-row.qty:row.qty;
+      setInv(item,getInv(item)+amount);
+    });
+    PlayerData.bubbles-=result.paid;
+    PlayerData.bubbles+=result.refund;
+    Object.assign(AquariumData,cloneData(TempAquariumData));
+    saveGame();
+    renderBubbles();
+    renderAquarium(AquariumData);
+    closeShop(true);
+
+    showPurchaseReceipt(
+      "鱼缸保存成功",
+      detailRows.length?detailRows:[{name:"当前鱼缸",qty:1,price:0}],
+      result.paid,
+      result.total!==0 ? `本次支付 ${result.paid} 🫧，返还 ${result.refund} 🫧。` : "本次无需购买新商品，鱼缸配置已保存。",
+      {balance:PlayerData.bubbles,refund:result.refund}
+    );
+  }
+
+  // ===== DEV 测试工具 =====
+  function updateDevStatus(){
+    const el=document.getElementById("devStatus");
+    if(!el)return;
+    const inv=PlayerData.inventory||{};
+    const counts=[];
+    Object.keys(inv).forEach(cat=>{
+      Object.entries(inv[cat]||{}).forEach(([id,n])=>{
+        if(n>0) counts.push(`${id} ×${n}`);
+      });
+    });
+    el.innerHTML=`泡泡：<b>${PlayerData.bubbles}</b> 🫧<br>
+      会员：<b>${PlayerData.isMember?"是":"否"}</b><br>
+      库存：${counts.length?counts.join("、"):"空"}`;
+  }
+  function devRefresh(){
+    saveGame();
+    renderBubbles();
+    renderShop();
+    renderAquarium(AquariumData);
+    updateDevStatus();
+  }
+  function devAddBubbles(amount){
+    PlayerData.bubbles+=amount;
+    devRefresh();
+  }
+  function devToggleMember(){
+    PlayerData.isMember=!PlayerData.isMember;
+    devRefresh();
+  }
+  function devResetBubbles(){
+    PlayerData.bubbles=0;
+    devRefresh();
+  }
+  function devClearInventory(){
+    PlayerData.inventory={
+      fish:{},decorations:{},backgrounds:{},sands:{},sounds:{}
+    };
+    devRefresh();
+  }
+  function devResetAll(){
+    if(!confirm("确定要删除当前本地存档并恢复 v0.2 初始状态吗？"))return;
+    localStorage.removeItem(SAVE_KEY);
+    location.reload();
+  }
+
+  document.querySelectorAll("#shopTabs .v02-tab").forEach(tab=>{
+    tab.addEventListener("click",()=>{
+      shopCategory=tab.dataset.category;
+      renderShop();
+    });
+  });
+  document.getElementById("shopOpenBtn").addEventListener("click",openShop);
+  document.getElementById("focusShopBlockerConfirm").addEventListener("click",()=>{
+    const blocker=document.getElementById("focusShopBlocker");
+    blocker.classList.remove("show");
+    blocker.setAttribute("aria-hidden","true");
+  });
+  document.getElementById("shopCloseBtn").addEventListener("click",()=>closeShop(false));
+  document.getElementById("shopCancelBtn").addEventListener("click",()=>{
+    // 清空预览只恢复正式鱼缸，不关闭商店。
+    TempAquariumData=cloneData(trialSnapshot);
+    renderAquarium(TempAquariumData);
+    renderShop();
+  });
+  document.getElementById("shopSaveBtn").addEventListener("click",saveAquarium);
+  document.getElementById("receiptCloseBtn").addEventListener("click",closePurchaseReceipt);
+  document.getElementById("receiptAdjustBtn").addEventListener("click",()=>{
+    closePurchaseReceipt();
+    // 保存失败时不改变 TempAquariumData，回到刚才的预览状态继续调整。
+    if(!shopOpen){
+      shopOpen=true;
+      document.getElementById("shopModal").classList.add("show");
+      document.getElementById("shopModal").setAttribute("aria-hidden","false");
+    }
+    renderAquarium(TempAquariumData);
+    renderShop();
+  });
+  document.getElementById("purchaseReceipt").addEventListener("click",e=>{
+    if(e.target.id==="purchaseReceipt") closePurchaseReceipt();
+  });
+  document.getElementById("devToggle").addEventListener("click",()=>{
+    const panel=document.getElementById("devPanel");
+    panel.classList.toggle("show");
+    panel.setAttribute("aria-hidden",panel.classList.contains("show")?"false":"true");
+    updateDevStatus();
+  });
+  document.getElementById("devAdd100").addEventListener("click",()=>devAddBubbles(100));
+  document.getElementById("devAdd1000").addEventListener("click",()=>devAddBubbles(1000));
+  document.getElementById("devAdd10000").addEventListener("click",()=>devAddBubbles(10000));
+  document.getElementById("devMember").addEventListener("click",devToggleMember);
+  document.getElementById("devResetBubble").addEventListener("click",devResetBubbles);
+  document.getElementById("devClearInventory").addEventListener("click",devClearInventory);
+  document.getElementById("devResetSave").addEventListener("click",devResetAll);
+  updateDevStatus();
+
+  function focusRewardMinutes(mins,isMember){
+    const wholeMinutes=Math.max(0,Math.floor(Number(mins)||0));
+    let bubblesPerMinute;
+
+    if(wholeMinutes<=25) bubblesPerMinute=isMember?2:1;
+    else if(wholeMinutes<=40) bubblesPerMinute=isMember?4:2;
+    else if(wholeMinutes<=60) bubblesPerMinute=isMember?6:3;
+    else return 0;
+
+    return wholeMinutes*bubblesPerMinute;
+  }
+  function grantFocusReward(){
+    const completedMinutes=Math.floor(durationSeconds/60);
+    const reward=focusRewardMinutes(completedMinutes,PlayerData.isMember);
+    if(reward>0){PlayerData.bubbles+=reward;saveGame();renderBubbles();}
+    return reward;
+  }
 
 
   let audioCtx = null;
@@ -656,8 +1660,10 @@
   startWaterNoise();
 
   const completionFlash=document.getElementById("completionFlash");
+  const completionReward=document.getElementById("completionReward");
+  const completionConfirm=document.getElementById("completionConfirm");
 
-  let minutes = 25, remaining = minutes * 60, running = false, startedAt = 0, durationSeconds = minutes * 60, timerFrame = 0;
+  let minutes = 25, remaining = minutes * 60, running = false, startedAt = 0, durationSeconds = minutes * 60, sessionIsMember = false, timerFrame = 0;
 
   function renderTime() {
     timeEl.textContent = `${String(Math.floor(remaining / 60)).padStart(2, "0")}:${String(remaining % 60).padStart(2, "0")}`;
@@ -677,6 +1683,8 @@
     running = true; 
     startedAt = Date.now(); 
     durationSeconds = minutes * 60;
+    // 按文档：会员状态以点击“开始专注”瞬间为准。
+    sessionIsMember = PlayerData.isMember;
 
     // 清除现有的呈现动画类，触发泡泡向上浮动消散动画
     appTitle.classList.remove("bubble-appear");
@@ -706,12 +1714,24 @@
 
   endBtn.onclick = () => modal.classList.add("show");
   continueBtn.onclick = () => modal.classList.remove("show");
+  completionConfirm.onclick = () => {
+    completionFlash.classList.remove("show");
+    completionFlash.setAttribute("aria-hidden","true");
+  };
+
   confirmBtn.onclick = () => {
     modal.classList.remove("show"); 
     resetFocus(false);
   };
 
-  function resetFocus(completed) {
+function resetFocus(completed) {
+    // 在重置 remaining 之前计算实际已专注时间。
+    const elapsedSeconds = Math.max(
+      0,
+      durationSeconds - remaining
+    );
+    const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+
     running = false;
     if (timerFrame) {
       clearTimeout(timerFrame);
@@ -727,50 +1747,55 @@
     hintEl.textContent = completed ? "棒极了！点击开始开启下次专注" : "点击开始专注后解锁投喂";
     startBtn.style.display = "inline-block";
     endBtn.style.display = "none";
+
+    // 专注结束后才把计时器恢复到下一次默认时长。
     remaining = minutes * 60;
     renderTime();
 
+    // 手动提前结束：按照实际已经专注的完整分钟数发放泡泡。
+    if (!completed) {
+      const earlyReward = focusRewardMinutes(elapsedMinutes, sessionIsMember);
+
+      if (earlyReward > 0) {
+        PlayerData.bubbles += earlyReward;
+        saveGame();
+        renderBubbles();
+      }
+
+      completionReward.textContent = `本次专注获得了 ${earlyReward} 泡泡 🫧`;
+      completionFlash.classList.add("show");
+      completionFlash.setAttribute("aria-hidden","false");
+      playCompleteSound();
+      if (navigator.vibrate) navigator.vibrate([120,70,180]);
+    }
+
+    // 自然完成：按照本次专注的完整分钟数结算。
     if (completed) {
+      const reward = focusRewardMinutes(
+        Math.floor(durationSeconds / 60),
+        sessionIsMember
+      );
+
+      if (reward > 0) {
+        PlayerData.bubbles += reward;
+        saveGame();
+        renderBubbles();
+      }
+
+      completionReward.textContent = `本次专注获得了 ${reward} 泡泡 🫧`;
       playCompleteSound();
       timer.classList.remove("complete-pulse");
-      completionFlash.classList.remove("show");
-      void timer.offsetWidth;
-      void completionFlash.offsetWidth;
-      timer.classList.add("complete-pulse");
       completionFlash.classList.add("show");
+      completionFlash.setAttribute("aria-hidden","false");
 
       if (navigator.vibrate) navigator.vibrate([120,70,180]);
-
-      setTimeout(() => {
-        timer.classList.remove("complete-pulse");
-        completionFlash.classList.remove("show");
-      }, 3000);
     }
   }
 
-  const fishStates = [
-    { 
-      el: document.getElementById("fish1"), 
-      tailEl: document.getElementById("fish1").querySelector(".fish-tail"),
-      finEl: document.getElementById("fish1").querySelector(".fish-fin"),
-      x: 200, y: 200, speed: 2.0, burstSpeed: 0, radius: 32, eatDist: 38, eatCooldown: 0, 
-      facingLeft: true, swimTime: Math.random() * 100 
-    },
-    { 
-      el: document.getElementById("fish2"), 
-      tailEl: document.getElementById("fish2").querySelector(".fish-tail"),
-      finEl: document.getElementById("fish2").querySelector(".fish-fin"),
-      x: 400, y: 300, speed: 2.5, burstSpeed: 0, radius: 22, eatDist: 28, eatCooldown: 0, 
-      facingLeft: true, swimTime: Math.random() * 100 
-    },
-    { 
-      el: document.getElementById("fish3"), 
-      tailEl: document.getElementById("fish3").querySelector(".fish-tail"),
-      finEl: document.getElementById("fish3").querySelector(".fish-fin"),
-      x: 300, y: 400, speed: 2.3, burstSpeed: 0, radius: 22, eatDist: 28, eatCooldown: 0, 
-      facingLeft: true, swimTime: Math.random() * 100 
-    }
-  ];
+  let fishStates = [];
+  rebuildFishFromData(AquariumData);
+  renderBubbles();
+  renderAquarium(AquariumData);
 
   let pellets = [];
 
@@ -974,6 +1999,10 @@ const elemToRemove = nearest.el;
     const v = Math.max(0, Math.min(100, Number(value)));
     audioVolumes[category] = v;
     localStorage.setItem("fishTank_" + category + "Volume", String(v));
+    if (SaveData && SaveData.Settings && SaveData.Settings.audio) {
+      SaveData.Settings.audio[category] = v;
+      saveGame();
+    }
 
     if(category === "bgm"){
       if(waterAudio && !audioMuted && !waterAudio.paused){
