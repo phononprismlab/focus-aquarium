@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>鱼缸游戏后台管理</title>
+	<style>
+		:root {
+			--ink: #18333a;
+			--muted: #70858a;
+			--line: #dfe8e6;
+			--soft: #f4f8f6;
+			--paper: #ffffff;
+			--teal: #197d78;
+			--teal-dark: #125c5a;
+			--coral: #ed8468;
+			--yellow: #f4c45b;
+			--shadow: 0 14px 40px rgba(24, 51, 58, 0.08);
+		}
+		* { box-sizing: border-box; }
+		body { margin: 0; color: var(--ink); background: #edf5f1; font: 14px/1.6 "Noto Sans SC", "Microsoft YaHei", sans-serif; }
+		button, input, select, textarea { font: inherit; }
+		button { cursor: pointer; }
+		.app { min-height: 100vh; display: flex; }
+		.sidebar { width: 248px; flex: 0 0 248px; padding: 28px 18px; background: #123d42; color: #fff; position: sticky; top: 0; height: 100vh; }
+		.brand { padding: 4px 14px 30px; }
+		.brand-mark { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 12px; background: var(--yellow); color: var(--ink); font-size: 20px; margin-bottom: 13px; }
+		.brand h1 { margin: 0; font-size: 19px; letter-spacing: .04em; }
+		.brand p { margin: 4px 0 0; color: #a8c8c3; font-size: 12px; }
+		.nav-label { padding: 0 14px 8px; color: #80aaa5; font-size: 11px; letter-spacing: .13em; }
+		.nav-item { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 0; border-radius: 10px; color: #c4ddda; background: transparent; text-align: left; margin-bottom: 5px; transition: .2s; }
+		.nav-item:hover, .nav-item.active { color: #fff; background: rgba(255,255,255,.12); }
+		.nav-icon { width: 20px; text-align: center; font-size: 16px; }
+		.nav-item .reserved { margin-left: auto; border: 1px solid rgba(255,255,255,.22); border-radius: 20px; padding: 0 6px; font-size: 10px; color: #9dc0bb; }
+		.main { min-width: 0; flex: 1; padding: 34px clamp(24px, 5vw, 72px); }
+		.topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 28px; }
+		.eyebrow { color: var(--teal); font-size: 12px; font-weight: 700; letter-spacing: .12em; }
+		h2 { margin: 4px 0 6px; font-size: 30px; letter-spacing: -.03em; }
+		.subtitle { margin: 0; color: var(--muted); }
+		.button { border: 1px solid transparent; border-radius: 8px; padding: 9px 15px; font-weight: 700; transition: .2s; }
+		.button.primary { background: var(--teal); color: white; box-shadow: 0 5px 14px rgba(25,125,120,.18); }
+		.button.primary:hover { background: var(--teal-dark); transform: translateY(-1px); }
+		.button.secondary { background: white; border-color: var(--line); color: var(--ink); }
+		.button.secondary:hover { border-color: var(--teal); color: var(--teal); }
+		.button.publish { color: var(--teal); background: #e6f4ef; border-color: #cce9df; }
+		.button:disabled { opacity: .42; cursor: not-allowed; transform: none; }
+		.panel { background: var(--paper); border: 1px solid rgba(220,232,228,.8); border-radius: 14px; box-shadow: var(--shadow); }
+		.panel-head { padding: 19px 22px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 15px; }
+		.panel-head h3 { margin: 0; font-size: 16px; }
+		.panel-head p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+		.table-wrap { overflow-x: auto; }
+		table { width: 100%; border-collapse: collapse; min-width: 690px; }
+		th, td { padding: 15px 22px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+		th { background: #fbfcfb; color: var(--muted); font-size: 12px; font-weight: 700; }
+		tr:last-child td { border-bottom: 0; }
+		.item-name { font-weight: 700; }
+		.item-id { color: var(--muted); font-size: 12px; margin-top: 1px; }
+		.badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 20px; font-size: 12px; }
+		.badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+		.badge.published { color: #23836e; background: #e7f6ef; }
+		.badge.draft { color: #bf7c27; background: #fff4dd; }
+		.actions { display: flex; gap: 8px; }
+		.link-button { border: 0; background: transparent; color: var(--teal); padding: 4px; font-weight: 700; }
+		.link-button:hover { color: var(--coral); }
+		.link-button.delete { color: var(--coral); }
+		.link-button.delete:hover { color: #c6533d; }
+		.empty { padding: 56px 20px; text-align: center; color: var(--muted); }
+		.empty strong { display: block; color: var(--ink); font-size: 16px; margin-bottom: 4px; }
+		.form-panel { max-width: 920px; }
+		.form-body { padding: 25px 28px 28px; }
+		.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 19px 22px; }
+		.field { display: flex; flex-direction: column; gap: 6px; }
+		.field.full { grid-column: 1 / -1; }
+		label { font-weight: 700; font-size: 13px; }
+		label span { color: var(--coral); }
+		input, select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: white; padding: 9px 11px; outline: none; }
+		input:focus, select:focus, textarea:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(25,125,120,.1); }
+		textarea { min-height: 90px; resize: vertical; }
+		input[type="checkbox"] { width: auto; accent-color: var(--teal); }
+		.check { display: flex; align-items: center; gap: 8px; padding-top: 27px; }
+		.hint { color: var(--muted); font-size: 12px; }
+		.upload-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+		.file-button { display: inline-flex; align-items: center; gap: 7px; border: 1px dashed #a9cbc3; border-radius: 7px; padding: 9px 12px; color: var(--teal); background: #f5fbf8; font-weight: 700; cursor: pointer; }
+		.file-button input { display: none; }
+		.file-list { display: flex; gap: 6px; flex-wrap: wrap; }
+		.file-chip { padding: 4px 8px; border-radius: 5px; background: #edf5f1; color: var(--ink); font-size: 12px; }
+		.form-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--line); padding-top: 20px; margin-top: 25px; }
+		.tier-row { display: grid; grid-template-columns: 1.1fr 1fr 1fr minmax(150px, 1.2fr) 38px; gap: 10px; align-items: end; margin-bottom: 11px; }
+		.tier-row .field { min-width: 0; gap: 4px; }
+		.tier-row .field input { min-width: 0; }
+		.icon-button { width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 7px; background: white; color: var(--coral); font-size: 18px; }
+		.icon-button:hover { background: #fff3ee; }
+		.section-title { margin: 25px 0 12px; font-size: 14px; }
+		.toast { position: fixed; right: 25px; bottom: 25px; z-index: 5; padding: 12px 17px; border-radius: 8px; color: white; background: var(--ink); box-shadow: var(--shadow); opacity: 0; transform: translateY(10px); pointer-events: none; transition: .25s; }
+		.toast.show { opacity: 1; transform: translateY(0); }
+		@media (max-width: 760px) {
+			.app { display: block; }
+			.sidebar { width: 100%; height: auto; position: static; padding: 14px; }
+			.brand { display: flex; align-items: center; gap: 11px; padding: 4px 5px 14px; }
+			.brand-mark { margin: 0; }
+			.brand p { display: none; }
+			.nav-label { display: none; }
+			.nav-list { display: flex; overflow-x: auto; gap: 5px; }
+			.nav-item { min-width: max-content; width: auto; margin: 0; padding: 9px 11px; }
+			.nav-item .reserved { display: none; }
+			.main { padding: 25px 16px 45px; }
+			.topbar { display: block; }
+			.topbar .button { margin-top: 17px; }
+			h2 { font-size: 26px; }
+			.form-grid { grid-template-columns: 1fr; }
+			.field.full { grid-column: auto; }
+			.check { padding-top: 0; }
+			.tier-row { grid-template-columns: 1fr 1fr; }
+			.tier-row .field:nth-child(4) { min-width: 150px; }
+			.tier-row .remove-tier { grid-column: 2; grid-row: 1 / span 2; align-self: center; justify-self: end; }
+		}
+	</style>
+</head>
+<body>
+	<div class="app">
+		<aside class="sidebar">
+			<div class="brand">
+				<div class="brand-mark">◒</div>
+				<div><h1>鱼缸管理台</h1><p>Fishtank Game Admin</p></div>
+			</div>
+			<div class="nav-label">内容管理</div>
+			<nav class="nav-list" id="navList">
+				<button class="nav-item active" data-module="decorations"><span class="nav-icon">✦</span>装点鱼缸配置</button>
+				<button class="nav-item" data-module="fish"><span class="nav-icon">◉</span>水产装配</button>
+				<button class="nav-item" data-module="focus"><span class="nav-icon">◌</span>专注配置</button>
+				<button class="nav-item" data-module="events"><span class="nav-icon">◇</span>事件设置 <span class="reserved">预留</span></button>
+				<button class="nav-item" data-module="payment"><span class="nav-icon">▣</span>付费配置 <span class="reserved">预留</span></button>
+			</nav>
+		</aside>
+		<main class="main" id="main"></main>
+	</div>
+	<div class="toast" id="toast"></div>
+
+	<script>
+		const SHOP_CATEGORIES = [
+			{ value: "fish", label: "鱼" },
+			{ value: "decorations", label: "鱼缸装饰" },
+			{ value: "backgrounds", label: "背景" },
+			{ value: "sands", label: "沙子" },
+			{ value: "sounds", label: "白噪音" }
+		];
+		const OLD_SHOP_ITEMS = [
+			{ id: "fish001", category: "fish", name: "小丑鱼", description: "色彩明亮的小丑鱼，为鱼缸增添一点活泼的海洋气息。", previewImage: "assets/fish/fish001_preview.webp", price: 30, resourcePath: "assets/fish/fish001.webp", isMemberOnly: false, maxInventory: 50 },
+			{ id: "fish002", category: "fish", name: "蓝尾鱼", description: "带着蓝色尾鳍的小鱼，游动时看起来清爽又灵巧。", previewImage: "assets/fish/fish002_preview.webp", price: 35, resourcePath: "assets/fish/fish002.webp", isMemberOnly: false, maxInventory: 50 },
+			{ id: "fish003", category: "fish", name: "金色小鱼", description: "闪着金色光泽的小鱼，让鱼缸多一点温暖的亮色。", previewImage: "assets/fish/fish003_preview.webp", price: 45, resourcePath: "assets/fish/fish003.webp", isMemberOnly: true, maxInventory: 50 },
+			{ id: "decoration001", category: "decorations", name: "水草", description: "柔软舒展的基础水草，适合打造自然的鱼缸底景。", previewImage: "assets/plants/plant001_preview.webp", price: 20, resourcePath: "assets/plants/plant001.webp", isMemberOnly: false, maxInventory: 1 },
+			{ id: "decoration002", category: "decorations", name: "细叶水草", description: "细长挺拔的水草，让鱼缸拥有更丰富的层次。", previewImage: "assets/plants/plant002_preview.webp", price: 30, resourcePath: "assets/plants/plant002.webp", isMemberOnly: false, maxInventory: 1 },
+			{ id: "decoration003", category: "decorations", name: "红色水草", description: "带有红色叶片的水草，为水下景色加入一抹醒目的颜色。", previewImage: "assets/plants/plant003_preview.webp", price: 50, resourcePath: "assets/plants/plant003.webp", isMemberOnly: true, maxInventory: 1 },
+			{ id: "background001", category: "backgrounds", name: "浅海晨光", description: "明亮柔和的浅海背景，像阳光落在清澈的海水里。", previewImage: "assets/backgrounds/background001_preview.webp", price: 30, resourcePath: "assets/backgrounds/background001.webp", isMemberOnly: false, maxInventory: 1 },
+			{ id: "background002", category: "backgrounds", name: "深海夜色", description: "深沉安静的海底夜色，适合营造宁静的晚间氛围。", previewImage: "assets/backgrounds/background002_preview.webp", price: 60, resourcePath: "assets/backgrounds/background002.webp", isMemberOnly: true, maxInventory: 1 },
+			{ id: "background003", category: "backgrounds", name: "珊瑚黄昏", description: "带着珊瑚色调的黄昏海景，让鱼缸显得温暖而梦幻。", previewImage: "assets/backgrounds/background003_preview.webp", price: 50, resourcePath: "assets/backgrounds/background003.webp", isMemberOnly: false, maxInventory: 1 },
+			{ id: "sand001", category: "sands", name: "暖色细沙", description: "温暖细腻的浅色沙地，适合作为基础鱼缸底景。", previewImage: "assets/sands/sand001_preview.webp", price: 20, resourcePath: "assets/sands/sand001.webp", isMemberOnly: false, maxInventory: 1 },
+			{ id: "sand002", category: "sands", name: "深海黑沙", description: "沉静的深色沙地，让鱼缸整体显得更加深邃。", previewImage: "assets/sands/sand002_preview.webp", price: 35, resourcePath: "assets/sands/sand002.webp", isMemberOnly: false, maxInventory: 1 },
+			{ id: "sound001", category: "sounds", name: "海水白噪音", description: "轻柔的水下环境声，让专注时的鱼缸更加安静。", previewImage: "assets/sounds/sound001_preview.webp", price: 25, resourcePath: "assets/sounds/sound001.mp3", isMemberOnly: false, maxInventory: 1 },
+			{ id: "sound002", category: "sounds", name: "轻柔气泡声", description: "细碎轻盈的气泡声，为专注时光增加一点流动感。", previewImage: "assets/sounds/sound002_preview.webp", price: 40, resourcePath: "assets/sounds/sound002.mp3", isMemberOnly: true, maxInventory: 1 }
+		];
+		const state = {
+			module: "decorations",
+			decorations: OLD_SHOP_ITEMS.map(item => ({ ...item, resourcePath: item.resourcePath ? [item.resourcePath] : [], tags: "", published: true, dirty: false })),
+			fish: [
+				{ fishid: "fish001", name: "小丑鱼", resourcePath: "assets/fish/clownfish.png", movementCode: "gentle-swim", scaleMin: 0.8, scaleMax: 1.1, feedReaction: true, published: true, dirty: false },
+				{ fishid: "fish002", name: "蓝尾鱼", resourcePath: "assets/fish/blue-tang.png", movementCode: "quick-swim", scaleMin: 0.7, scaleMax: 1.0, feedReaction: true, published: true, dirty: false }
+			],
+			focus: { minFocusDuration: 25, maxFocusDuration: 120, rewardTiers: [
+				{ id: "tier-1", endMinute: 25, normalBubblePerMinute: 1, memberBubblePerMinute: 2 },
+				{ id: "tier-2", endMinute: 60, normalBubblePerMinute: 2, memberBubblePerMinute: 3 },
+				{ id: "tier-3", endMinute: 120, normalBubblePerMinute: 3, memberBubblePerMinute: 5 }
+			]}
+		};
+		let editingIndex = null;
+		let editingType = null;
+		let focusPublished = true;
+		let focusDirty = false;
+		const API_BASE = window.FISHTANK_API_BASE || "http://localhost:8787/api";
+
+		const main = document.getElementById("main");
+		const toast = document.getElementById("toast");
+		const categoryLabel = value => SHOP_CATEGORIES.find(category => category.value === value)?.label || value;
+		const resourceList = value => Array.isArray(value) ? value : (value ? [value] : []);
+		const esc = value => String(value ?? "").replace(/[&<>\"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[char]));
+		async function apiRequest(path, options = {}) {
+			const response = await fetch(`${API_BASE}${path}`, { headers: { "Content-Type": "application/json" }, ...options });
+			const body = response.status === 204 ? null : await response.json();
+			if (!response.ok) throw new Error(body?.error || "API 请求失败");
+			return body;
+		}
+		function applyRecords(records, type) {
+			return records.map(record => ({ ...record.data, published: record.published, dirty: !record.published }));
+		}
+		async function loadAdminData() {
+			const [decorations, fish, focus] = await Promise.all([
+				apiRequest("/admin/decorations"),
+				apiRequest("/admin/fish"),
+				apiRequest("/admin/focus")
+			]);
+			state.decorations = applyRecords(decorations.data, "decorations");
+			state.fish = applyRecords(fish.data, "fish");
+			if (focus.data[0]) {
+				state.focus = { ...focus.data[0].data };
+				focusPublished = focus.data[0].published;
+				focusDirty = !focusPublished;
+			}
+		}
+		function showToast(message) { toast.textContent = message; toast.classList.add("show"); clearTimeout(showToast.timer); showToast.timer = setTimeout(() => toast.classList.remove("show"), 2400); }
+		function pageHeader(kicker, title, description, action = "") { return `<div class="topbar"><div><div class="eyebrow">${kicker}</div><h2>${title}</h2><p class="subtitle">${description}</p></div>${action}</div>`; }
+		function render() { document.querySelectorAll(".nav-item").forEach(item => item.classList.toggle("active", item.dataset.module === state.module)); renderModule(); }
+		function renderModule() {
+			if (state.module === "decorations") renderDecorationList();
+			if (state.module === "fish") renderFishList();
+			if (state.module === "focus") renderFocus();
+			if (state.module === "events" || state.module === "payment") renderPlaceholder();
+		}
+		function renderDecorationList() {
+			main.innerHTML = pageHeader("DECORATION CONFIG", "装点鱼缸配置", "管理旧版游戏中的商品、装扮与资源配置。", `<button class="button primary" id="newDecoration">＋ 新建商品</button>`) + `<section class="panel"><div class="panel-head"><div><h3>已配置商品</h3><p>共 ${state.decorations.length} 个旧版商品项目</p></div></div>${state.decorations.length ? `<div class="table-wrap"><table><thead><tr><th>商品</th><th>分类</th><th>价格</th><th>发布状态</th><th>操作</th></tr></thead><tbody>${state.decorations.map((item, index) => `<tr><td><div class="item-name">${esc(item.name)}</div><div class="item-id">${esc(item.id)}</div></td><td>${esc(categoryLabel(item.category))}</td><td>${item.price === 0 ? "免费" : item.price + " 鱼币"}</td><td><span class="badge ${item.dirty ? "draft" : "published"}">${item.dirty ? "有修改，待发布" : "已发布"}</span></td><td><div class="actions"><button class="link-button edit-decoration" data-index="${index}">编辑</button><button class="button publish" data-index="${index}" ${item.dirty ? "" : "disabled"}>发布</button><button class="link-button delete delete-decoration" data-index="${index}">删除</button></div></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty"><strong>还没有商品</strong>点击右上角新建第一个商品</div>`}</section>`;
+			document.getElementById("newDecoration").onclick = () => renderDecorationForm();
+			document.querySelectorAll(".edit-decoration").forEach(button => button.onclick = () => renderDecorationForm(Number(button.dataset.index)));
+			document.querySelectorAll(".publish").forEach(button => button.onclick = () => publishItem("decorations", Number(button.dataset.index)));
+			document.querySelectorAll(".delete-decoration").forEach(button => button.onclick = async () => { if (!confirm("确定要删除这个配置吗？")) return; const item = state.decorations[Number(button.dataset.index)]; try { await apiRequest(`/admin/decorations/${encodeURIComponent(item.id)}`, { method: "DELETE" }); state.decorations.splice(Number(button.dataset.index), 1); renderDecorationList(); } catch (error) { showToast(`删除失败：${error.message}`); } });
+		}
+		function renderDecorationForm(index = null) {
+			const item = index === null ? { id: "", category: "decorations", name: "", description: "", previewImage: "", resourcePath: [], tags: "", price: 0, isMemberOnly: false, maxInventory: 1 } : state.decorations[index];
+			editingIndex = index; editingType = "decorations";
+			main.innerHTML = pageHeader("DECORATION CONFIG", index === null ? "新建商品" : "编辑商品", "字段保持与旧版 SHOP_ITEMS 兼容，保存后可在列表中发布。", `<button class="button secondary" id="backList">返回列表</button>`) + `<section class="panel form-panel"><div class="form-body"><form id="decorationForm"><div class="form-grid"><div class="field"><label>id <span>*</span></label><input name="id" value="${esc(item.id)}" required></div><div class="field"><label>category <span>*</span></label><select name="category">${SHOP_CATEGORIES.map(category => `<option value="${category.value}" ${item.category === category.value ? "selected" : ""}>${category.label}</option>`).join("")}</select></div><div class="field"><label>name <span>*</span></label><input name="name" value="${esc(item.name)}" required></div><div class="field"><label>price</label><input name="price" type="number" min="0" value="${item.price}"></div><div class="field full"><label>description</label><textarea name="description">${esc(item.description)}</textarea></div><div class="field"><label>previewImage</label><div class="upload-row"><label class="file-button">上传预览图<input id="previewUpload" type="file" accept="image/*"></label><span class="hint">只允许一个文件</span></div><div class="file-list" id="previewFiles">${item.previewImage ? `<span class="file-chip">${esc(item.previewImage)}</span>` : ""}</div></div><div class="field"><label>resourcePath</label><div class="upload-row"><label class="file-button">上传资源<input id="resourceUpload" type="file" multiple></label><span class="hint">保存为资源数组；装饰类第 1 个为后景、第 2 个为前景</span></div><div class="file-list" id="resourceFiles">${resourceList(item.resourcePath).map((file, resourceIndex) => `<span class="file-chip">${item.category === "decorations" && resourceIndex < 2 ? (resourceIndex === 0 ? "后景：" : "前景：") : "资源："}${esc(file)}</span>`).join("")}</div></div><div class="field full"><label>tags</label><input name="tags" value="${esc(item.tags)}" placeholder="多个标签用逗号分隔"></div><div class="field"><label>maxInventory</label><input name="maxInventory" type="number" min="0" value="${item.maxInventory}"></div><label class="check"><input name="isMemberOnly" type="checkbox" ${item.isMemberOnly ? "checked" : ""}> isMemberOnly</label></div><div class="form-foot"><button type="button" class="button secondary" id="cancelForm">取消</button><button class="button primary">保存</button></div></form></div></section>`;
+			document.getElementById("backList").onclick = () => { editingIndex = null; renderDecorationList(); };
+			document.getElementById("cancelForm").onclick = () => renderDecorationList();
+			document.getElementById("previewUpload").onchange = event => { if (event.target.files[0]) document.getElementById("previewFiles").innerHTML = `<span class="file-chip">${esc(event.target.files[0].name)}</span>`; };
+			document.getElementById("resourceUpload").onchange = event => { const category = event.target.form.elements.category.value; document.getElementById("resourceFiles").innerHTML = Array.from(event.target.files).map((file, resourceIndex) => `<span class="file-chip">${category === "decorations" && resourceIndex < 2 ? (resourceIndex === 0 ? "后景：" : "前景：") : "资源："}${esc(file.name)}</span>`).join(""); };
+			document.getElementById("decorationForm").onsubmit = async event => { event.preventDefault(); const data = formData(event.target); if (state.decorations.some((decoration, decorationIndex) => decoration.id === data.id && decorationIndex !== editingIndex)) { showToast("保存失败，id重复"); return; } data.resourcePath = Array.from(document.querySelectorAll("#resourceFiles .file-chip")).map(chip => chip.textContent.replace(/^(后景|前景|资源)：/, "")); data.previewImage = document.querySelector("#previewFiles .file-chip")?.textContent || ""; try { const response = await apiRequest(`/admin/decorations${editingIndex === null ? "" : `/${encodeURIComponent(data.id)}`}`, { method: editingIndex === null ? "POST" : "PUT", body: JSON.stringify(data) }); const saved = { ...response.data.data, published: editingIndex === null ? response.data.published : false, dirty: editingIndex !== null || !response.data.published }; if (editingIndex === null) state.decorations.push(saved); else state.decorations[editingIndex] = saved; showToast("商品已保存，等待发布"); renderDecorationList(); } catch (error) { showToast(`保存失败：${error.message}`); } };
+		}
+		function renderFishList() {
+			main.innerHTML = pageHeader("FISH ASSEMBLY", "水产装配", "配置鱼种资源、运动表现与投喂反馈。", `<button class="button primary" id="newFish">＋ 新建鱼种</button>`) + `<section class="panel"><div class="panel-head"><div><h3>已配置鱼种</h3><p>fishid 必须唯一</p></div></div><div class="table-wrap"><table><thead><tr><th>鱼种</th><th>资源</th><th>运动代码</th><th>缩放范围</th><th>发布状态</th><th>操作</th></tr></thead><tbody>${state.fish.map((item, index) => `<tr><td><div class="item-name">${esc(item.name)}</div><div class="item-id">${esc(item.fishid)}</div></td><td>${esc(item.resourcePath)}</td><td>${esc(item.movementCode)}</td><td>${item.scaleMin} - ${item.scaleMax}</td><td><span class="badge ${item.dirty ? "draft" : "published"}">${item.dirty ? "有修改，待发布" : "已发布"}</span></td><td><div class="actions"><button class="link-button edit-fish" data-index="${index}">编辑</button><button class="button publish" data-index="${index}" ${item.dirty ? "" : "disabled"}>发布</button><button class="link-button delete delete-fish" data-index="${index}">删除</button></div></td></tr>`).join("")}</tbody></table></div></section>`;
+			document.getElementById("newFish").onclick = () => renderFishForm();
+			document.querySelectorAll(".edit-fish").forEach(button => button.onclick = () => renderFishForm(Number(button.dataset.index)));
+			document.querySelectorAll(".publish").forEach(button => button.onclick = () => publishItem("fish", Number(button.dataset.index)));
+			document.querySelectorAll(".delete-fish").forEach(button => button.onclick = async () => { if (!confirm("确定要删除这个配置吗？")) return; const item = state.fish[Number(button.dataset.index)]; try { await apiRequest(`/admin/fish/${encodeURIComponent(item.fishid)}`, { method: "DELETE" }); state.fish.splice(Number(button.dataset.index), 1); renderFishList(); } catch (error) { showToast(`删除失败：${error.message}`); } });
+		}
+		function renderFishForm(index = null) {
+			const item = index === null ? { fishid: "", name: "", resourcePath: "", movementCode: "", scaleMin: 1, scaleMax: 1, feedReaction: false } : state.fish[index]; editingIndex = index; editingType = "fish";
+			main.innerHTML = pageHeader("FISH ASSEMBLY", index === null ? "新建鱼种" : "编辑鱼种", "保存后返回鱼种列表，发布操作可单独进行。", `<button class="button secondary" id="backList">返回列表</button>`) + `<section class="panel form-panel"><div class="form-body"><form id="fishForm"><div class="form-grid"><div class="field"><label>fishid <span>*</span></label><input name="fishid" value="${esc(item.fishid)}" required></div><div class="field"><label>name <span>*</span></label><input name="name" value="${esc(item.name)}" required></div><div class="field full"><label>resourcePath</label><input name="resourcePath" value="${esc(item.resourcePath)}"></div><div class="field"><label>movementCode</label><input name="movementCode" value="${esc(item.movementCode)}"></div><label class="check"><input name="feedReaction" type="checkbox" ${item.feedReaction === true ? "checked" : ""}> feedReaction（对饲料产生反应）</label><div class="field"><label>scaleMin</label><input name="scaleMin" type="number" step="0.1" value="${item.scaleMin}"></div><div class="field"><label>scaleMax</label><input name="scaleMax" type="number" step="0.1" value="${item.scaleMax}"></div></div><div class="form-foot"><button type="button" class="button secondary" id="cancelForm">取消</button><button class="button primary">保存</button></div></form></div></section>`;
+			document.getElementById("backList").onclick = () => renderFishList(); document.getElementById("cancelForm").onclick = () => renderFishList();
+			document.getElementById("fishForm").onsubmit = async event => { event.preventDefault(); const data = formData(event.target); if (state.fish.some((fish, fishIndex) => fish.fishid === data.fishid && fishIndex !== editingIndex)) { showToast("保存失败：fishid 已存在"); return; } data.feedReaction = event.target.elements.feedReaction.checked; data.scaleMin = Number(data.scaleMin); data.scaleMax = Number(data.scaleMax); try { const response = await apiRequest(`/admin/fish${editingIndex === null ? "" : `/${encodeURIComponent(data.fishid)}`}`, { method: editingIndex === null ? "POST" : "PUT", body: JSON.stringify(data) }); const saved = { ...response.data.data, published: editingIndex === null ? response.data.published : false, dirty: editingIndex !== null || !response.data.published }; if (editingIndex === null) state.fish.push(saved); else state.fish[editingIndex] = saved; showToast("鱼种已保存，等待发布"); renderFishList(); } catch (error) { showToast(`保存失败：${error.message}`); } };
+		}
+		function renderFocus() {
+			const focus = state.focus; focus.rewardTiers.sort((a, b) => a.endMinute - b.endMinute);
+			const publishButton = `<button class="button publish" id="publishFocus" ${focusDirty ? "" : "disabled"}>${focusDirty ? "待发布" : (focusPublished ? "已发布" : "待发布")}</button>`;
+			main.innerHTML = pageHeader("FOCUS CONFIG", "专注配置", "设置专注时长与不同阶段的气泡奖励。", `${publishButton}<button class="button primary" id="saveFocus">保存配置</button>`) + `<section class="panel form-panel"><div class="form-body"><div class="form-grid"><div class="field"><label>minFocusDuration</label><input id="minFocusDuration" type="number" min="0" value="${focus.minFocusDuration}"></div><div class="field"><label>maxFocusDuration</label><input id="maxFocusDuration" type="number" min="0" value="${focus.maxFocusDuration}"></div></div><h3 class="section-title">rewardTiers <span class="hint">按 endMinute 从小到大显示</span></h3><div id="tiers">${focus.rewardTiers.map((tier, index) => tierTemplate(tier, index)).join("")}</div><button class="button secondary" id="addTier">＋ 新增梯度</button></div></section>`;
+			const markFocusDirty = () => { focusDirty = true; focusPublished = false; };
+			document.querySelectorAll("#minFocusDuration, #maxFocusDuration, #tiers input").forEach(input => input.addEventListener("input", markFocusDirty));
+			document.getElementById("addTier").onclick = () => { focus.rewardTiers.push({ id: `tier-${Date.now()}`, endMinute: 0, normalBubblePerMinute: 0, memberBubblePerMinute: 0 }); markFocusDirty(); renderFocus(); };
+			document.querySelectorAll(".remove-tier").forEach(button => button.onclick = () => { if (focus.rewardTiers.length <= 1) { showToast("至少保留一个奖励梯度"); return; } if (!confirm("确定要删除这个配置吗？")) return; focus.rewardTiers.splice(Number(button.dataset.index), 1); markFocusDirty(); renderFocus(); });
+			document.getElementById("saveFocus").onclick = async () => {
+				const minFocusDuration = Number(document.getElementById("minFocusDuration").value);
+				const maxFocusDuration = Number(document.getElementById("maxFocusDuration").value);
+				const rewardTiers = [...document.querySelectorAll(".tier-row")].map(row => { const values = row.querySelectorAll("input"); return { id: values[0].value, endMinute: Number(values[1].value), normalBubblePerMinute: Number(values[2].value), memberBubblePerMinute: Number(values[3].value) }; });
+				const errors = [];
+				if (minFocusDuration > maxFocusDuration) errors.push("minFocusDuration 不能大于 maxFocusDuration");
+				if (rewardTiers.some(tier => tier.endMinute <= 0)) errors.push("endMinute 必须大于 0");
+				if (new Set(rewardTiers.map(tier => tier.endMinute)).size !== rewardTiers.length) errors.push("endMinute 不允许重复");
+				if (rewardTiers.some(tier => tier.normalBubblePerMinute < 0)) errors.push("normalBubblePerMinute 不能小于 0");
+				if (rewardTiers.some(tier => tier.memberBubblePerMinute < 0)) errors.push("memberBubblePerMinute 不能小于 0");
+				if (errors.length) { showToast(`保存失败：${errors.join("；")}`); return; }
+				const data = { minFocusDuration, maxFocusDuration, rewardTiers: rewardTiers.sort((a, b) => a.endMinute - b.endMinute) };
+				try { const response = await apiRequest("/admin/focus/focus", { method: "PUT", body: JSON.stringify(data) }); focus.minFocusDuration = response.data.data.minFocusDuration; focus.maxFocusDuration = response.data.data.maxFocusDuration; focus.rewardTiers = response.data.data.rewardTiers; focusPublished = response.data.published; focusDirty = !focusPublished; showToast("专注配置已保存，等待发布"); renderFocus(); } catch (error) { showToast(`保存失败：${error.message}`); }
+			};
+			document.getElementById("publishFocus").onclick = async () => { try { await apiRequest("/admin/focus/focus/publish", { method: "POST" }); focusDirty = false; focusPublished = true; showToast("专注配置已发布"); renderFocus(); } catch (error) { showToast(`发布失败：${error.message}`); } };
+		}
+		function tierTemplate(tier, index) { return `<div class="tier-row"><div class="field"><label>id</label><input value="${esc(tier.id)}"></div><div class="field"><label>endMinute</label><input type="number" min="0" value="${tier.endMinute}"></div><div class="field"><label>normalBubblePerMinute</label><input type="number" min="0" value="${tier.normalBubblePerMinute}"></div><div class="field"><label>memberBubblePerMinute</label><input type="number" min="0" value="${tier.memberBubblePerMinute}"></div><button class="icon-button remove-tier" data-index="${index}" title="删除梯度">×</button></div>`; }
+		function renderPlaceholder() { const title = state.module === "events" ? "事件设置" : "付费配置"; main.innerHTML = pageHeader(state.module === "events" ? "EVENT SETTINGS" : "PAYMENT CONFIG", title, "该模块将在后续版本中接入。", "") + `<section class="panel"><div class="empty"><strong>功能预留中</strong>这里暂时没有可配置内容。</div></section>`; }
+		function formData(form) { const data = Object.fromEntries(new FormData(form).entries()); data.isMemberOnly = form.elements.isMemberOnly?.checked || false; data.price = Number(data.price || 0); data.maxInventory = Number(data.maxInventory || 0); return data; }
+		async function publishItem(type, index) { const item = state[type][index]; const id = type === "fish" ? item.fishid : item.id; try { await apiRequest(`/admin/${type}/${encodeURIComponent(id)}/publish`, { method: "POST" }); item.dirty = false; item.published = true; showToast("内容已发布"); renderModule(); } catch (error) { showToast(`发布失败：${error.message}`); } }
+		document.getElementById("navList").onclick = event => { const button = event.target.closest(".nav-item"); if (!button) return; state.module = button.dataset.module; editingIndex = null; render(); };
+		loadAdminData().then(render).catch(error => { showToast(`API 连接失败：${error.message}`); render(); });
+	</script>
+</body>
+</html>
