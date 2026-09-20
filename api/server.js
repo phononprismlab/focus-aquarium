@@ -4,7 +4,7 @@ import { createRepository } from "./repository.js";
 
 const app = express();
 const port = Number(process.env.PORT || 8787);
-const repository = await createRepository();
+let repository;
 
 const isProduction = process.env.NODE_ENV === "production";
 const configuredOrigins = (process.env.CORS_ORIGINS || "")
@@ -83,3 +83,13 @@ app.post("/api/admin/assets", (req, res) => res.status(501).json({ error: "èµ„æº
 app.listen(port, "0.0.0.0", () => {
   console.log(`Fishtank API listening on port ${port}`);
 });
+
+createRepository()
+  .then(instance => {
+    repository = instance;
+    console.log("Repository initialized");
+  })
+  .catch(error => {
+    console.error("Repository initialization failed", error);
+    process.exitCode = 1;
+  });
