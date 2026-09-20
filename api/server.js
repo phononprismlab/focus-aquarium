@@ -3,7 +3,7 @@ import express from "express";
 import { createRepository } from "./repository.js";
 
 const app = express();
-const port = Number(process.env.PORT || 8787);
+const port = Number(process.env.PORT || 80);
 let repository;
 
 const isProduction = process.env.NODE_ENV === "production";
