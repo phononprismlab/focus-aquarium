@@ -80,4 +80,6 @@ app.post("/api/admin/:type/:id/publish", async (req, res) => {
 
 app.post("/api/admin/assets", (req, res) => res.status(501).json({ error: "资源上传将在配置 API 接通后实现" }));
 
-app.listen(port, () => console.log(`Fishtank API listening on http://localhost:${port}`));
+app.listen(port, "0.0.0.0", () => {
+  console.log(`Fishtank API listening on port ${port}`);
+});
