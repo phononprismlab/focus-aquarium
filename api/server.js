@@ -17,7 +17,8 @@ const allowedOrigins = configuredOrigins.length ? configuredOrigins : [
   "http://127.0.0.1:3000",
   "http://localhost:8787",
   "http://127.0.0.1:8787",
-  "https://test-d0gpv0jya4925be19-1491495221.tcloudbaseapp.com"
+  "https://test-d0gpv0jya4925be19-1491495221.tcloudbaseapp.com",
+  "https://focus-aquarium-test-d0gpv0jya4925be19.webapps.tcloudbase.com"
 ];
 app.use(cors({
   origin(origin, callback) {
