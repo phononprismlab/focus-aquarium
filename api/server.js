@@ -5,6 +5,7 @@ import { createRepository } from "./repository.js";
 const app = express();
 const port = Number(process.env.PORT || 80);
 let repository;
+let repositoryError;
 
 const configuredOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
@@ -37,7 +38,21 @@ const validate = (type, data) => {
   if (type === "focus" && (!Number.isFinite(Number(data.minFocusDuration)) || !Array.isArray(data.rewardTiers))) return "专注配置必须包含 minFocusDuration 和 rewardTiers";
   return null;
 };
-const records = type => repository.list(type, false);
+const repositoryReady = createRepository().then(instance => {
+  repository = instance;
+  console.log("Repository initialized");
+  return instance;
+}).catch(error => {
+  repositoryError = error;
+  console.error("Repository initialization failed", error);
+  return null;
+});
+const getRepository = async () => {
+  const instance = await repositoryReady;
+  if (!instance) throw repositoryError || new Error("Repository is unavailable");
+  return instance;
+};
+const records = async type => (await getRepository()).list(type, false);
 const sendError = (res, error) => res.status(500).json({ error: error.message || "服务器错误" });
 
 app.get("/api/health", (req, res) => res.json({ ok: true, storage: process.env.CLOUDBASE_ENV_ID ? "cloudbase" : "memory" }));
@@ -48,7 +63,7 @@ for (const type of types) {
   });
   app.get(`/api/game/${type}`, async (req, res) => {
     try {
-      const published = await repository.list(type, true);
+      const published = await (await getRepository()).list(type, true);
       res.json({ data: published.map(record => ({ ...record, data: record.publishedData || record.data })) });
     } catch (error) { sendError(res, error); }
   });
@@ -60,7 +75,7 @@ app.put("/api/admin/:type/:id", async (req, res) => {
   const errorMessage = validate(type, req.body);
   if (errorMessage) return res.status(400).json({ error: errorMessage });
   if (idFor(type, req.body) !== id) return res.status(400).json({ error: "路径 id 与请求体 id 不一致" });
-  try { res.json({ data: await repository.save(type, id, req.body) }); } catch (error) { sendError(res, error); }
+  try { res.json({ data: await (await getRepository()).save(type, id, req.body) }); } catch (error) { sendError(res, error); }
 });
 
 app.post("/api/admin/:type", async (req, res) => {
@@ -69,18 +84,18 @@ app.post("/api/admin/:type", async (req, res) => {
   const errorMessage = validate(type, req.body);
   if (errorMessage) return res.status(400).json({ error: errorMessage });
   const id = idFor(type, req.body);
-  try { res.status(201).json({ data: await repository.save(type, id, req.body) }); } catch (error) { sendError(res, error); }
+  try { res.status(201).json({ data: await (await getRepository()).save(type, id, req.body) }); } catch (error) { sendError(res, error); }
 });
 
 app.delete("/api/admin/:type/:id", async (req, res) => {
   if (!types.has(req.params.type)) return res.status(404).json({ error: "未知配置类型" });
-  try { await repository.remove(req.params.type, req.params.id); res.status(204).end(); } catch (error) { sendError(res, error); }
+  try { await (await getRepository()).remove(req.params.type, req.params.id); res.status(204).end(); } catch (error) { sendError(res, error); }
 });
 
 app.post("/api/admin/:type/:id/publish", async (req, res) => {
   if (!types.has(req.params.type)) return res.status(404).json({ error: "未知配置类型" });
   try {
-    const data = await repository.publish(req.params.type, req.params.id);
+    const data = await (await getRepository()).publish(req.params.type, req.params.id);
     if (!data) return res.status(404).json({ error: "配置不存在" });
     res.json({ data });
   } catch (error) { sendError(res, error); }
@@ -88,17 +103,6 @@ app.post("/api/admin/:type/:id/publish", async (req, res) => {
 
 app.post("/api/admin/assets", (req, res) => res.status(501).json({ error: "资源上传将在配置 API 接通后实现" }));
 
-async function startServer() {
-  try {
-    repository = await createRepository();
-    console.log("Repository initialized");
-    app.listen(port, "0.0.0.0", () => {
-      console.log(`Fishtank API listening on port ${port}`);
-    });
-  } catch (error) {
-    console.error("Repository initialization failed", error);
-    process.exitCode = 1;
-  }
-}
-
-startServer();
+app.listen(port, "0.0.0.0", () => {
+  console.log(`Fishtank API listening on port ${port}`);
+});
