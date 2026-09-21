@@ -1,12 +1,10 @@
 import cors from "cors";
 import express from "express";
-import { createRequire } from "node:module";
 import { createRepository } from "./repository.js";
 
 const app = express();
 const port = Number(process.env.PORT || 80);
-const require = createRequire(import.meta.url);
-const cloudbaseSdkVersion = require("@cloudbase/js-sdk/package.json").version;
+const cloudbaseSdkVersion = "3.10.0";
 let repository;
 let repositoryError;
 
