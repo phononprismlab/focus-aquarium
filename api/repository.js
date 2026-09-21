@@ -96,14 +96,14 @@ export async function createCloudbaseRepository() {
         .limit(1)
         .throwOnError();
       if (!existing.length) {
-        await db.from(tableName).insert({
+        await db.from(tableName).insert([{
           type,
           config_id: configId,
           data,
           published_data: structuredClone(data),
           published: true,
           updated_at: now()
-        }).throwOnError();
+        }], { defaultToNull: false }).throwOnError();
       }
     }
   }
@@ -143,7 +143,7 @@ export async function createCloudbaseRepository() {
       if (current) {
         await db.from(tableName).update(row).eq("id", current.id).throwOnError();
       } else {
-        await db.from(tableName).insert(row).throwOnError();
+        await db.from(tableName).insert([row], { defaultToNull: false }).throwOnError();
       }
       return toRecord({ ...row, id: current?.id });
     },
