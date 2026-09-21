@@ -77,7 +77,11 @@ export function createMemoryRepository() {
 
 export async function createCloudbaseRepository() {
   const { default: cloudbase } = await import("@cloudbase/node-sdk");
-  const app = cloudbase.init({ env: process.env.CLOUDBASE_ENV_ID });
+  const app = cloudbase.init({
+    env: process.env.CLOUDBASE_ENV_ID,
+    secretId: process.env.CLOUDBASE_APIKEY,
+    secretKey: process.env.CLOUDBASE_APIKEY
+  });
   const collection = app.database().collection(process.env.CLOUDBASE_COLLECTION || "fishtank_configs");
 
   for (const [type, value] of Object.entries(seed)) {
