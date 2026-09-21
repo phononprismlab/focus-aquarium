@@ -1,9 +1,12 @@
 import cors from "cors";
 import express from "express";
+import { createRequire } from "node:module";
 import { createRepository } from "./repository.js";
 
 const app = express();
 const port = Number(process.env.PORT || 80);
+const require = createRequire(import.meta.url);
+const cloudbaseSdkVersion = require("@cloudbase/node-sdk/package.json").version;
 let repository;
 let repositoryError;
 
@@ -56,6 +59,30 @@ const records = async type => (await getRepository()).list(type, false);
 const sendError = (res, error) => res.status(500).json({ error: error.message || "服务器错误" });
 
 app.get("/api/health", (req, res) => res.json({ ok: true, storage: process.env.CLOUDBASE_ENV_ID ? "cloudbase" : "memory" }));
+
+// Temporary CloudBase authentication diagnostic endpoint. Remove after deployment diagnosis.
+app.get("/api/debug/cloudbase-auth", async (req, res) => {
+  const apiKey = process.env.CLOUDBASE_APIKEY || "";
+  const result = {
+    hasEnvId: Boolean(process.env.CLOUDBASE_ENV_ID),
+    hasApiKey: Boolean(apiKey),
+    apiKeyLength: apiKey.length,
+    sdkVersion: cloudbaseSdkVersion,
+    databaseTest: "ok"
+  };
+  try {
+    await (await getRepository()).list("decorations", false);
+  } catch (error) {
+    const message = apiKey ? String(error?.message || "").replace(apiKey, "[REDACTED]") : String(error?.message || "");
+    result.databaseTest = {
+      status: "failed",
+      name: error?.name || "Error",
+      code: error?.code,
+      message: message.replace(/(authorization|token|secretid|secretkey|apikey)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]")
+    };
+  }
+  res.json(result);
+});
 
 for (const type of types) {
   app.get(`/api/admin/${type}`, async (req, res) => {
