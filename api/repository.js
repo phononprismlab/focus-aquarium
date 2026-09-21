@@ -76,58 +76,103 @@ export function createMemoryRepository() {
 }
 
 export async function createCloudbaseRepository() {
-  const { default: cloudbase } = await import("@cloudbase/node-sdk");
+  const { default: cloudbase } = await import("@cloudbase/js-sdk");
   const app = cloudbase.init({
     env: process.env.CLOUDBASE_ENV_ID,
     accessKey: process.env.CLOUDBASE_APIKEY
   });
-  const collection = app.database().collection(process.env.CLOUDBASE_COLLECTION || "fishtank_configs");
+  const db = app.rdb();
+  const tableName = "fishtank_configs";
 
   for (const [type, value] of Object.entries(seed)) {
     const values = Array.isArray(value) ? value : [value];
     for (const data of values) {
       const configId = type === "fish" ? data.fishid : type === "focus" ? "focus" : data.id;
-      const existing = await collection.where({ type, configId }).limit(1).get();
-      if (!existing.data.length) {
-        await collection.add({ type, configId, data, publishedData: structuredClone(data), published: true, updatedAt: now() });
+      const { data: existing } = await db
+        .from(tableName)
+        .select("id")
+        .eq("type", type)
+        .eq("config_id", configId)
+        .limit(1)
+        .throwOnError();
+      if (!existing.length) {
+        await db.from(tableName).insert({
+          type,
+          config_id: configId,
+          data,
+          published_data: structuredClone(data),
+          published: true,
+          updated_at: now()
+        }).throwOnError();
       }
     }
   }
 
-  const toRecord = document => ({ type: document.type, id: document.configId, data: document.data, publishedData: document.publishedData || null, published: document.published === true, updatedAt: document.updatedAt });
+  const toRecord = row => ({
+    type: row.type,
+    id: row.config_id,
+    data: row.data,
+    publishedData: row.published_data || null,
+    published: row.published === true,
+    updatedAt: row.updated_at
+  });
   return {
     async list(type, publishedOnly = false) {
-      let query = collection.where({ type });
-      if (publishedOnly) query = query.where({ published: true });
-      const result = await query.get();
-      return result.data.map(toRecord);
+      let query = db.from(tableName).select("*").eq("type", type);
+      if (publishedOnly) query = query.eq("published", true);
+      const { data } = await query.throwOnError();
+      return data.map(toRecord);
     },
     async save(type, id, data) {
-      const existing = await collection.where({ type, configId: id }).limit(1).get();
-      const current = existing.data[0];
-      const document = {
+      const { data: existing } = await db
+        .from(tableName)
+        .select("*")
+        .eq("type", type)
+        .eq("config_id", id)
+        .limit(1)
+        .throwOnError();
+      const current = existing[0];
+      const row = {
         type,
-        configId: id,
+        config_id: id,
         data,
-        publishedData: current?.publishedData || (current?.published ? current.data : null),
+        published_data: current?.published_data || (current?.published ? current.data : null),
         published: false,
-        updatedAt: now()
+        updated_at: now()
       };
-      if (current?._id) await collection.doc(current._id).set(document);
-      else await collection.add(document);
-      return toRecord({ ...document, configId: id });
+      if (current) {
+        await db.from(tableName).update(row).eq("id", current.id).throwOnError();
+      } else {
+        await db.from(tableName).insert(row).throwOnError();
+      }
+      return toRecord({ ...row, id: current?.id });
     },
     async remove(type, id) {
-      const result = await collection.where({ type, configId: id }).get();
-      await Promise.all(result.data.map(document => collection.doc(document._id).remove()));
+      const { data: existing } = await db
+        .from(tableName)
+        .select("id")
+        .eq("type", type)
+        .eq("config_id", id)
+        .throwOnError();
+      await Promise.all(existing.map(row => db.from(tableName).delete().eq("id", row.id).throwOnError()));
     },
     async publish(type, id) {
-      const result = await collection.where({ type, configId: id }).limit(1).get();
-      const document = result.data[0];
-      if (!document) return null;
+      const { data: existing } = await db
+        .from(tableName)
+        .select("*")
+        .eq("type", type)
+        .eq("config_id", id)
+        .limit(1)
+        .throwOnError();
+      const current = existing[0];
+      if (!current) return null;
       const updatedAt = now();
-      await collection.doc(document._id).update({ published: true, publishedData: document.data, updatedAt });
-      return { type, id, data: document.data, publishedData: document.data, published: true, updatedAt };
+      await db.from(tableName).update({
+        published: true,
+        published_data: current.data,
+        updated_at: updatedAt
+      }).eq("id", current.id).throwOnError();
+      return { type, id, data: current.data, publishedData: current.data, published: true, updatedAt };
     }
   };
 }
