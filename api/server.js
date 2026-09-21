@@ -88,16 +88,17 @@ app.post("/api/admin/:type/:id/publish", async (req, res) => {
 
 app.post("/api/admin/assets", (req, res) => res.status(501).json({ error: "资源上传将在配置 API 接通后实现" }));
 
-app.listen(port, "0.0.0.0", () => {
-  console.log(`Fishtank API listening on port ${port}`);
-});
-
-createRepository()
-  .then(instance => {
-    repository = instance;
+async function startServer() {
+  try {
+    repository = await createRepository();
     console.log("Repository initialized");
-  })
-  .catch(error => {
+    app.listen(port, "0.0.0.0", () => {
+      console.log(`Fishtank API listening on port ${port}`);
+    });
+  } catch (error) {
     console.error("Repository initialization failed", error);
     process.exitCode = 1;
-  });
+  }
+}
+
+startServer();
