@@ -7,6 +7,7 @@
     "dev": "node --watch server.js"
   },
   "dependencies": {
+    "@cloudbase/js-sdk": "^3.10.0",
     "@cloudbase/node-sdk": "^3.18.3",
     "cors": "^2.8.5",
     "express": "^5.1.0"

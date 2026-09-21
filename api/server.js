@@ -6,7 +6,7 @@ import { createRepository } from "./repository.js";
 const app = express();
 const port = Number(process.env.PORT || 80);
 const require = createRequire(import.meta.url);
-const cloudbaseSdkVersion = require("@cloudbase/node-sdk/package.json").version;
+const cloudbaseSdkVersion = require("@cloudbase/js-sdk/package.json").version;
 let repository;
 let repositoryError;
 
@@ -66,17 +66,21 @@ app.get("/api/debug/cloudbase-auth", async (req, res) => {
   const result = {
     hasEnvId: Boolean(process.env.CLOUDBASE_ENV_ID),
     hasApiKey: Boolean(apiKey),
-    apiKeyLength: apiKey.length,
     sdkVersion: cloudbaseSdkVersion,
-    databaseTest: "ok"
+    databaseTest: { status: "ok" }
   };
   try {
-    await (await getRepository()).list("decorations", false);
+    const { default: cloudbase } = await import("@cloudbase/js-sdk");
+    const app = cloudbase.init({ env: process.env.CLOUDBASE_ENV_ID });
+    await app.database()
+      .collection(process.env.CLOUDBASE_COLLECTION || "fishtank_configs")
+      .where({ type: "decorations" })
+      .limit(1)
+      .get();
   } catch (error) {
     const message = apiKey ? String(error?.message || "").replace(apiKey, "[REDACTED]") : String(error?.message || "");
     result.databaseTest = {
       status: "failed",
-      name: error?.name || "Error",
       code: error?.code,
       message: message.replace(/(authorization|token|secretid|secretkey|apikey)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]")
     };
