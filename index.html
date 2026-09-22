@@ -756,10 +756,24 @@
 .v02-focus-blocker-message{font-size:16px;font-weight:700}
 .v02-focus-blocker-confirm{margin-top:18px;border:0;border-radius:10px;padding:10px 25px;background:#5a8588;color:#fff;font:700 14px inherit;cursor:pointer}
 
+/* 配置加载失败提示：层级高于所有弹窗，保证任何界面下用户都能看到。 */
+.config-notice{position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:6000;display:flex;align-items:center;gap:10px;width:min(520px,calc(100vw - 32px));padding:11px 12px;border-radius:14px;border:1px solid #e8b978;background:#fff6e8;color:#7c4a12;font-size:13px;line-height:1.5;box-shadow:0 10px 30px rgba(20,50,55,.18)}
+.config-notice[hidden]{display:none}
+.config-notice-text{flex:1 1 auto}
+.config-notice button{flex:0 0 auto;border:0;border-radius:9px;padding:5px 11px;background:#fff;color:#7c4a12;font:600 13px inherit;cursor:pointer}
+.config-notice-retry{border:1px solid #e0a860 !important}
+.config-notice-close{padding:5px 8px !important;background:transparent !important;font-size:16px !important;line-height:1}
+
 </style>
 </head>
 
 <body>
+
+<div class="config-notice" id="configNotice" role="status" aria-live="polite" hidden>
+  <span class="config-notice-text" id="configNoticeText"></span>
+  <button type="button" class="config-notice-retry" id="configNoticeRetry">重试</button>
+  <button type="button" class="config-notice-close" id="configNoticeClose" aria-label="关闭提示">×</button>
+</div>
 
 <div class="app">
 <main class="tank" id="tank">
@@ -956,30 +970,100 @@
     ]
   };
 
+  // ===== 配置加载状态提示 =====
+  // 加载失败必须让用户看见：否则他会以为自己看到的就是后台最新配置，
+  // 而实际上用的是内置默认值。提示不会自动消失，直到重试成功或手动关闭。
+  const configNotice = () => document.getElementById("configNotice");
+  function showConfigNotice(message){
+    const notice = configNotice();
+    const text = document.getElementById("configNoticeText");
+    if(!notice || !text) return;
+    if(!notice.hidden && text.textContent === message) return;
+    text.textContent = message;
+    notice.hidden = false;
+  }
+  function hideConfigNotice(){
+    const notice = configNotice();
+    if(notice) notice.hidden = true;
+  }
+
   async function loadPublishedConfig(){
+    // 每一项单独接住网络异常，这样才能说清到底是哪一类配置没加载，
+    // 也能让加载成功的部分正常生效，而不是整批作废。
+    // 包一层 Promise.resolve()：fetch 万一同步抛错也能被接住，
+    // 否则用户会看到浏览器原始的 "Failed to fetch" 而不是能看懂的中文提示。
+    const safeFetch = path => Promise.resolve()
+      .then(() => fetch(`${API_BASE}${path}`, { cache:"no-store" }))
+      .catch(() => null);
     const [decorationsResponse, fishResponse, focusResponse, audioResponse] = await Promise.all([
-      fetch(`${API_BASE}/game/decorations`, { cache:"no-store" }),
-      fetch(`${API_BASE}/game/fish`, { cache:"no-store" }),
-      fetch(`${API_BASE}/game/focus`, { cache:"no-store" }),
-      fetch(`${API_BASE}/game/audio`, { cache:"no-store" }).catch(() => null)
+      safeFetch("/game/decorations"),
+      safeFetch("/game/fish"),
+      safeFetch("/game/focus"),
+      safeFetch("/game/audio")
     ]);
-    if(!decorationsResponse.ok || !fishResponse.ok || !focusResponse.ok) throw new Error("published config request failed");
-    const decorations = await decorationsResponse.json();
-    const fish = await fishResponse.json();
-    const focus = await focusResponse.json();
-    if(decorations.data.length) SHOP_ITEMS = decorations.data.map(record => record.data);
-    FISH_ASSEMBLY = fish.data.map(record => record.data);
-    if(focus.data[0]) FOCUS_CONFIG = focus.data[0].data;
-    if(audioResponse && audioResponse.ok){
+    const usable = response => Boolean(response && response.ok);
+    const failed = [];
+    if(!usable(decorationsResponse)) failed.push("装饰");
+    if(!usable(fishResponse)) failed.push("鱼种");
+    if(!usable(focusResponse)) failed.push("专注配置");
+    const audioFailed = !usable(audioResponse);
+
+    if(usable(decorationsResponse)){
+      try{
+        const decorations = await decorationsResponse.json();
+        if(decorations.data.length) SHOP_ITEMS = decorations.data.map(record => record.data);
+      }catch(_){ failed.push("装饰"); }
+    }
+    if(usable(fishResponse)){
+      try{
+        const fish = await fishResponse.json();
+        FISH_ASSEMBLY = fish.data.map(record => record.data);
+      }catch(_){ failed.push("鱼种"); }
+    }
+    if(usable(focusResponse)){
+      try{
+        const focus = await focusResponse.json();
+        if(focus.data[0]) FOCUS_CONFIG = focus.data[0].data;
+      }catch(_){ failed.push("专注配置"); }
+    }
+    if(!audioFailed){
       try{
         const audio = await audioResponse.json();
         const config = audio && audio.data && audio.data[0] ? audio.data[0].data : null;
         if(config && config.categories && Array.isArray(config.sounds)) AUDIO_CONFIG = config;
-      }catch(_){ /* 音频配置不可用时不阻塞其它配置 */ }
+      }catch(_){ /* 音频配置解析失败时沿用内置音效 */ }
     }
-    applyServerAudioDefaults();
-    normalizeAmbientSound();
-    syncAmbientAudio();
+    // 这三步属于音频的附加处理：它们出错只会导致没有声音，
+    // 不应该被当成「配置加载失败」弹出吓人的提示条。
+    try{
+      applyServerAudioDefaults();
+      normalizeAmbientSound();
+      syncAmbientAudio();
+    }catch(error){
+      console.warn("应用音频配置失败，沿用内置音效：", error);
+    }
+    return { failed, audioFailed };
+  }
+
+  // 拉取配置并把结果反馈给用户；失败时不抛错，调用方照常继续渲染。
+  async function syncPublishedConfig(){
+    try{
+      const result = await loadPublishedConfig();
+      // 去重：failed 里可能因为解析失败出现重复项。
+      const failed = Array.from(new Set(result.failed));
+      if(!failed.length && !result.audioFailed){
+        hideConfigNotice();
+        return true;
+      }
+      const parts = [];
+      if(failed.length) parts.push(`${failed.join("、")}未能加载，以下为内置默认内容，后台改动暂不生效`);
+      if(result.audioFailed) parts.push("音频配置未加载，背景音沿用内置音效");
+      showConfigNotice(`配置服务连接失败：${parts.join("；")}。`);
+      return false;
+    }catch(error){
+      showConfigNotice(`配置加载失败：${error && error.message ? error.message : "未知错误"}。当前使用内置默认内容。`);
+      return false;
+    }
   }
 
   // 后台配置的背景音（category==="bgm"、已启用、且有音频文件）→ 商店「白噪音」分类的商品。
@@ -1395,7 +1479,7 @@
       blocker.setAttribute("aria-hidden","false");
       return;
     }
-    try { await loadPublishedConfig(); } catch(e) {}
+    await syncPublishedConfig();
     shopOpen=true;
     trialSnapshot=cloneData(AquariumData);
     TempAquariumData=cloneData(AquariumData);
@@ -2251,7 +2335,10 @@ const elemToRemove = nearest.el;
     });
   }
 
-  loadPublishedConfig().then(()=>{
+  // 无论配置有没有拉到，首屏都必须渲染出来：
+  // 之前失败时整个 then 分支被跳过，鱼缸会一直空白且没有任何提示。
+  async function bootstrapConfig(){
+    await syncPublishedConfig();
     const bounds = focusDurationBounds();
     minutes = Math.max(bounds.min, Math.min(bounds.max, minutes));
     remaining = minutes * 60;
@@ -2260,7 +2347,20 @@ const elemToRemove = nearest.el;
     renderShop();
     renderAquarium(AquariumData);
     updateDevStatus();
-  }).catch(()=>{});
+  }
+  bootstrapConfig();
+
+  const retryButton = document.getElementById("configNoticeRetry");
+  if(retryButton) retryButton.addEventListener("click", async () => {
+    retryButton.disabled = true;
+    retryButton.textContent = "重试中…";
+    const ok = await syncPublishedConfig();
+    retryButton.disabled = false;
+    retryButton.textContent = "重试";
+    if(ok){ renderShop(); renderAquarium(AquariumData); }
+  });
+  const closeButton = document.getElementById("configNoticeClose");
+  if(closeButton) closeButton.addEventListener("click", hideConfigNotice);
 
   window.addEventListener("pointerdown", unlockAudio, {capture:true, passive:true});
   window.addEventListener("keydown", unlockAudio, {once:true});
