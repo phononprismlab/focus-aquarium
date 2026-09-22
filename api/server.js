@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import multer from "multer";
 import { createRepository } from "./repository.js";
-import { UPLOAD_ROOT, MAX_UPLOAD_MB, AUDIO_EXTENSIONS, storeAudio, ensureUploadDir, resolveAudioPaths, currentDriver } from "./uploads.js";
+import { UPLOAD_ROOT, MAX_UPLOAD_MB, AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, storeAudio, ensureUploadDir, resolveAudioPaths, currentDriver } from "./uploads.js";
 import { resolveAllowList, createOriginChecker } from "./cors.js";
 import { validateStartRequest } from "./reward.js";
 import { createFocusSessionStore } from "./focus-session.js";
@@ -183,19 +183,23 @@ if (process.env.NODE_ENV !== "production") {
 // All /api/admin/* routes require the admin API key (when configured).
 app.use("/api/admin", requireAdminAuth);
 
+// 公开接口的字段里有 cloud:// 标识时，需要换成可播放 / 可显示的链接，
+// 否则前端 <img src> / <audio src> 会拿到 cloud:// 直接 404。
+// 音频和装点鱼缸商品都可能有此问题，统一在出库时解析。
+const PUBLIC_PATH_RESOLVE_TYPES = new Set(["audio", "decorations"]);
 for (const type of types) {
   app.get(`/api/admin/${type}`, async (req, res) => {
     try {
       const data = await records(type);
       // 云存储的 cloud:// 标识只对内使用，出库前换成可播放的临时链接。
-      res.json({ data: type === "audio" ? await resolveAudioPaths(data) : data });
+      res.json({ data: PUBLIC_PATH_RESOLVE_TYPES.has(type) ? await resolveAudioPaths(data) : data });
     } catch (error) { sendError(res, error); }
   });
   app.get(`/api/game/${type}`, async (req, res) => {
     try {
       const published = await (await getRepository()).list(type, true);
       const mapped = published.map(record => ({ ...record, data: record.publishedData || record.data }));
-      res.json({ data: type === "audio" ? await resolveAudioPaths(mapped) : mapped });
+      res.json({ data: PUBLIC_PATH_RESOLVE_TYPES.has(type) ? await resolveAudioPaths(mapped) : mapped });
     } catch (error) { sendError(res, error); }
   });
 }
@@ -236,7 +240,7 @@ app.post("/api/game/focus/complete", async (req, res) => {
 });
 
 // 音频上传：必须注册在 /api/admin/:type 之前，否则会被当成配置类型吃掉。
-const upload = multer({
+const audioUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: Math.max(1, MAX_UPLOAD_MB) * 1024 * 1024, files: 1 },
   fileFilter(req, file, callback) {
@@ -248,7 +252,27 @@ const upload = multer({
   }
 });
 
-const uploadSingle = (req, res, next) => upload.single("file")(req, res, error => {
+const imageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: Math.max(1, MAX_UPLOAD_MB) * 1024 * 1024, files: 1 },
+  fileFilter(req, file, callback) {
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    if (!IMAGE_EXTENSIONS.includes(ext)) {
+      return callback(new Error(`只支持图片文件：${IMAGE_EXTENSIONS.join(" ")}`));
+    }
+    callback(null, true);
+  }
+});
+
+const uploadSingle = (req, res, next) => audioUpload.single("file")(req, res, error => {
+  if (!error) return next();
+  const message = error.code === "LIMIT_FILE_SIZE"
+    ? `文件超过 ${MAX_UPLOAD_MB}MB 限制`
+    : (error.message || "上传失败");
+  res.status(400).json({ error: message });
+});
+
+const uploadImageSingle = (req, res, next) => imageUpload.single("file")(req, res, error => {
   if (!error) return next();
   const message = error.code === "LIMIT_FILE_SIZE"
     ? `文件超过 ${MAX_UPLOAD_MB}MB 限制`
@@ -269,7 +293,32 @@ app.post("/api/admin/assets", uploadSingle, async (req, res) => {
         driver: stored.driver,
         size: req.file.size,
         name: req.file.originalname,
-        fallbackError: stored.fallbackError || ""
+        // fallbackError 非空 = 云存储失败了，现在这个 path 只是容器本地磁盘上的临时文件，
+        // 实例重建即 404。后台据此拒绝把它写进配置。
+        fallbackError: stored.fallbackError || "",
+        fallbackCode: stored.fallbackCode || ""
+      }
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "上传失败" });
+  }
+});
+
+// 商品预览图上传：旧代码里 previewUpload 根本没走后端，保存的只是本地文件名（必然 404），
+// 所以后台"上传了"也看不到。这里走和音频一样的 cloudbase / 本地双驱动 + 失败兜底。
+app.post("/api/admin/assets/image", uploadImageSingle, async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "请选择要上传的图片文件" });
+    const stored = await storeAudio({ buffer: req.file.buffer, originalName: req.file.originalname, kind: "image" }, "images");
+    res.json({
+      data: {
+        url: stored.url || "",
+        path: stored.path,
+        driver: stored.driver,
+        size: req.file.size,
+        name: req.file.originalname,
+        fallbackError: stored.fallbackError || "",
+        fallbackCode: stored.fallbackCode || ""
       }
     });
   } catch (error) {

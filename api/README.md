@@ -25,6 +25,9 @@ npm test
 | `reward.test.js` | tiered reward maths, `HARD_MAX_MINUTES`, start-request validation |
 | `focus-session.test.js` | session TTL, pruning, replay protection, tolerance window |
 | `audio-categories.test.js` | audio config validation, plus the category helpers extracted from `index.html` / `admin.html` |
+| `shop-sound-items.test.js` | backend audio config → shop "白噪音" items: shop-side name/description/price must win, matched by id or by audio file name |
+| `ambient-audio.test.js` | `syncAmbientAudio` must not touch the player when the source did not change (reopening the shop used to restart the background noise) |
+| `image-upload.test.js` | `POST /api/admin/assets/image`: auth, multipart handling, non-image rejection, and that an image keeps its own extension instead of the audio `.mp3` fallback |
 | `cors.test.js` | origin parsing, trailing-slash normalisation, wildcard and `null` rules |
 | `health.test.js` | `/api/health` answers immediately even while the data layer is still initialising |
 | `bind-failure.test.js` | a failed `listen` must be loud: reports the real error code, does not print a misleading `listening`, and exits non-zero |
@@ -119,6 +122,39 @@ The image pins `node:22-bookworm-slim`, sets `NODE_ENV=production`, listens on `
 
 Uploaded audio is written to `uploads/` inside the container by default, which is lost on restart. Either set `STORAGE_DRIVER=cloudbase` (default whenever `CLOUDBASE_ENV_ID` is set) or mount a persistent volume at that path and point `UPLOAD_DIR` at it.
 
+## Upload storage, and what a failure looks like
+
+There are two upload routes, and they differ only in the allowed extensions and the target folder:
+
+| Route | Field | Extensions | Folder |
+| --- | --- | --- | --- |
+| `POST /api/admin/assets` | `file` | `AUDIO_EXTENSIONS` (`.mp3 .wav .ogg .m4a .aac .flac .webm`) | `sounds/` |
+| `POST /api/admin/assets/image` | `file` | `IMAGE_EXTENSIONS` (`.png .jpg .jpeg .gif .webp .svg .bmp .avif`) | `images/` |
+
+`POST /api/admin/assets` returns `data.fallbackError` **non-empty** when cloud storage was attempted and failed, and the file was instead written to the container's local disk. That local path (`/uploads/sounds/...`) only lives as long as the instance does — after a redeploy it is a guaranteed 404. The admin UI therefore refuses to write it into the audio config and keeps the previous value, so a failed upload never publishes a dead path.
+
+`POST /api/admin/assets/image` behaves the same way and is what the 商品预览图 picker uses. Before it existed the admin page only put the *local file name* into the preview field, so the saved `previewImage` was something like `myfish.png` with no upload behind it — a guaranteed 404 in the shop.
+
+> **Extension fallback is per kind.** `storedFileName(name, kind)` picks the fallback extension from the kind: unknown audio extensions become `.mp3`, unknown image extensions become `.png`. They used to share one code path, so an uploaded PNG was stored as `...png.mp3` — the static handler then served it as `audio/mpeg` and browsers refused to render it. `image-upload.test.js` locks this in.
+
+`data.fallbackCode` carries the underlying error code. It exists because `@cloudbase/node-sdk` hides the real reason twice over:
+
+- when `storage.getUploadMetadata` answers with an error payload, `uploadFile` destructures `data` off it and throws a bare `TypeError`, losing the code and message;
+- when the COS upload itself fails, `uploadFile` does not throw at all — it *resolves* an `{ code, message, requestId }` object, so a `fileID` check alone reports only "no fileID".
+
+So `saveCloudbase` probes `getUploadMetadata` after a failure and re-throws with the real `code` / `message` / `requestId` attached; `storeAudio` logs them and passes them through. If uploads fail, the server log line to read is:
+
+```
+云存储上传失败，已回落到本地存储（<code> | <message>） | requestId=...
+```
+
+Common causes, in the order worth checking:
+
+1. **The bucket has no RLS policy.** In PG mode a bucket with *zero* policies refuses every API access, and the console says so right on the bucket page: 「该存储桶未配置任何 RLS 策略。所有通过 API 的访问都将被拒绝。」 Add any one policy (a read-only `SELECT` policy is enough) and it takes effect within 1–3 minutes. `service_role` has `BYPASSRLS`, so server-side uploads keep working without a write policy.
+2. 云存储 not enabled for the env.
+3. The API key lacking storage permission.
+4. A wrong `CLOUDBASE_ENV_ID`.
+
 ## Endpoints
 
 - `GET /api/admin/decorations`
@@ -138,14 +174,16 @@ Uploaded audio is written to `uploads/` inside the container by default, which i
 - `PUT /api/admin/audio/audio`
 - `POST /api/admin/audio/audio/publish`
 - `POST /api/admin/assets` — multipart field `file`, audio only, `MAX_UPLOAD_MB` cap (default 15)
+- `POST /api/admin/assets/image` — multipart field `file`, images only, same cap; used for 商品预览图
 - `GET /api/game/decorations`
 - `GET /api/game/fish`
 - `GET /api/game/focus`
 - `GET /api/game/audio`
 - `GET /uploads/sounds/*` — uploaded audio, range requests supported
+- `GET /uploads/images/*` — uploaded 商品预览图
 - `GET /api/health`
 
 `GET /api/health` reports `storage` (driver), `repository` (`pending` / `ok` / `failed`), `cors` (`configured` / `fallback` / `all`) and `adminAuth` (`enabled` / `disabled`). It always answers 200 and **never waits on the data layer** — the repository connects to CloudBase RDB and seeds a dozen-odd rows over the network at boot, and a probe that blocks on that gets the whole version marked as a failed deployment even though the logs show the service listening. Read the `repository` field to see how the data layer is doing; the probe answer is not affected by it.
 
 Admin reads draft data. Game endpoints return only `publishedData`. Saving a published config keeps the previous published version until the publish endpoint is called.
-Audio configs store the permanent `cloud://` fileID; a playable URL is resolved on read.
+Audio configs store the permanent `cloud://` fileID; a playable URL is resolved on read. The same resolution runs for `audio` and `decorations` (`PUBLIC_PATH_RESOLVE_TYPES`), so a 商品预览图 stored as `cloud://...` is also turned into a usable URL on the way out — images need it just as much as audio does.

@@ -410,6 +410,8 @@
 .v02-preview{height:120px;border-radius:13px;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;overflow:hidden;background:linear-gradient(135deg,#a9dfe8,#d9f2ef);}
 .v02-preview:hover{filter:brightness(1.03);box-shadow:inset 0 0 0 2px rgba(77,138,140,.25)}
 .v02-preview-fish{font-size:48px;filter:drop-shadow(0 5px 4px rgba(0,0,0,.12));}
+/* 底色与 .v02-preview 的渐变一致：透明 PNG 透出来的是背景，不是底下那层 emoji。 */
+.v02-preview-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:13px;display:block;background:linear-gradient(135deg,#a9dfe8,#d9f2ef);}
 .v02-preview-plant{font-size:50px}.v02-preview-bg{width:100%;height:100%;background:linear-gradient(to bottom,#4e8fa8,#9fd7d7 70%,#dfcb92 71%)}
 .v02-preview-bg.night{background:linear-gradient(to bottom,#274c68,#427f91 68%,#6d6751 69%)}
 .v02-preview-sand{width:100%;height:100%;background:linear-gradient(to bottom,#9dd4dc 0 70%,#dfcb92 71%)}
@@ -1016,7 +1018,12 @@
     if(usable(decorationsResponse)){
       try{
         const decorations = await decorationsResponse.json();
-        if(decorations.data.length) SHOP_ITEMS = decorations.data.map(record => record.data);
+        if(decorations.data.length){
+          // 之前 CloudBase RDB 默认顺序没有保证，用户改了一条商品后它会飘到末尾。
+          // 现在锁死"按 id"排序，让 SHOP_ITEMS 自身也是有序的，便于调试和调试输出。
+          const items = decorations.data.map(record => record.data);
+          SHOP_ITEMS = sortShopItems(items);
+        }
       }catch(_){ failed.push("装饰"); }
     }
     if(usable(fishResponse)){
@@ -1080,34 +1087,77 @@
     const keys = audioCategoryKeys();
     return keys.includes("bgm") ? "bgm" : (keys[0] || "bgm");
   }
+  // 音频文件在配置里可能被写成 assets/...、/uploads/...、cloud://... 或完整链接，
+  // 只要文件名相同就认为是同一个文件。不归一化的话，同一个文件会被判成两个资源。
+  function resourceBasename(value){
+    const text = String(value || "").trim();
+    if(!text) return "";
+    const clean = text.split("?")[0].split("#")[0];
+    return clean.slice(clean.lastIndexOf("/") + 1).toLowerCase();
+  }
+  // 商品配置里的 resourcePath 后台保存后统一是数组，但旧存档里可能还是字符串，两种都要吃。
+  function itemResourcePaths(item){
+    const raw = item && item.resourcePath;
+    if(Array.isArray(raw)) return raw.filter(Boolean);
+    return raw ? [raw] : [];
+  }
   // 后台配置的背景音（属于背景分类、已启用、且有音频文件）→ 商店「白噪音」分类的商品。
-  // 价格/会员/描述优先沿用同 id 或同音频文件的旧商品，匹配不到则按免费处理。
+  // 名称/描述/价格/会员一律以「装点鱼缸配置」里的商品为准，音效管理里的名字只作兜底。
+  // 关联方式：同 id，或商品 resourcePath 里挂了同一个音频文件。
+  // 旧代码用 `item.resourcePath === sound.resourcePath` 直接比数组和字符串，永远匹配不上，
+  // 结果商品名和描述被音效管理里的名字与兜底文案顶掉。
+  // audioCategory 字段保留真实分类（bgm / prompt / sfx），给 ambientSoundCategory 用。
   function serverSoundItems(){
     if(!AUDIO_CONFIG || !Array.isArray(AUDIO_CONFIG.sounds)) return [];
     const ambientCategory = ambientCategoryKey();
+    const byId = new Map();
+    const byFile = new Map();
+    SHOP_ITEMS.filter(item => item && item.category === "sounds").forEach(item => {
+      if(item.id) byId.set(item.id, item);
+      itemResourcePaths(item).forEach(path => {
+        const base = resourceBasename(path);
+        if(base && !byFile.has(base)) byFile.set(base, item);
+      });
+    });
     return AUDIO_CONFIG.sounds
       .filter(sound => sound && sound.category === ambientCategory && sound.enabled !== false && sound.resourcePath)
       .map(sound => {
-        const legacy = SHOP_ITEMS.find(item => item.id === sound.id || item.resourcePath === sound.resourcePath) || {};
+        const base = resourceBasename(sound.resourcePath);
+        const legacy = byId.get(sound.id) || (base ? byFile.get(base) : null) || null;
         return {
           id: sound.id,
+          audioCategory: sound.category,
           category: "sounds",
-          name: sound.name || legacy.name || sound.id,
-          description: legacy.description || "来自后台音频配置的背景音",
-          previewImage: legacy.previewImage || "",
-          price: Number.isFinite(Number(legacy.price)) ? Number(legacy.price) : 0,
+          name: (legacy && legacy.name) || sound.name || sound.id,
+          // 商品里没配描述时留空，不要再塞一句占位文案把玩家自己写的内容盖掉。
+          description: legacy ? (legacy.description || "") : "来自后台音频配置的背景音",
+          previewImage: (legacy && legacy.previewImage) || "",
+          price: legacy && Number.isFinite(Number(legacy.price)) ? Number(legacy.price) : 0,
           resourcePath: sound.resourcePath,
-          isMemberOnly: legacy.isMemberOnly === true,
+          isMemberOnly: Boolean(legacy && legacy.isMemberOnly === true),
           maxInventory: 1,
           volume: Number(sound.volume)
         };
       });
   }
+  // 商品列表排序：现阶段按 id 排序（localeCompare 自动处理 fish001/fish002 这种纯字母数字）。
+  // 新品置前、置顶等规则以后单独立项，不混在这一条里。
+  // 没有 id 的商品视为异常数据，排在末尾，便于人工排查。
+  function sortShopItems(items){
+    return items.slice().sort((a, b) => {
+      const aid = a && a.id;
+      const bid = b && b.id;
+      if(!aid && !bid) return 0;
+      if(!aid) return 1;
+      if(!bid) return -1;
+      return String(aid).localeCompare(String(bid));
+    });
+  }
   // 商店统一数据源：背景音一律以后台音频配置为准，其余分类沿用商品配置。
   function currentShopItems(){
     const server = serverSoundItems();
-    if(!server.length) return SHOP_ITEMS;
-    return SHOP_ITEMS.filter(item => item.category !== "sounds").concat(server);
+    if(!server.length) return sortShopItems(SHOP_ITEMS);
+    return sortShopItems(SHOP_ITEMS.filter(item => item.category !== "sounds").concat(server));
   }
   // 商品 id 对应的视觉样式字段：背景/沙子用 css，鱼/水草用 class。
   const VISUAL_FIELD_BY_CATEGORY = { fish:"class", decorations:"class", backgrounds:"css", sands:"css" };
@@ -1454,6 +1504,10 @@
       const equipped=item.category==="fish"?previewCount>0: aquariumValue(TempAquariumData,item)===item.id;
       const d=document.createElement("div"); d.className="v02-item";
       let preview=`<div class="v02-preview" data-preview="${item.id}">`;
+      // 后台填了 previewImage 就用图；图加载失败时退回原有的 emoji/CSS 视觉。
+      if(item.previewImage){
+        preview+=`<img class="v02-preview-img" src="${escapeHtml(item.previewImage)}" alt="${escapeHtml(item.name)}" onerror="this.remove()">`;
+      }
       if(item.category==="fish"){
         preview+=`<div class="v02-preview-fish">${visualForItem("fish", item.id).emoji}</div>`;
       }else if(item.category==="decorations"){
@@ -1774,20 +1828,24 @@
 
   const FALLBACK_AUDIO_SRC = (window.FISHTANK_ASSET_BASE || '') + 'assets/sounds/water-ambient.mp3';
   const withAssetBase = path => /^(https?:)?\/\//i.test(path || "") ? path : (window.FISHTANK_ASSET_BASE || '') + (path || "");
-  // 后台分类开关与音量作为总控：关闭即静音，音量作为上限系数，再乘以玩家自己的滑块。
-  function categoryScale(key){
+  // 后台分类的音量是玩家音量滑块的**默认值**，不是上限。
+// 关闭分类 → 静音（return 0）；其余情况只把 enabled/disabled 反映出来，
+// 具体音量由 audioVolumes[key] / 100 决定 —— 玩家可以在默认值基础上自由拖动。
+// 旧代码里这里也乘了一次分类音量，会和 audioVolumes 双倍应用，把背景音压到几乎听不见。
+function categoryScale(key){
     const category = AUDIO_CONFIG && AUDIO_CONFIG.categories ? AUDIO_CONFIG.categories[key] : null;
     if(!category) return 1;
     if(category.enabled === false) return 0;
-    const volume = Number(category.volume);
-    if(!Number.isFinite(volume)) return 1;
-    return Math.max(0, Math.min(100, volume)) / 100;
+    return 1;
   }
   // 当前正在播放的背景音所属的分类（用于给它单独调音量）。
+  // 旧代码直接读 serverSoundItems 产出的 category，那个字段是商店分类 "sounds"，
+  // 与真实音频分类（bgm/prompt/sfx）对不上 → 调音面板的 bgm 滑块改不到当前背景音。
+  // 现在 serverSoundItems 多留了一个 audioCategory 字段专门给这里用。
   function ambientSoundCategory(){
     const list = serverSoundItems();
     const sound = list.find(item => item.id === currentAmbientId()) || list[0];
-    return (sound && sound.category) || ambientCategoryKey();
+    return (sound && sound.audioCategory) || ambientCategoryKey();
   }
   function currentAmbientId(){ return (TempAquariumData && TempAquariumData.ambientSound) || (AquariumData && AquariumData.ambientSound) || ""; }
   // 装点鱼缸里选中的背景音 → 对应音频文件；找不到就回落到第一个可用音效，再回落到内置文件。
@@ -1796,27 +1854,56 @@
     const sound = list.find(item => item.id === id) || list[0];
     return sound && sound.resourcePath ? withAssetBase(sound.resourcePath) : FALLBACK_AUDIO_SRC;
   }
+  // 同一个音源可能被写成相对路径、绝对路径或协议相对路径，直接比字符串会把
+  // 「同一个文件」判成「换了一首歌」，进而触发 pause/load 从头播放。统一归一化后再比。
+  function normalizeAudioSrc(src){
+    const value = String(src || "");
+    if(!value) return "";
+    try { return new URL(value, document.baseURI).href; } catch(_) { return value; }
+  }
   let ambientSrc = "";
+  // 后台配的音频文件可能已经失效（上传时云存储不可用、回落到了容器本地磁盘，
+  // 实例一重建文件就 404）。这时候退到内置音效，而不是让鱼缸彻底安静。
+  function fallbackAmbientAudio(){
+    if(!waterAudio) return;
+    if(normalizeAudioSrc(waterAudio.src) === normalizeAudioSrc(FALLBACK_AUDIO_SRC)) return;
+    ambientSrc = normalizeAudioSrc(FALLBACK_AUDIO_SRC);
+    waterAudio.src = FALLBACK_AUDIO_SRC;
+    waterAudio.load();
+    if(audioMuted) return;
+    const p = waterAudio.play();
+    if(p && typeof p.then === "function") p.then(() => fadeInWater(900)).catch(()=>{});
+  }
   function syncAmbientAudio(){
     const src = ambientSourceFor(currentAmbientId());
     if(!src) return;
+    const normalized = normalizeAudioSrc(src);
+    // 只有「真的换了音源」或「当前没在播」才需要动播放器。
+    // 旧代码每次配置同步都无条件 play() 再 fadeInWater()，而 fadeInWater 会先把音量清零再涨回来，
+    // 于是每次打开装点鱼缸弹窗（openShop → syncPublishedConfig → 这里）背景音都像从头来一遍。
+    let restarted = false;
     if(!waterAudio){
       waterAudio = new Audio(src);
       waterAudio.loop = true;
       waterAudio.preload = "auto";
       waterAudio.volume = 0;
       waterAudio.muted = audioMuted;
-      ambientSrc = src;
-    } else if(ambientSrc !== src){
-      ambientSrc = src;
+      waterAudio.onerror = fallbackAmbientAudio;
+      ambientSrc = normalized;
+      restarted = true;
+    } else if(ambientSrc !== normalized){
+      ambientSrc = normalized;
       waterAudio.pause();
       waterAudio.src = src;
       waterAudio.load();
       waterAudio.muted = audioMuted;
+      waterAudio.volume = 0;
+      restarted = true;
     }
     if(audioMuted){ waterAudio.volume = 0; return; }
+    if(!restarted && !waterAudio.paused) return;
     const p = waterAudio.play();
-    if(p && typeof p.then === "function") p.then(() => fadeInWater(1200)).catch(()=>{});
+    if(p && typeof p.then === "function") p.then(() => fadeInWater(restarted ? 1200 : 700)).catch(()=>{});
   }
 
   // 取分类的增益节点，没有就现建一个接到 master 上。分类随时可能新增，不能预先写死。
@@ -1884,7 +1971,10 @@
       waterAudio.preload = "auto";
       waterAudio.volume = 0;
       waterAudio.muted = audioMuted;
-      ambientSrc = waterAudio.src;
+      waterAudio.onerror = fallbackAmbientAudio;
+      // 记录归一化后的地址，否则这里存绝对地址、syncAmbientAudio 比相对地址，
+      // 第一次同步必然被判定成"换了音源"而重头播放。
+      ambientSrc = normalizeAudioSrc(waterAudio.src);
     }
 
     if(audioMuted) return;
@@ -1916,7 +2006,8 @@
       waterAudio.loop = true;
       waterAudio.preload = "auto";
       waterAudio.volume = 0;
-      ambientSrc = waterAudio.src;
+      waterAudio.onerror = fallbackAmbientAudio;
+      ambientSrc = normalizeAudioSrc(waterAudio.src);
     }
 
     // 这是用户手势触发的真正解锁点。

@@ -277,7 +277,7 @@
 					: failed.map(item => `${item.label}加载失败（${item.reason}）`).join("；"));
 			}
 		}
-		function showToast(message) { toast.textContent = message; toast.classList.add("show"); clearTimeout(showToast.timer); showToast.timer = setTimeout(() => toast.classList.remove("show"), 2400); }
+		function showToast(message, duration = 2400) { toast.textContent = message; toast.classList.add("show"); clearTimeout(showToast.timer); showToast.timer = setTimeout(() => toast.classList.remove("show"), duration); }
 		function pageHeader(kicker, title, description, action = "") { return `<div class="topbar"><div><div class="eyebrow">${kicker}</div><h2>${title}</h2><p class="subtitle">${description}</p></div>${action}</div>`; }
 		function render() { document.querySelectorAll(".nav-item").forEach(item => item.classList.toggle("active", item.dataset.module === state.module)); renderModule(); }
 		function renderModule() {
@@ -297,12 +297,66 @@
 		function renderDecorationForm(index = null) {
 			const item = index === null ? { id: "", category: "decorations", name: "", description: "", previewImage: "", resourcePath: [], tags: "", price: 0, isMemberOnly: false, maxInventory: 1 } : state.decorations[index];
 			editingIndex = index; editingType = "decorations";
-			main.innerHTML = pageHeader("DECORATION CONFIG", index === null ? "新建商品" : "编辑商品", "字段保持与旧版 SHOP_ITEMS 兼容，保存后可在列表中发布。", `<button class="button secondary" id="backList">返回列表</button>`) + `<section class="panel form-panel"><div class="form-body"><form id="decorationForm"><div class="form-grid"><div class="field"><label>id <span>*</span></label><input name="id" value="${esc(item.id)}" required></div><div class="field"><label>category <span>*</span></label><select name="category">${SHOP_CATEGORIES.map(category => `<option value="${category.value}" ${item.category === category.value ? "selected" : ""}>${category.label}</option>`).join("")}</select></div><div class="field"><label>name <span>*</span></label><input name="name" value="${esc(item.name)}" required></div><div class="field"><label>price</label><input name="price" type="number" min="0" value="${item.price}"></div><div class="field full"><label>description</label><textarea name="description">${esc(item.description)}</textarea></div><div class="field"><label>previewImage</label><div class="upload-row"><label class="file-button">上传预览图<input id="previewUpload" type="file" accept="image/*"></label><span class="hint">只允许一个文件</span></div><div class="file-list" id="previewFiles">${item.previewImage ? `<span class="file-chip">${esc(item.previewImage)}</span>` : ""}</div></div><div class="field"><label>resourcePath</label><div class="upload-row"><label class="file-button">上传资源<input id="resourceUpload" type="file" multiple></label><span class="hint">保存为资源数组；装饰类第 1 个为后景、第 2 个为前景</span></div><div class="file-list" id="resourceFiles">${resourceList(item.resourcePath).map((file, resourceIndex) => `<span class="file-chip">${item.category === "decorations" && resourceIndex < 2 ? (resourceIndex === 0 ? "后景：" : "前景：") : "资源："}${esc(file)}</span>`).join("")}</div></div><div class="field full"><label>tags</label><input name="tags" value="${esc(item.tags)}" placeholder="多个标签用逗号分隔"></div><div class="field"><label>maxInventory</label><input name="maxInventory" type="number" min="0" value="${item.maxInventory}"></div><label class="check"><input name="isMemberOnly" type="checkbox" ${item.isMemberOnly ? "checked" : ""}> isMemberOnly</label></div><div class="form-foot"><button type="button" class="button secondary" id="cancelForm">取消</button><button class="button primary">保存</button></div></form></div></section>`;
+			// 音效管理里已上传的音频，直接挂到这个商品的 resourcePath 上。
+			// 这是两处配置唯一的关联点：挂同一个文件，商店才会用本页的名称和描述。
+			const resourceOptions = audioResourceOptions();
+			main.innerHTML = pageHeader("DECORATION CONFIG", index === null ? "新建商品" : "编辑商品", "字段保持与旧版 SHOP_ITEMS 兼容，保存后可在列表中发布。", `<button class="button secondary" id="backList">返回列表</button>`) + `<section class="panel form-panel"><div class="form-body"><form id="decorationForm"><div class="form-grid"><div class="field"><label>id <span>*</span></label><input name="id" value="${esc(item.id)}" required></div><div class="field"><label>category <span>*</span></label><select name="category">${SHOP_CATEGORIES.map(category => `<option value="${category.value}" ${item.category === category.value ? "selected" : ""}>${category.label}</option>`).join("")}</select></div><div class="field"><label>name <span>*</span></label><input name="name" value="${esc(item.name)}" required></div><div class="field"><label>price</label><input name="price" type="number" min="0" value="${item.price}"></div><div class="field full"><label>description</label><textarea name="description">${esc(item.description)}</textarea></div><div class="field"><label>previewImage</label><div class="upload-row"><label class="file-button">上传预览图<input id="previewUpload" type="file" accept="image/*"></label><span class="hint">只允许一个文件</span></div><div class="file-list" id="previewFiles">${item.previewImage ? `<span class="file-chip" data-path="${esc(item.previewImage)}">${esc(item.previewImage)}</span>` : ""}</div></div><div class="field"><label>resourcePath</label><div class="upload-row"><label class="file-button">上传资源<input id="resourceUpload" type="file" multiple></label><select id="resourcePick" style="flex:1;min-width:260px">${resourceOptions}</select></div><span class="hint">保存为资源数组；装饰类第 1 个为后景、第 2 个为前景。音效类商品挂上音效管理里的同一个音频文件后，商店就会用本页的名称与描述</span><div class="file-list" id="resourceFiles">${resourceList(item.resourcePath).map((file, resourceIndex) => `<span class="file-chip" data-path="${esc(file)}">${item.category === "decorations" && resourceIndex < 2 ? (resourceIndex === 0 ? "后景：" : "前景：") : "资源："}${esc(file)}</span>`).join("")}</div></div><div class="field full"><label>tags</label><input name="tags" value="${esc(item.tags)}" placeholder="多个标签用逗号分隔"></div><div class="field"><label>maxInventory</label><input name="maxInventory" type="number" min="0" value="${item.maxInventory}"></div><label class="check"><input name="isMemberOnly" type="checkbox" ${item.isMemberOnly ? "checked" : ""}> isMemberOnly</label></div><div class="form-foot"><button type="button" class="button secondary" id="cancelForm">取消</button><button class="button primary">保存</button></div></form></div></section>`;
 			document.getElementById("backList").onclick = () => { editingIndex = null; renderDecorationList(); };
 			document.getElementById("cancelForm").onclick = () => renderDecorationList();
-			document.getElementById("previewUpload").onchange = event => { if (event.target.files[0]) document.getElementById("previewFiles").innerHTML = `<span class="file-chip">${esc(event.target.files[0].name)}</span>`; };
-			document.getElementById("resourceUpload").onchange = event => { const category = event.target.form.elements.category.value; document.getElementById("resourceFiles").innerHTML = Array.from(event.target.files).map((file, resourceIndex) => `<span class="file-chip">${category === "decorations" && resourceIndex < 2 ? (resourceIndex === 0 ? "后景：" : "前景：") : "资源："}${esc(file.name)}</span>`).join(""); };
-			document.getElementById("decorationForm").onsubmit = async event => { event.preventDefault(); const data = formData(event.target); if (state.decorations.some((decoration, decorationIndex) => decoration.id === data.id && decorationIndex !== editingIndex)) { showToast("保存失败，id重复"); return; } data.resourcePath = Array.from(document.querySelectorAll("#resourceFiles .file-chip")).map(chip => chip.textContent.replace(/^(后景|前景|资源)：/, "")); data.previewImage = document.querySelector("#previewFiles .file-chip")?.textContent || ""; try { const response = await apiRequest(`/admin/decorations${editingIndex === null ? "" : `/${encodeURIComponent(data.id)}`}`, { method: editingIndex === null ? "POST" : "PUT", body: JSON.stringify(data) }); const saved = { ...response.data.data, published: editingIndex === null ? response.data.published : false, dirty: editingIndex !== null || !response.data.published }; if (editingIndex === null) state.decorations.push(saved); else state.decorations[editingIndex] = saved; showToast("商品已保存，等待发布"); renderDecorationList(); } catch (error) { showToast(`保存失败：${error.message}`); } };
+			document.getElementById("previewUpload").onchange = async event => {
+				const file = event.target.files && event.target.files[0];
+				if (!file) return;
+				event.target.value = "";
+				showToast(`正在上传预览图 ${file.name}…`);
+				try {
+					const form = new FormData();
+					form.append("file", file);
+					const headers = {};
+					if (adminKey) headers["x-admin-key"] = adminKey;
+					const response = await fetch(`${API_BASE}/admin/assets/image`, { method: "POST", body: form, headers });
+					const body = await response.json();
+					if (!response.ok) throw new Error((body && body.error) || "上传失败");
+					// 云存储失败时本地路径同样不能写进配置：实例一重建就没了，发布出去是必然 404。
+					if (body.data.fallbackError) {
+						showToast(`预览图未保存：${body.data.fallbackError}${body.data.fallbackCode ? `（${body.data.fallbackCode}）` : ""}。`, 9000);
+						return;
+					}
+					// 一个商品只有一个预览图，直接替换。
+					const list = document.getElementById("previewFiles");
+					list.innerHTML = "";
+					const chip = document.createElement("span");
+					chip.className = "file-chip";
+					chip.dataset.path = body.data.url || body.data.path;
+					chip.textContent = body.data.url || body.data.path;
+					list.appendChild(chip);
+					showToast(`已上传预览图 ${file.name}，记得保存并发布`);
+				} catch (error) {
+					showToast(`预览图上传失败：${error.message}`);
+				}
+			};
+			// 上传与「从音效管理选择」都往资源列表里追加，避免先选了音效再传文件时把已选资源冲掉。
+			const resourcePrefix = resourceIndex => document.getElementById("decorationForm").elements.category.value === "decorations" && resourceIndex < 2 ? (resourceIndex === 0 ? "后景：" : "前景：") : "资源：";
+			const addResourceChip = (path, label) => {
+				const list = document.getElementById("resourceFiles");
+				const exists = Array.from(list.querySelectorAll(".file-chip")).some(chip => (chip.dataset.path || chip.textContent.replace(/^(后景|前景|资源)：/, "")) === path);
+				if (exists) { showToast(`该资源已在列表中：${path}`); return; }
+				const chip = document.createElement("span");
+				chip.className = "file-chip";
+				chip.dataset.path = path;
+				chip.textContent = `${label}${path}`;
+				list.appendChild(chip);
+			};
+			document.getElementById("resourceUpload").onchange = event => {
+				Array.from(event.target.files).forEach((file, resourceIndex) => addResourceChip(file.name, resourcePrefix(resourceIndex)));
+				event.target.value = "";
+			};
+			document.getElementById("resourcePick").onchange = event => {
+				const path = event.target.value;
+				event.target.value = "";
+				if (!path) return;
+				addResourceChip(path, resourcePrefix(99));
+			};
+			document.getElementById("decorationForm").onsubmit = async event => { event.preventDefault(); const data = formData(event.target); if (state.decorations.some((decoration, decorationIndex) => decoration.id === data.id && decorationIndex !== editingIndex)) { showToast("保存失败，id重复"); return; } data.resourcePath = Array.from(document.querySelectorAll("#resourceFiles .file-chip")).map(chip => chip.dataset.path || chip.textContent.replace(/^(后景|前景|资源)：/, "")).filter(Boolean); data.previewImage = document.querySelector("#previewFiles .file-chip")?.dataset.path || document.querySelector("#previewFiles .file-chip")?.textContent || ""; try { const response = await apiRequest(`/admin/decorations${editingIndex === null ? "" : `/${encodeURIComponent(data.id)}`}`, { method: editingIndex === null ? "POST" : "PUT", body: JSON.stringify(data) }); const saved = { ...response.data.data, published: editingIndex === null ? response.data.published : false, dirty: editingIndex !== null || !response.data.published }; if (editingIndex === null) state.decorations.push(saved); else state.decorations[editingIndex] = saved; showToast("商品已保存，等待发布"); renderDecorationList(); } catch (error) { showToast(`保存失败：${error.message}`); } };
 		}
 		function renderFishList() {
 			main.innerHTML = pageHeader("FISH ASSEMBLY", "水产装配", "配置鱼种资源、运动表现与投喂反馈。", `<button class="button primary" id="newFish">＋ 新建鱼种</button>`) + `<section class="panel"><div class="panel-head"><div><h3>已配置鱼种</h3><p>fishid 必须唯一</p></div></div><div class="table-wrap"><table><thead><tr><th>鱼种</th><th>资源</th><th>运动代码</th><th>缩放范围</th><th>发布状态</th><th>操作</th></tr></thead><tbody>${state.fish.map((item, index) => `<tr><td><div class="item-name">${esc(item.name)}</div><div class="item-id">${esc(item.fishid)}</div></td><td>${esc(item.resourcePath)}</td><td>${esc(item.movementCode)}</td><td>${item.scaleMin} - ${item.scaleMax}</td><td><span class="badge ${item.dirty ? "draft" : "published"}">${item.dirty ? "有修改，待发布" : "已发布"}</span></td><td><div class="actions"><button class="link-button edit-fish" data-index="${index}">编辑</button><button class="button publish" data-index="${index}" ${item.dirty ? "" : "disabled"}>发布</button><button class="link-button delete delete-fish" data-index="${index}">删除</button></div></td></tr>`).join("")}</tbody></table></div></section>`;
@@ -342,6 +396,20 @@
 		}
 		function tierTemplate(tier, index) { return `<div class="tier-row"><div class="field"><label>id</label><input value="${esc(tier.id)}"></div><div class="field"><label>endMinute</label><input type="number" min="0" value="${tier.endMinute}"></div><div class="field"><label>normalBubblePerMinute</label><input type="number" min="0" value="${tier.normalBubblePerMinute}"></div><div class="field"><label>memberBubblePerMinute</label><input type="number" min="0" value="${tier.memberBubblePerMinute}"></div><button class="icon-button remove-tier" data-index="${index}" title="删除梯度">×</button></div>`; }
 		const audioCategoryLabel = key => state.audio?.categories?.[key]?.label || DEFAULT_AUDIO.categories[key]?.label || key;
+		// 「装点鱼缸配置」里的商品可以直接挂载音效管理里已上传的音频文件。
+		// 只列 resourcePath 非空的（没上传过的音效挂上去等于没有声音），并按路径去重。
+		// 两处配置就靠这个 resourcePath 关联：挂上同一个文件，商店商品名/描述才生效。
+		function audioResourceOptions() {
+			const sounds = Array.isArray(state.audio?.sounds) ? state.audio.sounds : [];
+			const seen = new Set();
+			const options = sounds.filter(sound => {
+				const path = String((sound && sound.resourcePath) || "").trim();
+				if (!path || seen.has(path)) return false;
+				seen.add(path);
+				return true;
+			}).map(sound => `<option value="${esc(sound.resourcePath)}">${esc(sound.name || sound.id)}（${esc(audioCategoryLabel(sound.category))}）· ${esc(sound.resourcePath)}</option>`).join("");
+			return options || `<option value="">（音效管理里还没有已上传的音频）</option>`;
+		}
 		// 分类不再固定，随时可能被增删，凡是需要分类清单的地方都走这里。
 		// 配置异常为空时回落到内置分类，避免出现没有分类可选、无法恢复的死局。
 		const audioCategoryKeys = () => {
@@ -383,10 +451,17 @@
 					const response = await fetch(`${API_BASE}/admin/assets`, { method: "POST", body: form, headers });
 					const body = await response.json();
 					if (!response.ok) throw new Error((body && body.error) || "上传失败");
+					// 云存储失败时后端会回落到容器本地磁盘，那个地址只在当前实例活着时有效，
+					// 实例一重建就 404。所以这里绝不把它写进配置 —— 保持原值（默认音效），
+					// 否则发布出去的是一段必然失效的路径。
+					if (body.data.fallbackError) {
+						input.value = "";
+						showToast(`上传未保存：${body.data.fallbackError}${body.data.fallbackCode ? `（${body.data.fallbackCode}）` : ""}。音效配置保持原值未改动，请先解决云存储问题再上传。`, 9000);
+						return;
+					}
 					pathInput.value = body.data.url || body.data.path;
 					markAudioDirty();
 					showToast(`已上传 ${file.name}（${(body.data.size / 1048576).toFixed(2)}MB）到${body.data.driver === "cloudbase" ? "云存储" : "本地"}，记得保存并发布`);
-					if (body.data.fallbackError) showToast(`云存储不可用，已存本地：${body.data.fallbackError}`);
 				} catch (error) {
 					showToast(`上传失败：${error.message}`);
 				}

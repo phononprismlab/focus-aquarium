@@ -99,7 +99,7 @@ const consts = [
   extractConst(source, "audioStorageKey"),
   extractConst(source, "audioVolumes")
 ].join("\n");
-const funcs = ["audioCategoryKeys", "audioCategoryLabel", "readStoredVolume", "syncAudioVolumeKeys", "escapeHtml", "ambientCategoryKey"]
+const funcs = ["audioCategoryKeys", "audioCategoryLabel", "readStoredVolume", "syncAudioVolumeKeys", "escapeHtml", "ambientCategoryKey", "categoryScale"]
   .map(name => extractFunction(source, name))
   .join("\n");
 
@@ -108,7 +108,7 @@ function buildSandbox(audioConfig, stored = {}) {
   const localStorage = {
     getItem: key => (Object.prototype.hasOwnProperty.call(stored, key) ? String(stored[key]) : null)
   };
-  const factory = new Function("AUDIO_CONFIG", "localStorage", `${consts}\n${funcs}\nreturn { audioCategoryKeys, audioCategoryLabel, readStoredVolume, syncAudioVolumeKeys, escapeHtml, ambientCategoryKey, audioVolumes };`);
+  const factory = new Function("AUDIO_CONFIG", "localStorage", `${consts}\n${funcs}\nreturn { audioCategoryKeys, audioCategoryLabel, readStoredVolume, syncAudioVolumeKeys, escapeHtml, ambientCategoryKey, categoryScale, audioVolumes };`);
   return factory(audioConfig, localStorage);
 }
 
@@ -193,6 +193,25 @@ chk("分类模板展示 key", categoryHtml.includes("key：voice"), true);
 const adminFallback = adminFactory({ audio: { categories: {}, sounds: [] } }, DEFAULT_AUDIO, adminEsc);
 chk("空配置时回落到内置分类", adminFallback.audioCategoryKeys(), ["bgm"]);
 chk("空配置时标签回落内置", adminFallback.audioCategoryLabel("bgm"), "背景白噪音");
+
+// categoryScale（Bug 6：后台分类音量「算默认值」，不做上限缩放）
+// 旧实现会把后台 category.volume 当成乘数（38 → 0.38），玩家滑块实际被二次压低；
+// 现在 volume 只是滑块默认值，categoryScale 只表达「分类被关掉就静音」。
+console.log("--- categoryScale（Bug 6：后台音量算默认值）---");
+const scaleConfig = {
+  categories: {
+    bgm: { label: "背景白噪音", enabled: true, volume: 38 },
+    sfx: { label: "交互音效", enabled: false, volume: 80 },
+    prompt: { label: "提示音", enabled: true, volume: 100 }
+  },
+  sounds: []
+};
+const scaleSandbox = buildSandbox(scaleConfig);
+chk("启用分类不受后台音量缩放影响", scaleSandbox.categoryScale("bgm"), 1);
+chk("禁用分类为 0（静音）", scaleSandbox.categoryScale("sfx"), 0);
+chk("另一个启用分类也是 1", scaleSandbox.categoryScale("prompt"), 1);
+chk("未配置的分类为 1（不阻断播放）", scaleSandbox.categoryScale("nonexistent"), 1);
+chk("旧实现曾返回 0.38（后台音量 38/100），现在必须是 1", scaleSandbox.categoryScale("bgm") !== 0.38, true);
 
 console.log("----");
 console.log(`audio-categories.test: PASS=${pass} FAIL=${fail}`);
