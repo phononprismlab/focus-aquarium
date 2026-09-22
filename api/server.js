@@ -1,5 +1,6 @@
 import cors from "cors";
 import express from "express";
+import os from "node:os";
 import path from "node:path";
 import multer from "multer";
 import { createRepository } from "./repository.js";
@@ -295,9 +296,48 @@ app.post("/api/admin/:type/:id/publish", async (req, res) => {
   } catch (error) { sendError(res, error); }
 });
 
-app.listen(port, "0.0.0.0", () => {
+// 启动自检：绑定成功之后，用回环地址和容器自己的网卡地址各打一次 /api/health，
+// 把结果写进启动日志。存在的意义是把两种完全不同的"部署失败"区分开：
+//   1) 应用根本没监听成功 —— 自检本身就是失败
+//   2) 应用在正常监听，但平台的探针够不着 —— 自检成功，而平台仍报 connection refused
+// 线上长期卡在第 2 种状态：启动日志说 listening，平台探针说 connection refused，
+// 两边说法矛盾，只有平台日志时只能靠猜。自检失败不影响服务，仅记录。
+async function selfCheck(server) {
+  try {
+    const address = server.address();
+    if (!address || typeof address !== "object") {
+      console.log(`启动自检：监听地址异常（${String(address)}）`);
+      return;
+    }
+    console.log(`启动自检：已绑定 ${address.address}:${address.port}（family ${address.family}）`);
+
+    // 容器里真正要能通的是网卡地址（平台的探针打的就是它），回环地址只是对照。
+    const hosts = ["127.0.0.1"];
+    for (const list of Object.values(os.networkInterfaces())) {
+      for (const item of list || []) {
+        if (item.family === "IPv4" && !item.internal) hosts.push(item.address);
+      }
+    }
+
+    for (const host of hosts) {
+      const url = `http://${host}:${address.port}/api/health`;
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
+        console.log(`启动自检：${url} -> ${res.status}`);
+      } catch (error) {
+        const code = (error && error.cause && error.cause.code) || error.name || "unknown";
+        console.log(`启动自检：${url} -> 失败（${code}）`);
+      }
+    }
+  } catch (error) {
+    console.log(`启动自检本身出错：${error && error.message ? error.message : error}`);
+  }
+}
+
+const server = app.listen(port, "0.0.0.0", () => {
   console.log(`Fishtank API listening on port ${port}`);
   console.log(`CORS 来源（${originsSource === "env" ? "来自 CORS_ORIGINS" : "内置兜底名单"}）：${allowAllOrigins ? "*（全部放行）" : allowedOrigins.join(", ")}`);
   console.log(`管理接口鉴权：${adminApiKey ? "已启用（x-admin-key）" : "未启用 —— 仅限本地开发，生产环境会拒绝启动"}`);
   warnWeakAdminKey(adminApiKey);
+  void selfCheck(server);
 });

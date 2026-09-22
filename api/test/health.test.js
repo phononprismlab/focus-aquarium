@@ -98,6 +98,16 @@ try {
     console.log(`     数据层最终状态：${settled.body.repository}`);
     chkTrue("数据层失败后探针仍为 200", settled.status === 200, `status=${settled.status}`);
     chkTrue("启动日志里有 listening（对照用）", logs.includes("listening on port"), "");
+
+    // 启动自检是区分「应用没监听」和「平台探不到」的唯一依据，不能悄悄失效。
+    const logDeadline = Date.now() + 3000;
+    while (Date.now() < logDeadline && !/启动自检：http[^\n]*-> 200/.test(logs)) {
+      await new Promise(r => setTimeout(r, 100));
+    }
+    chkTrue("启动日志含绑定详情", logs.includes("启动自检：已绑定"), "");
+    chkTrue("启动自检至少一次拿到 200", /启动自检：http[^\n]*-> 200/.test(logs), "");
+    const selfCheckLines = logs.split("\n").filter(line => line.includes("启动自检")).map(line => line.trim());
+    selfCheckLines.forEach(line => console.log(`     ${line}`));
   }
 } finally {
   server.kill();
