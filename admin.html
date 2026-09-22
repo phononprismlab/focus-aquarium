@@ -22,7 +22,8 @@
 		button, input, select, textarea { font: inherit; }
 		button { cursor: pointer; }
 		.app { min-height: 100vh; display: flex; }
-		.sidebar { width: 248px; flex: 0 0 248px; padding: 28px 18px; background: #123d42; color: #fff; position: sticky; top: 0; height: 100vh; }
+		.sidebar { width: 248px; flex: 0 0 248px; padding: 28px 18px; background: #123d42; color: #fff; position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; }
+		.nav-list { flex: 1; }
 		.brand { padding: 4px 14px 30px; }
 		.brand-mark { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 12px; background: var(--yellow); color: var(--ink); font-size: 20px; margin-bottom: 13px; }
 		.brand h1 { margin: 0; font-size: 19px; letter-spacing: .04em; }
@@ -91,8 +92,23 @@
 		.icon-button { width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 7px; background: white; color: var(--coral); font-size: 18px; }
 		.icon-button:hover { background: #fff3ee; }
 		.section-title { margin: 25px 0 12px; font-size: 14px; }
+		.volume-row { display: flex; align-items: center; gap: 11px; }
+		.volume-row input[type="range"] { padding: 0; border: 0; box-shadow: none; accent-color: var(--teal); }
+		.volume-row input[type="range"]:focus { box-shadow: none; }
+		.volume-value { min-width: 32px; text-align: right; color: var(--teal); font-weight: 700; font-size: 13px; }
+		.audio-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) 38px; gap: 12px; align-items: end; padding-bottom: 15px; margin-bottom: 15px; border-bottom: 1px solid var(--line); }
+		.audio-row .field { min-width: 0; gap: 4px; }
+		.audio-row .field.full { grid-column: 1 / -2; }
+		.audio-row .check { padding-top: 0; }
 		.toast { position: fixed; right: 25px; bottom: 25px; z-index: 5; padding: 12px 17px; border-radius: 8px; color: white; background: var(--ink); box-shadow: var(--shadow); opacity: 0; transform: translateY(10px); pointer-events: none; transition: .25s; }
 		.toast.show { opacity: 1; transform: translateY(0); }
+		.key-section { margin-top: auto; padding: 16px 14px 4px; border-top: 1px solid rgba(255,255,255,.12); }
+		.key-input { width: 100%; border: 1px solid rgba(255,255,255,.2); border-radius: 7px; background: rgba(0,0,0,.15); color: #fff; padding: 8px 10px; font-size: 13px; outline: none; }
+		.key-input::placeholder { color: #80aaa5; }
+		.key-input:focus { border-color: var(--yellow); }
+		.key-btn { width: 100%; margin-top: 8px; border: 0; border-radius: 7px; padding: 8px; font-weight: 700; background: var(--teal); color: white; }
+		.key-btn:hover { background: var(--teal-dark); }
+		.key-btn.connected { background: #2d7a55; }
 		@media (max-width: 760px) {
 			.app { display: block; }
 			.sidebar { width: 100%; height: auto; position: static; padding: 14px; }
@@ -127,11 +143,17 @@
 			<nav class="nav-list" id="navList">
 				<button class="nav-item active" data-module="decorations"><span class="nav-icon">✦</span>装点鱼缸配置</button>
 				<button class="nav-item" data-module="fish"><span class="nav-icon">◉</span>水产装配</button>
-				<button class="nav-item" data-module="focus"><span class="nav-icon">◌</span>专注配置</button>
-				<button class="nav-item" data-module="events"><span class="nav-icon">◇</span>事件设置 <span class="reserved">预留</span></button>
+			<button class="nav-item" data-module="focus"><span class="nav-icon">◌</span>专注配置</button>
+			<button class="nav-item" data-module="audio"><span class="nav-icon">♪</span>音效管理</button>
+			<button class="nav-item" data-module="events"><span class="nav-icon">◇</span>事件设置 <span class="reserved">预留</span></button>
 				<button class="nav-item" data-module="payment"><span class="nav-icon">▣</span>付费配置 <span class="reserved">预留</span></button>
-			</nav>
-		</aside>
+		</nav>
+		<div class="key-section">
+			<div class="nav-label">管理密钥</div>
+			<input type="password" id="adminKeyInput" class="key-input" placeholder="输入管理密钥">
+			<button class="key-btn" id="adminKeyBtn">连接</button>
+		</div>
+	</aside>
 		<main class="main" id="main"></main>
 	</div>
 	<div class="toast" id="toast"></div>
@@ -159,6 +181,20 @@
 			{ id: "sound001", category: "sounds", name: "海水白噪音", description: "轻柔的水下环境声，让专注时的鱼缸更加安静。", previewImage: "assets/sounds/sound001_preview.webp", price: 25, resourcePath: "assets/sounds/sound001.mp3", isMemberOnly: false, maxInventory: 1 },
 			{ id: "sound002", category: "sounds", name: "轻柔气泡声", description: "细碎轻盈的气泡声，为专注时光增加一点流动感。", previewImage: "assets/sounds/sound002_preview.webp", price: 40, resourcePath: "assets/sounds/sound002.mp3", isMemberOnly: true, maxInventory: 1 }
 		];
+		const DEFAULT_AUDIO = {
+			categories: {
+				bgm: { label: "背景白噪音", enabled: true, volume: 38 },
+				prompt: { label: "提示音", enabled: true, volume: 100 },
+				sfx: { label: "交互音效", enabled: true, volume: 100 }
+			},
+			sounds: [
+				{ id: "water-ambient", name: "海水白噪音", category: "bgm", enabled: true, volume: 100, resourcePath: "assets/sounds/water-ambient.mp3", loop: true },
+				{ id: "focus-start", name: "开始专注", category: "prompt", enabled: true, volume: 100, resourcePath: "" },
+				{ id: "focus-complete", name: "专注完成", category: "prompt", enabled: true, volume: 100, resourcePath: "" },
+				{ id: "feed", name: "投喂饲料", category: "sfx", enabled: true, volume: 100, resourcePath: "" },
+				{ id: "fish-startle", name: "鱼儿受惊", category: "sfx", enabled: true, volume: 100, resourcePath: "" }
+			]
+		};
 		const state = {
 			module: "decorations",
 			decorations: OLD_SHOP_ITEMS.map(item => ({ ...item, resourcePath: item.resourcePath ? [item.resourcePath] : [], tags: "", published: true, dirty: false })),
@@ -170,12 +206,15 @@
 				{ id: "tier-1", endMinute: 25, normalBubblePerMinute: 1, memberBubblePerMinute: 2 },
 				{ id: "tier-2", endMinute: 60, normalBubblePerMinute: 2, memberBubblePerMinute: 3 },
 				{ id: "tier-3", endMinute: 120, normalBubblePerMinute: 3, memberBubblePerMinute: 5 }
-			]}
+			]},
+			audio: JSON.parse(JSON.stringify(DEFAULT_AUDIO))
 		};
 		let editingIndex = null;
 		let editingType = null;
 		let focusPublished = true;
 		let focusDirty = false;
+		let audioPublished = true;
+		let audioDirty = false;
 		const API_BASE = window.FISHTANK_API_BASE || "https://focus-aquarium-api-316509-5-1491495221.sh.run.tcloudbase.com/api";
 
 		const main = document.getElementById("main");
@@ -183,8 +222,15 @@
 		const categoryLabel = value => SHOP_CATEGORIES.find(category => category.value === value)?.label || value;
 		const resourceList = value => Array.isArray(value) ? value : (value ? [value] : []);
 		const esc = value => String(value ?? "").replace(/[&<>\"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[char]));
+		let adminKey = sessionStorage.getItem("fishtank_admin_key") || "";
+		const adminKeyInput = document.getElementById("adminKeyInput");
+		const adminKeyBtn = document.getElementById("adminKeyBtn");
+		if (adminKey) { adminKeyInput.value = adminKey; adminKeyBtn.textContent = "已连接"; adminKeyBtn.classList.add("connected"); }
 		async function apiRequest(path, options = {}) {
-			const response = await fetch(`${API_BASE}${path}`, { headers: { "Content-Type": "application/json" }, ...options });
+			const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+			if (adminKey) headers["x-admin-key"] = adminKey;
+			const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+			if (response.status === 401) { adminKeyBtn.classList.remove("connected"); adminKeyBtn.textContent = "连接"; throw new Error("管理密钥无效或缺失"); }
 			const body = response.status === 204 ? null : await response.json();
 			if (!response.ok) throw new Error(body?.error || "API 请求失败");
 			return body;
@@ -193,10 +239,11 @@
 			return records.map(record => ({ ...record.data, published: record.published, dirty: !record.published }));
 		}
 		async function loadAdminData() {
-			const [decorations, fish, focus] = await Promise.all([
+			const [decorations, fish, focus, audio] = await Promise.all([
 				apiRequest("/admin/decorations"),
 				apiRequest("/admin/fish"),
-				apiRequest("/admin/focus")
+				apiRequest("/admin/focus"),
+				apiRequest("/admin/audio")
 			]);
 			state.decorations = applyRecords(decorations.data, "decorations");
 			state.fish = applyRecords(fish.data, "fish");
@@ -204,6 +251,11 @@
 				state.focus = { ...focus.data[0].data };
 				focusPublished = focus.data[0].published;
 				focusDirty = !focusPublished;
+			}
+			if (audio.data[0]) {
+				state.audio = JSON.parse(JSON.stringify(audio.data[0].data));
+				audioPublished = audio.data[0].published;
+				audioDirty = !audioPublished;
 			}
 		}
 		function showToast(message) { toast.textContent = message; toast.classList.add("show"); clearTimeout(showToast.timer); showToast.timer = setTimeout(() => toast.classList.remove("show"), 2400); }
@@ -213,6 +265,7 @@
 			if (state.module === "decorations") renderDecorationList();
 			if (state.module === "fish") renderFishList();
 			if (state.module === "focus") renderFocus();
+			if (state.module === "audio") renderAudio();
 			if (state.module === "events" || state.module === "payment") renderPlaceholder();
 		}
 		function renderDecorationList() {
@@ -270,11 +323,94 @@
 			document.getElementById("publishFocus").onclick = async () => { try { await apiRequest("/admin/focus/focus/publish", { method: "POST" }); focusDirty = false; focusPublished = true; showToast("专注配置已发布"); renderFocus(); } catch (error) { showToast(`发布失败：${error.message}`); } };
 		}
 		function tierTemplate(tier, index) { return `<div class="tier-row"><div class="field"><label>id</label><input value="${esc(tier.id)}"></div><div class="field"><label>endMinute</label><input type="number" min="0" value="${tier.endMinute}"></div><div class="field"><label>normalBubblePerMinute</label><input type="number" min="0" value="${tier.normalBubblePerMinute}"></div><div class="field"><label>memberBubblePerMinute</label><input type="number" min="0" value="${tier.memberBubblePerMinute}"></div><button class="icon-button remove-tier" data-index="${index}" title="删除梯度">×</button></div>`; }
+		const audioCategoryLabel = key => state.audio?.categories?.[key]?.label || DEFAULT_AUDIO.categories[key]?.label || key;
+		function categoryTemplate(key, category) {
+			const volume = Number(category.volume);
+			return `<div class="field"><label>${esc(category.label || key)}</label><div class="volume-row"><label class="check"><input type="checkbox" data-category="${esc(key)}" data-prop="enabled" ${category.enabled ? "checked" : ""}> 启用</label><input type="range" min="0" max="100" data-category="${esc(key)}" data-prop="volume" value="${volume}" style="flex:1"><span class="volume-value" data-volume-label="${esc(key)}">${volume}</span></div><span class="hint">${esc(key)} 分类总开关与总音量</span></div>`;
+		}
+		function soundTemplate(sound, index) {
+			return `<div class="audio-row" data-index="${index}"><div class="field"><label>id</label><input data-prop="id" value="${esc(sound.id)}"></div><div class="field"><label>名称</label><input data-prop="name" value="${esc(sound.name)}"></div><div class="field"><label>分类</label><select data-prop="category">${["bgm", "prompt", "sfx"].map(value => `<option value="${value}" ${sound.category === value ? "selected" : ""}>${esc(audioCategoryLabel(value))}</option>`).join("")}</select></div><label class="check"><input type="checkbox" data-prop="enabled" ${sound.enabled ? "checked" : ""}> 启用</label><div class="field"><label>音量 0-100</label><input type="number" min="0" max="100" data-prop="volume" value="${Number(sound.volume)}"></div><div class="field full"><label>resourcePath</label><div class="upload-row"><input data-prop="resourcePath" value="${esc(sound.resourcePath)}" placeholder="上传音频后自动回填，或手动填写已有路径" style="flex:1"><label class="file-button">上传音频<input type="file" class="sound-upload" data-index="${index}" accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac,.webm"></label></div><span class="hint">支持 mp3/wav/ogg/m4a 等，单个 ≤15MB；留空则使用内置音效</span></div><button class="icon-button remove-sound" data-index="${index}" title="删除音效">×</button></div>`;
+		}
+		function renderAudio() {
+			if (!state.audio || !state.audio.categories || !Array.isArray(state.audio.sounds)) state.audio = JSON.parse(JSON.stringify(DEFAULT_AUDIO));
+			const audio = state.audio;
+			const publishButton = `<button class="button publish" id="publishAudio" ${audioDirty ? "" : "disabled"}>${audioDirty ? "待发布" : (audioPublished ? "已发布" : "待发布")}</button>`;
+			main.innerHTML = pageHeader("AUDIO CONFIG", "音效管理", "配置背景白噪音、提示音与交互音效的开关和音量。", `${publishButton}<button class="button primary" id="saveAudio">保存配置</button>`) + `<section class="panel form-panel"><div class="form-body"><h3 class="section-title">音效分类 <span class="hint">关闭后该分类下的全部音效静音</span></h3><div class="form-grid">${Object.entries(audio.categories).map(([key, category]) => categoryTemplate(key, category)).join("")}</div><h3 class="section-title">音效列表 <span class="hint">共 ${audio.sounds.length} 个音效，音量取值 0-100</span></h3>${audio.sounds.length ? `<div id="sounds">${audio.sounds.map((sound, index) => soundTemplate(sound, index)).join("")}</div>` : `<div class="empty"><strong>还没有音效</strong>点击下方按钮新增第一个音效</div><div id="sounds"></div>`}<button class="button secondary" id="addSound">＋ 新增音效</button></div></section>`;
+			const markAudioDirty = () => { audioDirty = true; audioPublished = false; const button = document.getElementById("publishAudio"); button.disabled = false; button.textContent = "待发布"; };
+			document.querySelectorAll(".volume-row input[type=\"range\"]").forEach(input => input.addEventListener("input", () => { const label = document.querySelector(`[data-volume-label="${input.dataset.category}"]`); if (label) label.textContent = input.value; markAudioDirty(); }));
+			const soundList = document.getElementById("sounds");
+			if (soundList) soundList.addEventListener("input", markAudioDirty);
+			document.querySelectorAll(".sound-upload").forEach(input => input.onchange = async () => {
+				const file = input.files && input.files[0];
+				if (!file) return;
+				const row = input.closest(".audio-row");
+				const pathInput = row ? row.querySelector('[data-prop="resourcePath"]') : null;
+				if (!pathInput) return;
+				showToast(`正在上传 ${file.name}…`);
+				try {
+					const form = new FormData();
+					form.append("file", file);
+					const headers = {};
+					if (adminKey) headers["x-admin-key"] = adminKey;
+					const response = await fetch(`${API_BASE}/admin/assets`, { method: "POST", body: form, headers });
+					const body = await response.json();
+					if (!response.ok) throw new Error((body && body.error) || "上传失败");
+					pathInput.value = body.data.url;
+					markAudioDirty();
+					showToast(`已上传 ${file.name}（${(body.data.size / 1048576).toFixed(2)}MB），记得保存并发布`);
+					if (body.data.fallbackError) showToast(`云存储不可用，已存本地：${body.data.fallbackError}`);
+				} catch (error) {
+					showToast(`上传失败：${error.message}`);
+				}
+				input.value = "";
+			});
+			document.getElementById("addSound").onclick = () => { audio.sounds.push({ id: `sound-${Date.now()}`, name: "新音效", category: "bgm", enabled: true, volume: 100, resourcePath: "", loop: false }); markAudioDirty(); renderAudio(); };
+			document.querySelectorAll(".remove-sound").forEach(button => button.onclick = () => { if (!confirm("确定要删除这个音效吗？")) return; audio.sounds.splice(Number(button.dataset.index), 1); markAudioDirty(); renderAudio(); });
+			document.getElementById("saveAudio").onclick = saveAudio;
+			document.getElementById("publishAudio").onclick = async () => { try { await apiRequest("/admin/audio/audio/publish", { method: "POST" }); audioDirty = false; audioPublished = true; showToast("音效配置已发布"); renderAudio(); } catch (error) { showToast(`发布失败：${error.message}`); } };
+		}
+		async function saveAudio() {
+			const categories = JSON.parse(JSON.stringify(state.audio.categories));
+			document.querySelectorAll("[data-category]").forEach(input => {
+				const key = input.dataset.category;
+				if (!categories[key]) categories[key] = { label: key, enabled: true, volume: 100 };
+				if (input.dataset.prop === "enabled") categories[key].enabled = input.checked;
+				else categories[key].volume = Number(input.value);
+			});
+			const sounds = [...document.querySelectorAll(".audio-row")].map(row => {
+				const value = prop => row.querySelector(`[data-prop="${prop}"]`);
+				return { id: value("id").value.trim(), name: value("name").value.trim(), category: value("category").value, enabled: value("enabled").checked, volume: Number(value("volume").value), resourcePath: value("resourcePath").value.trim(), loop: state.audio.sounds[Number(row.dataset.index)]?.loop === true };
+			});
+			const errors = [];
+			if (sounds.some(sound => !sound.id || !sound.name)) errors.push("每个音效都必须填写 id 和 name");
+			if (new Set(sounds.map(sound => sound.id)).size !== sounds.length) errors.push("音效 id 不允许重复");
+			if (sounds.some(sound => !["bgm", "prompt", "sfx"].includes(sound.category))) errors.push("音效分类必须是 bgm、prompt 或 sfx");
+			if (sounds.some(sound => !Number.isFinite(sound.volume) || sound.volume < 0 || sound.volume > 100)) errors.push("音效音量必须在 0-100 之间");
+			Object.entries(categories).forEach(([key, category]) => { if (!Number.isFinite(Number(category.volume)) || category.volume < 0 || category.volume > 100) errors.push(`分类 ${key} 的音量必须在 0-100 之间`); });
+			if (errors.length) { showToast(`保存失败：${errors.join("；")}`); return; }
+			try {
+				const response = await apiRequest("/admin/audio/audio", { method: "PUT", body: JSON.stringify({ categories, sounds }) });
+				state.audio = JSON.parse(JSON.stringify(response.data.data));
+				audioPublished = response.data.published;
+				audioDirty = !audioPublished;
+				showToast("音效配置已保存，等待发布");
+				renderAudio();
+			} catch (error) { showToast(`保存失败：${error.message}`); }
+		}
 		function renderPlaceholder() { const title = state.module === "events" ? "事件设置" : "付费配置"; main.innerHTML = pageHeader(state.module === "events" ? "EVENT SETTINGS" : "PAYMENT CONFIG", title, "该模块将在后续版本中接入。", "") + `<section class="panel"><div class="empty"><strong>功能预留中</strong>这里暂时没有可配置内容。</div></section>`; }
 		function formData(form) { const data = Object.fromEntries(new FormData(form).entries()); data.isMemberOnly = form.elements.isMemberOnly?.checked || false; data.price = Number(data.price || 0); data.maxInventory = Number(data.maxInventory || 0); return data; }
 		async function publishItem(type, index) { const item = state[type][index]; const id = type === "fish" ? item.fishid : item.id; try { await apiRequest(`/admin/${type}/${encodeURIComponent(id)}/publish`, { method: "POST" }); item.dirty = false; item.published = true; showToast("内容已发布"); renderModule(); } catch (error) { showToast(`发布失败：${error.message}`); } }
 		document.getElementById("navList").onclick = event => { const button = event.target.closest(".nav-item"); if (!button) return; state.module = button.dataset.module; editingIndex = null; render(); };
-		loadAdminData().then(render).catch(error => { showToast(`API 连接失败：${error.message}`); render(); });
+		function connectWithKey() {
+			adminKey = adminKeyInput.value.trim();
+			if (adminKey) sessionStorage.setItem("fishtank_admin_key", adminKey);
+			else sessionStorage.removeItem("fishtank_admin_key");
+			loadAdminData().then(() => { adminKeyBtn.textContent = "已连接"; adminKeyBtn.classList.add("connected"); render(); }).catch(error => { adminKeyBtn.classList.remove("connected"); adminKeyBtn.textContent = "连接"; showToast(`连接失败：${error.message}`); render(); });
+		}
+		adminKeyBtn.onclick = connectWithKey;
+		adminKeyInput.addEventListener("keydown", event => { if (event.key === "Enter") connectWithKey(); });
+		if (adminKey) { loadAdminData().then(() => { render(); }).catch(error => { showToast(`API 连接失败：${error.message}`); adminKeyBtn.classList.remove("connected"); adminKeyBtn.textContent = "连接"; render(); }); }
+		else { render(); showToast("请输入管理密钥后点击连接"); }
 	</script>
 </body>
 </html>
