@@ -98,12 +98,19 @@ const validate = (type, data) => {
   if (type === "audio") return validateAudioConfig(data);
   return null;
 };
+// 数据层状态单独存一个字段给 /api/health 读，而不是让健康检查去 await 仓库。
+// 仓库初始化要连云开发 RDB 并串行补齐十几条种子数据，全程是网络往返；
+// 健康检查一旦等它，容器编排就会在这段时间里一直探不通，把整个版本判成部署失败 ——
+// 表现就是"启动日志里服务明明起来了，部署却失败"。
+let repositoryStatus = "pending";
 const repositoryReady = createRepository().then(instance => {
   repository = instance;
+  repositoryStatus = "ok";
   console.log("Repository initialized");
   return instance;
 }).catch(error => {
   repositoryError = error;
+  repositoryStatus = "failed";
   console.error("Repository initialization failed", error);
   return null;
 });
@@ -115,11 +122,11 @@ const getRepository = async () => {
 const records = async type => (await getRepository()).list(type, false);
 const sendError = (res, error) => res.status(500).json({ error: error.message || "服务器错误" });
 
-// 健康检查供容器编排使用：进程活着、数据层可用、跨域来源是从环境变量读到的而不是兜底名单。
-// 数据层失败时仍返回 200，避免配置问题把容器拖进无限重启；状态放在字段里供排查。
-app.get("/api/health", async (req, res) => {
-  let repositoryStatus = "ok";
-  try { await getRepository(); } catch (error) { repositoryStatus = "failed"; }
+// 健康检查供容器编排使用：只回答"这个进程还活着吗"，永远立刻返回 200，不碰数据层。
+// 数据层是外部依赖，慢或者不可用都不该让探针失败 —— 探针失败会被判成实例故障，
+// 进而导致反复重启和"部署版本失败"，而这跟业务是否真的可用完全是两回事。
+// 数据层状态读上面那个字段（pending / ok / failed），排查时看得到，但不影响探针结论。
+app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     storage: currentDriver(),
