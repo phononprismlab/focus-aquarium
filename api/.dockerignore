@@ -1,0 +1,24 @@
+# 宿主机的 node_modules 会覆盖镜像里 npm ci 装好的依赖（还可能是别的平台的二进制），必须排除。
+node_modules/
+npm-debug.log*
+
+# 密钥不能进镜像。
+.env
+.env.*
+!.env.example
+
+# 运行期上传的文件，不属于镜像产物。
+uploads/
+
+.git/
+.gitignore
+.vscode/
+
+# 本地诊断脚本，生产镜像里不需要也用不了（/api/debug/* 在非 production 才注册）。
+test-cloudbase-auth.js
+extract-audio.mjs
+
+Dockerfile
+.dockerignore
+README.md
+*.log
