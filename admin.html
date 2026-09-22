@@ -355,9 +355,9 @@
 					const response = await fetch(`${API_BASE}/admin/assets`, { method: "POST", body: form, headers });
 					const body = await response.json();
 					if (!response.ok) throw new Error((body && body.error) || "上传失败");
-					pathInput.value = body.data.url;
+					pathInput.value = body.data.url || body.data.path;
 					markAudioDirty();
-					showToast(`已上传 ${file.name}（${(body.data.size / 1048576).toFixed(2)}MB），记得保存并发布`);
+					showToast(`已上传 ${file.name}（${(body.data.size / 1048576).toFixed(2)}MB）到${body.data.driver === "cloudbase" ? "云存储" : "本地"}，记得保存并发布`);
 					if (body.data.fallbackError) showToast(`云存储不可用，已存本地：${body.data.fallbackError}`);
 				} catch (error) {
 					showToast(`上传失败：${error.message}`);

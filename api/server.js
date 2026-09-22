@@ -3,10 +3,15 @@ import express from "express";
 import path from "node:path";
 import multer from "multer";
 import { createRepository } from "./repository.js";
-import { UPLOAD_ROOT, MAX_UPLOAD_MB, AUDIO_EXTENSIONS, storeAudio, ensureUploadDir } from "./uploads.js";
+import { UPLOAD_ROOT, MAX_UPLOAD_MB, AUDIO_EXTENSIONS, storeAudio, ensureUploadDir, resolveAudioPaths, currentDriver } from "./uploads.js";
 
 const app = express();
 const port = Number(process.env.PORT || 80);
+
+// 云开发 SDK 内部偶发的异步错误不能把整个 API 进程带走，这里兜住并记日志。
+process.on("unhandledRejection", error => {
+  console.error("未处理的异步错误：", error && error.message ? error.message : error);
+});
 const cloudbaseSdkVersion = "3.10.0";
 let repository;
 let repositoryError;
@@ -135,12 +140,17 @@ app.use("/api/admin", requireAdminAuth);
 
 for (const type of types) {
   app.get(`/api/admin/${type}`, async (req, res) => {
-    try { res.json({ data: await records(type) }); } catch (error) { sendError(res, error); }
+    try {
+      const data = await records(type);
+      // 云存储的 cloud:// 标识只对内使用，出库前换成可播放的临时链接。
+      res.json({ data: type === "audio" ? await resolveAudioPaths(data) : data });
+    } catch (error) { sendError(res, error); }
   });
   app.get(`/api/game/${type}`, async (req, res) => {
     try {
       const published = await (await getRepository()).list(type, true);
-      res.json({ data: published.map(record => ({ ...record, data: record.publishedData || record.data })) });
+      const mapped = published.map(record => ({ ...record, data: record.publishedData || record.data }));
+      res.json({ data: type === "audio" ? await resolveAudioPaths(mapped) : mapped });
     } catch (error) { sendError(res, error); }
   });
 }
@@ -172,7 +182,9 @@ app.post("/api/admin/assets", uploadSingle, async (req, res) => {
     const stored = await storeAudio({ buffer: req.file.buffer, originalName: req.file.originalname });
     res.json({
       data: {
-        url: stored.url,
+        // 云存储返回的是永久标识 fileID（cloud://...），链接在出库时换取；
+        // 本地存储则直接给出可访问 URL。
+        url: stored.url || "",
         path: stored.path,
         driver: stored.driver,
         size: req.file.size,
