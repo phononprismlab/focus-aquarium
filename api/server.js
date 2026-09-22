@@ -4,6 +4,7 @@ import path from "node:path";
 import multer from "multer";
 import { createRepository } from "./repository.js";
 import { UPLOAD_ROOT, MAX_UPLOAD_MB, AUDIO_EXTENSIONS, storeAudio, ensureUploadDir, resolveAudioPaths, currentDriver } from "./uploads.js";
+import { resolveAllowList, createOriginChecker } from "./cors.js";
 
 const app = express();
 const port = Number(process.env.PORT || 80);
@@ -16,22 +17,27 @@ const cloudbaseSdkVersion = "3.10.0";
 let repository;
 let repositoryError;
 
-const configuredOrigins = (process.env.CORS_ORIGINS || "")
-  .split(",")
-  .map(origin => origin.trim())
-  .filter(Boolean);
-const allowedOrigins = configuredOrigins.length ? configuredOrigins : [
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-  "http://localhost:8787",
-  "http://127.0.0.1:8787",
-  "https://test-d0gpv0jya4925be19-1491495221.tcloudbaseapp.com",
-  "https://focus-aquarium-test-d0gpv0jya4925be19.webapps.tcloudbase.com"
-];
+const { origins: allowedOrigins, source: originsSource } = resolveAllowList();
+const isOriginAllowed = createOriginChecker(allowedOrigins);
+const allowAllOrigins = allowedOrigins.includes("*");
+if (originsSource === "default") {
+  console.warn("CORS_ORIGINS 未配置，正在使用内置兜底名单（含测试域名）。生产环境请显式配置 CORS_ORIGINS。");
+} else if (allowAllOrigins) {
+  console.warn("CORS_ORIGINS=*，所有来源都被放行。请确认这是有意为之。");
+}
+
+// 同一个地址对不同 Origin 会返回不同的响应头，中间的缓存必须按 Origin 区分，否则会串。
+app.use((req, res, next) => {
+  res.setHeader("Vary", "Origin");
+  next();
+});
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error("CORS origin not allowed"));
+    if (isOriginAllowed(origin)) return callback(null, true);
+    // 抛错会让 Express 返回 500，浏览器只能看到一个莫名的服务端错误；
+    // 规范做法是干脆不发 CORS 响应头，让浏览器自己拦。
+    console.warn(`CORS 已拒绝来源：${origin}`);
+    return callback(null, false);
   },
   methods: ["GET", "HEAD", "PUT", "POST", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "x-admin-key"],
@@ -40,7 +46,13 @@ app.use(cors({
 app.use(express.json({ limit: "2mb" }));
 
 // 已上传的音频走静态目录对外提供，不要求管理密钥。
-ensureUploadDir();
+// 上传目录建不出来不该让整个服务起不来：云存储模式下根本用不到本地目录，
+// 只挂了只读文件系统时也应该能正常提供配置读取。
+try {
+  ensureUploadDir();
+} catch (error) {
+  console.warn(`上传目录不可用（${UPLOAD_ROOT}）：${error.message}。上传会失败，其余接口继续服务。`);
+}
 app.use("/uploads", express.static(UPLOAD_ROOT, {
   fallthrough: false,
   setHeaders(res, filePath) {
@@ -103,7 +115,19 @@ const getRepository = async () => {
 const records = async type => (await getRepository()).list(type, false);
 const sendError = (res, error) => res.status(500).json({ error: error.message || "服务器错误" });
 
-app.get("/api/health", (req, res) => res.json({ ok: true, storage: process.env.CLOUDBASE_ENV_ID ? "cloudbase" : "memory" }));
+// 健康检查供容器编排使用：进程活着、数据层可用、跨域来源是从环境变量读到的而不是兜底名单。
+// 数据层失败时仍返回 200，避免配置问题把容器拖进无限重启；状态放在字段里供排查。
+app.get("/api/health", async (req, res) => {
+  let repositoryStatus = "ok";
+  try { await getRepository(); } catch (error) { repositoryStatus = "failed"; }
+  res.json({
+    ok: true,
+    storage: currentDriver(),
+    repository: repositoryStatus,
+    cors: allowAllOrigins ? "all" : (originsSource === "env" ? "configured" : "fallback"),
+    adminAuth: adminApiKey ? "enabled" : "disabled"
+  });
+});
 
 // CloudBase authentication diagnostic — only available in non-production.
 if (process.env.NODE_ENV !== "production") {
@@ -231,6 +255,7 @@ app.post("/api/admin/:type/:id/publish", async (req, res) => {
 
 app.listen(port, "0.0.0.0", () => {
   console.log(`Fishtank API listening on port ${port}`);
+  console.log(`CORS 来源（${originsSource === "env" ? "来自 CORS_ORIGINS" : "内置兜底名单"}）：${allowAllOrigins ? "*（全部放行）" : allowedOrigins.join(", ")}`);
   if (process.env.NODE_ENV === "production" && !adminApiKey) {
     console.warn("WARNING: ADMIN_API_KEY is not set. Admin endpoints are unprotected in production.");
   }
