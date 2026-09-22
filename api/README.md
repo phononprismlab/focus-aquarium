@@ -20,6 +20,15 @@ Unit tests need no server:
 npm test
 ```
 
+| File | Covers |
+| --- | --- |
+| `reward.test.js` | tiered reward maths, `HARD_MAX_MINUTES`, start-request validation |
+| `focus-session.test.js` | session TTL, pruning, replay protection, tolerance window |
+| `audio-categories.test.js` | audio config validation, plus the category helpers extracted from `index.html` / `admin.html` |
+| `cors.test.js` | origin parsing, trailing-slash normalisation, wildcard and `null` rules |
+| `health.test.js` | `/api/health` answers immediately even while the data layer is still initialising |
+| `runtime-guard.test.js` | `ADMIN_API_KEY` handling, and a real process refusing to boot in production without it |
+
 The HTTP smoke test starts and stops its own server, so one command is enough:
 
 ```
@@ -60,6 +69,7 @@ Allowed frontend origins come from `CORS_ORIGINS` (comma separated). Each entry 
 | `*` | every origin, only if you accept that |
 
 Requests without an `Origin` header (curl, server-to-server, same origin) are not affected by the list.
+A trailing slash on an entry is stripped (`https://a.com/` behaves as `https://a.com`) — the `Origin` header never carries a path, and the match is an exact string comparison, so a stray slash would silently block the frontend.
 Rejected origins get no CORS headers at all — that is what makes the browser block them. The rejection is logged with the offending origin.
 If `CORS_ORIGINS` is unset the service falls back to a built-in list (localhost plus the two known test domains) and logs a warning; check `GET /api/health` → `cors: "fallback"` to detect that in production.
 
@@ -106,7 +116,7 @@ Uploaded audio is written to `uploads/` inside the container by default, which i
 - `GET /uploads/sounds/*` — uploaded audio, range requests supported
 - `GET /api/health`
 
-`GET /api/health` reports `storage` (driver), `repository` (`ok` / `failed`), `cors` (`configured` / `fallback` / `all`) and `adminAuth` (`enabled` / `disabled`). It always answers 200 so a bad config does not throw the container into a restart loop — read the fields instead.
+`GET /api/health` reports `storage` (driver), `repository` (`pending` / `ok` / `failed`), `cors` (`configured` / `fallback` / `all`) and `adminAuth` (`enabled` / `disabled`). It always answers 200 and **never waits on the data layer** — the repository connects to CloudBase RDB and seeds a dozen-odd rows over the network at boot, and a probe that blocks on that gets the whole version marked as a failed deployment even though the logs show the service listening. Read the `repository` field to see how the data layer is doing; the probe answer is not affected by it.
 
 Admin reads draft data. Game endpoints return only `publishedData`. Saving a published config keeps the previous published version until the publish endpoint is called.
 Audio configs store the permanent `cloud://` fileID; a playable URL is resolved on read.
