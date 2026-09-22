@@ -12,7 +12,41 @@
 Without `CLOUDBASE_ENV_ID`, the API uses an in-memory repository for local development. Set `CLOUDBASE_ENV_ID` and optionally `CLOUDBASE_COLLECTION` to use CloudBase.
 In production (`NODE_ENV=production`), `CLOUDBASE_ENV_ID` is required and the process exits instead of using the in-memory repository.
 
-Set `ADMIN_API_KEY` to protect all `/api/admin/*` endpoints. When set, admin requests must include an `x-admin-key` header matching this value. When unset (local dev), admin endpoints remain open. Always set this in production, otherwise anyone can rewrite the published config and upload files.
+## Tests
+
+Unit tests need no server:
+
+```
+npm test
+```
+
+The HTTP smoke test starts and stops its own server, so one command is enough:
+
+```
+npm run test:smoke
+```
+
+That script picks port 4173 and the throwaway key `test-key-123` on its own. Options: `node test/smoke-standalone.mjs --port 4180`, or `--keep` to leave the server running afterwards.
+
+If you prefer to drive the server yourself, start it in one terminal and point the smoke script at it from another:
+
+```
+# terminal 1 — PowerShell
+$env:PORT="4173"; $env:ADMIN_API_KEY="test-key-123"; node server.js
+
+# terminal 2 — PowerShell
+$env:BASE_URL="http://127.0.0.1:4173"; $env:ADMIN_API_KEY="test-key-123"; node test/smoke.mjs
+```
+
+On Git Bash / WSL use `PORT=4173 ADMIN_API_KEY=test-key-123 node server.js` instead.
+
+> **Windows PowerShell:** if `npm test` fails with `npm.ps1 cannot be loaded because running scripts is disabled on this system`, the machine's execution policy blocks the npm wrapper script — it is not a project problem. Use `npm.cmd test`, or run `node test/run-unit.mjs` directly, or allow local scripts once with `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned` (no admin rights needed).
+>
+> If the machine has an `http_proxy` set, `curl` against `localhost` may be intercepted and return 502 — add `--noproxy '*'`. The test scripts use Node's `fetch`, which ignores the proxy, so they are unaffected.
+
+Set `ADMIN_API_KEY` to protect all `/api/admin/*` endpoints. When set, admin requests must include an `x-admin-key` header matching this value. When unset (local dev), admin endpoints remain open.
+
+In production (`NODE_ENV=production`) `ADMIN_API_KEY` is **required**: without it the process prints an error and exits with a non-zero code, because an unauthenticated admin API lets anyone rewrite the published config and upload files. The value is trimmed, and keys shorter than 16 characters trigger a warning (but still start).
 
 ## CORS
 
@@ -41,6 +75,8 @@ docker run --rm -p 8080:80 \
 ```
 
 The image pins `node:22-bookworm-slim`, sets `NODE_ENV=production`, runs as the non-root `node` user and declares a `HEALTHCHECK` against `/api/health`. `.dockerignore` keeps host `node_modules`, `.env` and `uploads/` out of the image.
+
+> **The image sets `NODE_ENV=production`, so `ADMIN_API_KEY` is mandatory.** A container started without it will exit immediately instead of serving an unprotected admin API. Set it in the CloudBase console (or with `-e`) before deploying this change.
 
 Uploaded audio is written to `uploads/` inside the container by default, which is lost on restart. Either set `STORAGE_DRIVER=cloudbase` (default whenever `CLOUDBASE_ENV_ID` is set) or mount a persistent volume at that path and point `UPLOAD_DIR` at it.
 
