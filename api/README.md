@@ -28,6 +28,7 @@ npm test
 | `shop-sound-items.test.js` | backend audio config → shop "白噪音" items: shop-side name/description/price must win, matched by id or by audio file name |
 | `ambient-audio.test.js` | `syncAmbientAudio` must not touch the player when the source did not change (reopening the shop used to restart the background noise) |
 | `image-upload.test.js` | `POST /api/admin/assets/image`: auth, multipart handling, non-image rejection, and that an image keeps its own extension instead of the audio `.mp3` fallback |
+| `storage-pg.test.js` | the PG-mode storage channel against a local fake gateway: upload endpoint, auth header, MIME, `x-upsert`, URL encoding, signed-URL lookup, caching, and error passthrough |
 | `cors.test.js` | origin parsing, trailing-slash normalisation, wildcard and `null` rules |
 | `health.test.js` | `/api/health` answers immediately even while the data layer is still initialising |
 | `bind-failure.test.js` | a failed `listen` must be loud: reports the real error code, does not print a misleading `listening`, and exits non-zero |
@@ -124,6 +125,42 @@ Uploaded audio is written to `uploads/` inside the container by default, which i
 
 ## Upload storage, and what a failure looks like
 
+### PG mode vs classic mode — the wrong channel fails with no useful error
+
+CloudBase storage comes in two shapes, and **they use completely different upload channels**:
+
+| | classic (traditional) | **pg** (this project) |
+| --- | --- | --- |
+| Upload path | `getUploadMetadata` → client uploads **straight to COS** | everything goes through the **Storage API gateway**, which writes `storage.objects` and COS in one transaction |
+| Metadata | the business side maintains it | the gateway writes it |
+| `@cloudbase/node-sdk` | ✅ `uploadFile()` | ❌ **not implemented** — the SDK has no `app.storage.from(bucketId)` |
+
+You can tell which one an environment uses by opening 云存储 in the console: if you see `storage.objects` / `storage.buckets` **tables with RLS policies**, it is PG mode.
+
+This project's environment is PG mode, and the code originally called `app.uploadFile()` — the classic channel. That is why uploads failed while every other CloudBase call (the RDB repository) worked, and why the error looked unrelated to RLS or key permissions. **Calling the wrong channel fails in a way that no amount of RLS debugging can explain.**
+
+`storageMode()` picks the channel:
+
+- `CLOUDBASE_STORAGE_MODE` — `pg` or `classic`. Defaults to **`pg`**.
+- `CLOUDBASE_BUCKET` — the bucket id, default `aquarium-assets`.
+- `CLOUDBASE_APIKEY` — used as the `service_role` bearer token. `CLOUDBASE_STORAGE_TOKEN` overrides it.
+
+The two gateway calls (both need `Authorization: Bearer <service_role API Key>`):
+
+```
+POST https://<envId>.api.tcloudbasegateway.com/v1/storages/object/<bucketId>/<objectName>
+     Content-Type: <mime>   x-upsert: true      →  { Id, Key }
+
+POST https://<envId>.api.tcloudbasegateway.com/v1/storages/object/sign/<bucketId>/<objectName>
+     { "expiresIn": 3600 }                       →  { signedURL, fullSignedURL }
+```
+
+Uploads persist the returned `Key` as `tcbpg://<bucketId>/<objectName>`; `cloud://` fileIDs from the classic channel are still resolved for older data. `GET /api/health` reports `storageMode` and `storageBucket`, and startup logs the same line, so a mode mismatch is visible before you go looking at permissions.
+
+`storage-pg.test.js` runs the whole PG channel against a local fake gateway, so it needs no credentials.
+
+### Fallback behaviour
+
 There are two upload routes, and they differ only in the allowed extensions and the target folder:
 
 | Route | Field | Extensions | Folder |
@@ -150,10 +187,12 @@ So `saveCloudbase` probes `getUploadMetadata` after a failure and re-throws with
 
 Common causes, in the order worth checking:
 
-1. **The bucket has no RLS policy.** In PG mode a bucket with *zero* policies refuses every API access, and the console says so right on the bucket page: 「该存储桶未配置任何 RLS 策略。所有通过 API 的访问都将被拒绝。」 Add any one policy (a read-only `SELECT` policy is enough) and it takes effect within 1–3 minutes. `service_role` has `BYPASSRLS`, so server-side uploads keep working without a write policy.
-2. 云存储 not enabled for the env.
-3. The API key lacking storage permission.
-4. A wrong `CLOUDBASE_ENV_ID`.
+1. **The storage channel does not match the environment.** A PG-mode environment (RLS policies on `storage.objects`) called through the classic `uploadFile` path fails every time, for reasons unrelated to permissions. Check `storageMode` in the startup log and in `GET /api/health` first.
+2. **The bucket name.** `CLOUDBASE_BUCKET` must be the bucket the gateway actually writes to; a policy on one bucket does nothing for another.
+3. **The bucket has no RLS policy.** In PG mode a bucket with *zero* policies refuses client API access, and the console says so right on the bucket page: 「该存储桶未配置任何 RLS 策略。所有通过 API 的访问都将被拒绝。」 Add any one policy (a read-only `SELECT` policy is enough) and it takes effect within 1–3 minutes. Note that this concerns **client** access — server-side uploads run as `service_role`, which has `BYPASSRLS`, so RLS is usually *not* the reason a server-side upload fails.
+4. 云存储 not enabled for the env.
+5. The API key lacking storage permission, or not being a `service_role` key.
+6. A wrong `CLOUDBASE_ENV_ID`.
 
 ## Endpoints
 
@@ -183,7 +222,7 @@ Common causes, in the order worth checking:
 - `GET /uploads/images/*` — uploaded 商品预览图
 - `GET /api/health`
 
-`GET /api/health` reports `storage` (driver), `repository` (`pending` / `ok` / `failed`), `cors` (`configured` / `fallback` / `all`) and `adminAuth` (`enabled` / `disabled`). It always answers 200 and **never waits on the data layer** — the repository connects to CloudBase RDB and seeds a dozen-odd rows over the network at boot, and a probe that blocks on that gets the whole version marked as a failed deployment even though the logs show the service listening. Read the `repository` field to see how the data layer is doing; the probe answer is not affected by it.
+`GET /api/health` reports `storage` (driver), `storageMode` / `storageBucket` (empty unless the driver is `cloudbase`), `repository` (`pending` / `ok` / `failed`), `cors` (`configured` / `fallback` / `all`) and `adminAuth` (`enabled` / `disabled`). It always answers 200 and **never waits on the data layer** — the repository connects to CloudBase RDB and seeds a dozen-odd rows over the network at boot, and a probe that blocks on that gets the whole version marked as a failed deployment even though the logs show the service listening. Read the `repository` field to see how the data layer is doing; the probe answer is not affected by it.
 
 Admin reads draft data. Game endpoints return only `publishedData`. Saving a published config keeps the previous published version until the publish endpoint is called.
 Audio configs store the permanent `cloud://` fileID; a playable URL is resolved on read. The same resolution runs for `audio` and `decorations` (`PUBLIC_PATH_RESOLVE_TYPES`), so a 商品预览图 stored as `cloud://...` is also turned into a usable URL on the way out — images need it just as much as audio does.

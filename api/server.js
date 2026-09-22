@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import multer from "multer";
 import { createRepository } from "./repository.js";
-import { UPLOAD_ROOT, MAX_UPLOAD_MB, AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, storeAudio, ensureUploadDir, resolveAudioPaths, currentDriver } from "./uploads.js";
+import { UPLOAD_ROOT, MAX_UPLOAD_MB, AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, storeAudio, ensureUploadDir, resolveAudioPaths, currentDriver, storageMode, CLOUDBASE_BUCKET } from "./uploads.js";
 import { resolveAllowList, createOriginChecker } from "./cors.js";
 import { validateStartRequest } from "./reward.js";
 import { createFocusSessionStore } from "./focus-session.js";
@@ -141,9 +141,13 @@ const sendError = (res, error) => res.status(500).json({ error: error.message ||
 // 进而导致反复重启和"部署版本失败"，而这跟业务是否真的可用完全是两回事。
 // 数据层状态读上面那个字段（pending / ok / failed），排查时看得到，但不影响探针结论。
 app.get("/api/health", (req, res) => {
+  const driver = currentDriver();
   res.json({
     ok: true,
-    storage: currentDriver(),
+    storage: driver,
+    // PG 模式与传统模式的上传通道完全不同，出问题时这一行能直接告诉你该查哪条路。
+    storageMode: driver === "cloudbase" ? storageMode() : "",
+    storageBucket: driver === "cloudbase" && storageMode() === "pg" ? CLOUDBASE_BUCKET : "",
     repository: repositoryStatus,
     cors: allowAllOrigins ? "all" : (originsSource === "env" ? "configured" : "fallback"),
     adminAuth: adminApiKey ? "enabled" : "disabled"
@@ -283,7 +287,7 @@ const uploadImageSingle = (req, res, next) => imageUpload.single("file")(req, re
 app.post("/api/admin/assets", uploadSingle, async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "请选择要上传的音频文件" });
-    const stored = await storeAudio({ buffer: req.file.buffer, originalName: req.file.originalname });
+    const stored = await storeAudio({ buffer: req.file.buffer, originalName: req.file.originalname, mimeType: req.file.mimetype });
     res.json({
       data: {
         // 云存储返回的是永久标识 fileID（cloud://...），链接在出库时换取；
@@ -309,7 +313,7 @@ app.post("/api/admin/assets", uploadSingle, async (req, res) => {
 app.post("/api/admin/assets/image", uploadImageSingle, async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "请选择要上传的图片文件" });
-    const stored = await storeAudio({ buffer: req.file.buffer, originalName: req.file.originalname, kind: "image" }, "images");
+    const stored = await storeAudio({ buffer: req.file.buffer, originalName: req.file.originalname, kind: "image", mimeType: req.file.mimetype }, "images");
     res.json({
       data: {
         url: stored.url || "",
@@ -444,4 +448,12 @@ if (!listening.some(Boolean)) {
 }
 console.log(`CORS 来源（${originsSource === "env" ? "来自 CORS_ORIGINS" : "内置兜底名单"}）：${allowAllOrigins ? "*（全部放行）" : allowedOrigins.join(", ")}`);
 console.log(`管理接口鉴权：${adminApiKey ? "已启用（x-admin-key）" : "未启用 —— 仅限本地开发，生产环境会拒绝启动"}`);
+// 上传出问题时，第一眼看的就是这一行：模式选错（PG 环境用 classic 通道）会导致上传必然失败，
+// 而报错跟 RLS、密钥权限全都无关，极难从现象倒推。
+if (currentDriver() === "cloudbase") {
+  const mode = storageMode();
+  console.log(mode === "pg"
+    ? `云存储：PG 模式，桶 ${CLOUDBASE_BUCKET}（经由 Storage API 网关，需 CLOUDBASE_APIKEY）`
+    : "云存储：传统模式（getUploadMetadata + 直传 COS）");
+}
 warnWeakAdminKey(adminApiKey);
