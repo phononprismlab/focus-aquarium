@@ -20,6 +20,10 @@ export function parseOrigins(value) {
   return String(value || "")
     .split(",")
     .map(origin => origin.trim())
+    // 去掉结尾斜杠：来源（Origin）从来不带路径，但控制台里手填很容易多一个 "/"，
+    // 而下面的匹配是精确字符串比较，"https://a.com/" 永远匹配不上 "https://a.com"，
+    // 结果就是前端被跨域拦住，而配置看起来完全正确。
+    .map(origin => origin.replace(/\/+$/, ""))
     .filter(Boolean);
 }
 
