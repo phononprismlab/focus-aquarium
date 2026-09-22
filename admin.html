@@ -230,33 +230,69 @@
 		async function apiRequest(path, options = {}) {
 			const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
 			if (adminKey) headers["x-admin-key"] = adminKey;
-			const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+			let response;
+			try {
+				response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+			} catch (error) {
+				// fetch 只在网络层失败时抛出。最常见三种：服务没起来、地址不对、跨域被拦截。
+				throw new Error(`无法连接 ${API_BASE}（网络错误或跨域被拦截）`);
+			}
 			if (response.status === 401) { adminKeyBtn.classList.remove("connected"); adminKeyBtn.textContent = "连接"; throw new Error("管理密钥无效或缺失"); }
 			const body = response.status === 204 ? null : await response.json();
 			if (!response.ok) throw new Error(body?.error || "API 请求失败");
 			return body;
 		}
 		function applyRecords(records, type) {
-			return records.map(record => ({ ...record.data, published: record.published, dirty: !record.published }));
+			// 记录里缺 data 字段时不该让后台崩掉，用空对象兜住，界面上表现为一条待补完的记录。
+			return records.map(record => ({ ...(record?.data || {}), published: record.published, dirty: !record.published }));
 		}
 		async function loadAdminData() {
-			const [decorations, fish, focus, audio] = await Promise.all([
+			// 逐项接住失败：原来任何一项挂掉都会让整个后台打不开，也说不清是哪一项。
+			const [decorations, fish, focus, audio] = await Promise.allSettled([
 				apiRequest("/admin/decorations"),
 				apiRequest("/admin/fish"),
 				apiRequest("/admin/focus"),
 				apiRequest("/admin/audio")
 			]);
-			state.decorations = applyRecords(decorations.data, "decorations");
-			state.fish = applyRecords(fish.data, "fish");
-			if (focus.data[0]) {
-				state.focus = { ...focus.data[0].data };
-				focusPublished = focus.data[0].published;
+			const failed = [];
+			const reasons = new Set();
+			const pick = (result, label) => {
+				if (result.status === "fulfilled") return result.value;
+				const reason = result.reason?.message || "请求失败";
+				failed.push({ label, reason });
+				reasons.add(reason);
+				return null;
+			};
+			const decorationsData = pick(decorations, "商品");
+			const fishData = pick(fish, "鱼种");
+			const focusData = pick(focus, "专注配置");
+			// 音效是后加的配置类型，老版本 API 没有它时不能把后台整个搞挂。
+			const audioData = audio.status === "fulfilled" ? audio.value : null;
+			if (audioData) {
+				const audioRecord = audioData.data?.[0];
+				if (audioRecord?.data?.categories) {
+					state.audio = JSON.parse(JSON.stringify(audioRecord.data));
+					audioPublished = audioRecord.published;
+					audioDirty = !audioPublished;
+				} else {
+					showToast(`音效配置为空或格式不符，已使用默认配置`);
+				}
+			} else {
+				showToast(`音效配置未能加载，已使用默认配置，其余功能不受影响`);
+			}
+			if (decorationsData) state.decorations = applyRecords(decorationsData.data || [], "decorations");
+			if (fishData) state.fish = applyRecords(fishData.data || [], "fish");
+			const focusRecord = focusData?.data?.[0];
+			if (focusRecord?.data) {
+				state.focus = { ...focusRecord.data };
+				focusPublished = focusRecord.published;
 				focusDirty = !focusPublished;
 			}
-			if (audio.data[0]) {
-				state.audio = JSON.parse(JSON.stringify(audio.data[0].data));
-				audioPublished = audio.data[0].published;
-				audioDirty = !audioPublished;
+			if (failed.length) {
+				// 同一原因时合并成一句话，否则提示里会重复三遍一模一样的说明。
+				throw new Error(reasons.size === 1
+					? `${failed.map(item => item.label).join("、")}未能加载：${Array.from(reasons)[0]}`
+					: failed.map(item => `${item.label}加载失败（${item.reason}）`).join("；"));
 			}
 		}
 		function showToast(message) { toast.textContent = message; toast.classList.add("show"); clearTimeout(showToast.timer); showToast.timer = setTimeout(() => toast.classList.remove("show"), 2400); }
