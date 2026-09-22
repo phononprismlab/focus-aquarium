@@ -792,18 +792,8 @@
     <!-- 调音面板挂载在按钮框下方 -->
     <div class="audio-settings" id="audioSettings" aria-hidden="true">
       <div class="audio-settings-title">音频设置</div>
-      <div class="audio-slider-row">
-        <div class="audio-slider-label"><span>BGM</span><span id="bgmVolumeValue">100%</span></div>
-        <input id="bgmVolume" type="range" min="0" max="100" step="1" value="100" aria-label="BGM音量">
-      </div>
-      <div class="audio-slider-row">
-        <div class="audio-slider-label"><span>Prompt</span><span id="promptVolumeValue">100%</span></div>
-        <input id="promptVolume" type="range" min="0" max="100" step="1" value="100" aria-label="Prompt音量">
-      </div>
-      <div class="audio-slider-row">
-        <div class="audio-slider-label"><span>SFX</span><span id="sfxVolumeValue">100%</span></div>
-        <input id="sfxVolume" type="range" min="0" max="100" step="1" value="100" aria-label="SFX音量">
-      </div>
+      <!-- 滑块按后台配置的音效分类动态生成，分类可增删，这里不再写死 -->
+      <div id="audioSliders"></div>
     </div>
   </div>
 
@@ -913,6 +903,7 @@
   </div>
 </div>
 
+<script src="game-data.js"></script>
 <script src="config.js"></script>
 <script>
 (() => {
@@ -933,42 +924,56 @@
   // ==================== v0.2 Data / Save / Shop ====================
   const SAVE_KEY = "fishtank_save";
   const SAVE_VERSION = "0.2.0";
-  const LEGACY_AUDIO_KEYS = { bgm:"fishTank_bgmVolume", prompt:"fishTank_promptVolume", sfx:"fishTank_sfxVolume" };
 
-  let SHOP_ITEMS = [
-    { id:"fish001", category:"fish", name:"小丑鱼", description:"色彩明亮的小丑鱼，为鱼缸增添一点活泼的海洋气息。", previewImage:"assets/fish/fish001_preview.webp", price:30, resourcePath:"assets/fish/fish001.webp", isMemberOnly:false, maxInventory:50 },
-    { id:"fish002", category:"fish", name:"蓝尾鱼", description:"带着蓝色尾鳍的小鱼，游动时看起来清爽又灵巧。", previewImage:"assets/fish/fish002_preview.webp", price:35, resourcePath:"assets/fish/fish002.webp", isMemberOnly:false, maxInventory:50 },
-    { id:"fish003", category:"fish", name:"金色小鱼", description:"闪着金色光泽的小鱼，让鱼缸多一点温暖的亮色。", previewImage:"assets/fish/fish003_preview.webp", price:45, resourcePath:"assets/fish/fish003.webp", isMemberOnly:true, maxInventory:50 },
+  // ===== 音效分类（动态）=====
+  // 分类由后台「音效管理」下发，可自由增删；配置未加载时用内置三类兜底。
+  // 注意：凡是需要分类清单的地方都必须走 audioCategoryKeys()，不要再写死 bgm/prompt/sfx。
+  const BUILTIN_AUDIO_CATEGORIES = { bgm:{ label:"背景白噪音" }, prompt:{ label:"提示音" }, sfx:{ label:"交互音效" } };
+  const AUDIO_DEFAULTS = { bgm:100, prompt:100, sfx:100 };
+  const audioStorageKey = key => "fishTank_" + key + "Volume";
+  function audioCategoryKeys(){
+    const fromConfig = AUDIO_CONFIG && AUDIO_CONFIG.categories ? Object.keys(AUDIO_CONFIG.categories) : [];
+    return fromConfig.length ? fromConfig : Object.keys(BUILTIN_AUDIO_CATEGORIES);
+  }
+  function audioCategoryLabel(key){
+    const fromConfig = AUDIO_CONFIG && AUDIO_CONFIG.categories && AUDIO_CONFIG.categories[key];
+    return (fromConfig && fromConfig.label) || BUILTIN_AUDIO_CATEGORIES[key]?.label || key;
+  }
+  function readStoredVolume(key, fallback){
+    const raw = localStorage.getItem(audioStorageKey(key));
+    const value = raw === null ? Number(fallback) : Number(raw);
+    return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 100;
+  }
+  // 玩家自己的分类音量偏好。分类是动态的，这里按需补齐，不写死 key。
+  const audioVolumes = {};
+  function syncAudioVolumeKeys(){
+    audioCategoryKeys().forEach(key => {
+      if(audioVolumes[key] === undefined) audioVolumes[key] = readStoredVolume(key, AUDIO_DEFAULTS[key] ?? 100);
+    });
+  }
+  function escapeHtml(value){
+    return String(value ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
+  }
 
-    { id:"decoration001", category:"decorations", name:"水草", description:"柔软舒展的基础水草，适合打造自然的鱼缸底景。", previewImage:"assets/plants/plant001_preview.webp", price:20, resourcePath:"assets/plants/plant001.webp", isMemberOnly:false, maxInventory:1 },
-    { id:"decoration002", category:"decorations", name:"细叶水草", description:"细长挺拔的水草，让鱼缸拥有更丰富的层次。", previewImage:"assets/plants/plant002_preview.webp", price:30, resourcePath:"assets/plants/plant002.webp", isMemberOnly:false, maxInventory:1 },
-    { id:"decoration003", category:"decorations", name:"红色水草", description:"带有红色叶片的水草，为水下景色加入一抹醒目的颜色。", previewImage:"assets/plants/plant003_preview.webp", price:50, resourcePath:"assets/plants/plant003.webp", isMemberOnly:true, maxInventory:1 },
-
-    { id:"background001", category:"backgrounds", name:"浅海晨光", description:"明亮柔和的浅海背景，像阳光落在清澈的海水里。", previewImage:"assets/backgrounds/background001_preview.webp", price:30, resourcePath:"assets/backgrounds/background001.webp", isMemberOnly:false, maxInventory:1 },
-    { id:"background002", category:"backgrounds", name:"深海夜色", description:"深沉安静的海底夜色，适合营造宁静的晚间氛围。", previewImage:"assets/backgrounds/background002_preview.webp", price:60, resourcePath:"assets/backgrounds/background002.webp", isMemberOnly:true, maxInventory:1 },
-    { id:"background003", category:"backgrounds", name:"珊瑚黄昏", description:"带着珊瑚色调的黄昏海景，让鱼缸显得温暖而梦幻。", previewImage:"assets/backgrounds/background003_preview.webp", price:50, resourcePath:"assets/backgrounds/background003.webp", isMemberOnly:false, maxInventory:1 },
-
-    { id:"sand001", category:"sands", name:"暖色细沙", description:"温暖细腻的浅色沙地，适合作为基础鱼缸底景。", previewImage:"assets/sands/sand001_preview.webp", price:20, resourcePath:"assets/sands/sand001.webp", isMemberOnly:false, maxInventory:1 },
-    { id:"sand002", category:"sands", name:"深海黑沙", description:"沉静的深色沙地，让鱼缸整体显得更加深邃。", previewImage:"assets/sands/sand002_preview.webp", price:35, resourcePath:"assets/sands/sand002.webp", isMemberOnly:false, maxInventory:1 },
-
-    { id:"sound001", category:"sounds", name:"海水白噪音", description:"轻柔的水下环境声，让专注时的鱼缸更加安静。", previewImage:"assets/sounds/sound001_preview.webp", price:25, resourcePath:"assets/sounds/sound001.mp3", isMemberOnly:false, maxInventory:1 },
-    { id:"sound002", category:"sounds", name:"轻柔气泡声", description:"细碎轻盈的气泡声，为专注时光增加一点流动感。", previewImage:"assets/sounds/sound002_preview.webp", price:40, resourcePath:"assets/sounds/sound002.mp3", isMemberOnly:true, maxInventory:1 }
-  ];
+  // 内置默认数据来自 game-data.js，只在配置接口不可用时使用；
+  // 正常情况下后台下发的配置会整体覆盖它，后台才是唯一权威数据源。
+  const DEFAULT_DATA = window.FISHTANK_DEFAULT_DATA || {
+    shopItems: [],
+    initialAquarium: { fish: [] },
+    initialInventory: {},
+    focusConfig: { minFocusDuration:25, maxFocusDuration:120, rewardTiers:[{ id:"tier-1", endMinute:25, normalBubblePerMinute:1, memberBubblePerMinute:2 }] },
+    visuals: {},
+    defaults: {}
+  };
+  let SHOP_ITEMS = cloneData(DEFAULT_DATA.shopItems || []);
 
   const API_BASE = window.FISHTANK_API_BASE || "https://focus-aquarium-api-316509-5-1491495221.sh.run.tcloudbase.com/api";
   // 后台「音效管理」下发的音频配置：{ categories:{bgm,prompt,sfx}, sounds:[...] }
   // 拉取失败时保持 null，前端沿用内置默认值，保证离线可用。
   let AUDIO_CONFIG = null;
+  syncAudioVolumeKeys(); // 配置还没来，先用内置分类把音量表建起来
   let FISH_ASSEMBLY = [];
-  let FOCUS_CONFIG = {
-    minFocusDuration: 25,
-    maxFocusDuration: 120,
-    rewardTiers: [
-      { id:"tier-1", endMinute:25, normalBubblePerMinute:1, memberBubblePerMinute:2 },
-      { id:"tier-2", endMinute:60, normalBubblePerMinute:2, memberBubblePerMinute:3 },
-      { id:"tier-3", endMinute:120, normalBubblePerMinute:3, memberBubblePerMinute:5 }
-    ]
-  };
+  let FOCUS_CONFIG = cloneData(DEFAULT_DATA.focusConfig);
 
   // ===== 配置加载状态提示 =====
   // 加载失败必须让用户看见：否则他会以为自己看到的就是后台最新配置，
@@ -1033,12 +1038,15 @@
         if(config && config.categories && Array.isArray(config.sounds)) AUDIO_CONFIG = config;
       }catch(_){ /* 音频配置解析失败时沿用内置音效 */ }
     }
-    // 这三步属于音频的附加处理：它们出错只会导致没有声音，
+    // 这几步属于音频的附加处理：它们出错只会导致没有声音，
     // 不应该被当成「配置加载失败」弹出吓人的提示条。
     try{
+      syncAudioVolumeKeys();       // 后台可能新增了分类，补上对应的音量项
       applyServerAudioDefaults();
+      refreshCategoryGains();      // 后台改了分类开关/音量，已建好的增益节点要重算
       normalizeAmbientSound();
       syncAmbientAudio();
+      renderAudioSliders();        // 按最新分类重建调音面板
     }catch(error){
       console.warn("应用音频配置失败，沿用内置音效：", error);
     }
@@ -1066,12 +1074,19 @@
     }
   }
 
-  // 后台配置的背景音（category==="bgm"、已启用、且有音频文件）→ 商店「白噪音」分类的商品。
+  // 哪个分类算「背景白噪音」：该分类下的音效可以装进鱼缸循环播放。
+  // 分类可增删，所以不能写死 bgm —— 默认优先取 bgm，被删了就退而取第一个分类。
+  function ambientCategoryKey(){
+    const keys = audioCategoryKeys();
+    return keys.includes("bgm") ? "bgm" : (keys[0] || "bgm");
+  }
+  // 后台配置的背景音（属于背景分类、已启用、且有音频文件）→ 商店「白噪音」分类的商品。
   // 价格/会员/描述优先沿用同 id 或同音频文件的旧商品，匹配不到则按免费处理。
   function serverSoundItems(){
     if(!AUDIO_CONFIG || !Array.isArray(AUDIO_CONFIG.sounds)) return [];
+    const ambientCategory = ambientCategoryKey();
     return AUDIO_CONFIG.sounds
-      .filter(sound => sound && sound.category === "bgm" && sound.enabled !== false && sound.resourcePath)
+      .filter(sound => sound && sound.category === ambientCategory && sound.enabled !== false && sound.resourcePath)
       .map(sound => {
         const legacy = SHOP_ITEMS.find(item => item.id === sound.id || item.resourcePath === sound.resourcePath) || {};
         return {
@@ -1094,14 +1109,26 @@
     if(!server.length) return SHOP_ITEMS;
     return SHOP_ITEMS.filter(item => item.category !== "sounds").concat(server);
   }
+  // 商品 id 对应的视觉样式字段：背景/沙子用 css，鱼/水草用 class。
+  const VISUAL_FIELD_BY_CATEGORY = { fish:"class", decorations:"class", backgrounds:"css", sands:"css" };
+  // 渲染不再按 id 写死：优先用后台商品自带的 visual，其次查内置样式表，最后用分类默认值。
+  // 这样后台新增的资源只要带上 visual 就能正常显示，不用改渲染代码。
+  function visualForItem(category, id){
+    const fallback = (DEFAULT_DATA.defaults && DEFAULT_DATA.defaults[category]) || {};
+    const table = (DEFAULT_DATA.visuals && DEFAULT_DATA.visuals[category]) || {};
+    const visual = { ...fallback, ...(table[id] || {}) };
+    const item = currentShopItems().find(candidate => candidate.category === category && (candidate.id === id || candidate.fishid === id));
+    const override = item && typeof item.visual === "string" ? item.visual.trim() : "";
+    const field = VISUAL_FIELD_BY_CATEGORY[category];
+    if(override && field) visual[field] = override;
+    return visual;
+  }
   // 玩家第一次进入（本地没有音量偏好）时，用后台配置的分类音量作为默认值；已有偏好则不覆盖。
   function applyServerAudioDefaults(){
     if(!AUDIO_CONFIG || !AUDIO_CONFIG.categories) return;
-    ["bgm", "prompt", "sfx"].forEach(key => {
-      if(localStorage.getItem("fishTank_" + key + "Volume") !== null) return;
-      const category = AUDIO_CONFIG.categories[key];
-      if(!category) return;
-      const volume = Number(category.volume);
+    Object.keys(AUDIO_CONFIG.categories).forEach(key => {
+      if(localStorage.getItem(audioStorageKey(key)) !== null) return;
+      const volume = Number(AUDIO_CONFIG.categories[key]?.volume);
       if(!Number.isFinite(volume)) return;
       audioVolumes[key] = Math.max(0, Math.min(100, volume));
     });
@@ -1127,24 +1154,8 @@
   // v0.2 初始状态
   // 玩家第一次进入游戏时，默认拥有并装备：
   // fish001 ×3、decoration001 ×1、background001 ×1、sand001 ×1、sound001 ×1
-  const INITIAL_AQUARIUM = {
-    background:"background001",
-    sand:"sand001",
-    decoration:"decoration001",
-    fish:[
-      {instanceId:"initial_fish_001",itemId:"fish001",x:200,y:200},
-      {instanceId:"initial_fish_002",itemId:"fish001",x:400,y:300},
-      {instanceId:"initial_fish_003",itemId:"fish001",x:300,y:400}
-    ],
-    ambientSound:"sound001"
-  };
-  const INITIAL_INVENTORY = {
-    fish:{fish001:3},
-    decorations:{decoration001:1},
-    backgrounds:{background001:1},
-    sands:{sand001:1},
-    sounds:{sound001:1}
-  };
+  const INITIAL_AQUARIUM = cloneData(DEFAULT_DATA.initialAquarium || { fish: [] });
+  const INITIAL_INVENTORY = cloneData(DEFAULT_DATA.initialInventory || {});
   function defaultAquarium(){
     return cloneData(INITIAL_AQUARIUM);
   }
@@ -1153,11 +1164,9 @@
   }
   function getDefaultSave(){
     const a=defaultAquarium(), p=defaultPlayer();
-    return { saveVersion:SAVE_VERSION, PlayerData:p, AquariumData:a, Settings:{ audio:{
-      bgm:Number(localStorage.getItem(LEGACY_AUDIO_KEYS.bgm) ?? 100),
-      prompt:Number(localStorage.getItem(LEGACY_AUDIO_KEYS.prompt) ?? 100),
-      sfx:Number(localStorage.getItem(LEGACY_AUDIO_KEYS.sfx) ?? 100)
-    }}};
+    const audio={};
+    audioCategoryKeys().forEach(key => { audio[key]=readStoredVolume(key, AUDIO_DEFAULTS[key] ?? 100); });
+    return { saveVersion:SAVE_VERSION, PlayerData:p, AquariumData:a, Settings:{ audio } };
   }
   let SaveData;
   try { SaveData=JSON.parse(localStorage.getItem(SAVE_KEY)||"null"); } catch(e){ SaveData=null; }
@@ -1165,6 +1174,45 @@
   SaveData.saveVersion=SAVE_VERSION;
   const PlayerData=SaveData.PlayerData;
   const AquariumData=SaveData.AquariumData;
+
+  // ===== 存档完整性校验 =====
+  // 本地存档可以被开发者工具直接改，这里给关键字段加签名，能发现被改过的存档。
+  // 注意：签名算法在客户端，挡不住铁了心的攻击者，它的作用是「发现」而非「阻止」；
+  // 真正的防篡改要等存档服务端化（见 /api/game/focus/* 的奖励结算）。
+  const SAVE_INTEGRITY_SALT = "fishtank-v0.2-integrity";
+  function computeSaveSignature(player){
+    const payload = JSON.stringify({
+      bubbles: Math.floor(Number(player.bubbles)||0),
+      isMember: player.isMember === true,
+      inventory: player.inventory || {}
+    });
+    const input = SAVE_INTEGRITY_SALT + payload;
+    let hash = 0x811c9dc5; // FNV-1a 32 位
+    for (let i = 0; i < input.length; i++){
+      hash ^= input.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return hash.toString(16).padStart(8,"0");
+  }
+  // 返回 "ok"（签名匹配）、"unsigned"（旧存档，尚无签名）或 "tampered"（签名不匹配）。
+  function verifySaveIntegrity(){
+    const signature = SaveData && SaveData.integrity && SaveData.integrity.signature;
+    if(!signature) return "unsigned";
+    return signature === computeSaveSignature(PlayerData) ? "ok" : "tampered";
+  }
+  // 启动时校验一次。签名不匹配说明存档被手改过：清掉泡泡与会员标记并重签。
+  // 旧存档没有签名属于正常升级，补签即可，不做惩罚。
+  const SAVE_INTEGRITY_STATUS = verifySaveIntegrity();
+  if(SAVE_INTEGRITY_STATUS === "tampered"){
+    const tamperedBubbles = Math.floor(Number(PlayerData.bubbles)||0);
+    PlayerData.bubbles = 0;
+    PlayerData.isMember = false;
+    saveGame();
+    window.__fishtankTamperDetected = { bubbles: tamperedBubbles };
+  }else if(SAVE_INTEGRITY_STATUS === "unsigned"){
+    saveGame(); // 老存档补签，避免下次误判
+  }
+
   function migrateData(){
     const inv=PlayerData.inventory=PlayerData.inventory||{};
     if(inv.plants && !inv.decorations) inv.decorations=inv.plants;
@@ -1202,6 +1250,8 @@
   ensureInventory();
   function saveGame(){
     SaveData.PlayerData=PlayerData; SaveData.AquariumData=AquariumData;
+    // 每次存档重算签名，保证正常游玩不会误报被篡改。
+    SaveData.integrity = { version:1, signature: computeSaveSignature(PlayerData) };
     localStorage.setItem(SAVE_KEY,JSON.stringify(SaveData));
   }
   function getInv(item){ return Number((PlayerData.inventory[item.category]||{})[item.id]||0); }
@@ -1243,10 +1293,9 @@
   function renderBubbles(){ document.getElementById("bubbleDisplay").textContent=`🫧 ${PlayerData.bubbles}`; }
   function renderAquarium(data){
     const tankEl=tank;
-    const bg=data.background==="background002"?"linear-gradient(to bottom,#274c68 0%,#427f91 66%,#6d6751 100%)":"linear-gradient(to bottom,#8bcbd9 0%,#9dd4dc 66%,#a9d6ce 100%)";
-    tankEl.style.background=bg;
+    tankEl.style.background=visualForItem("backgrounds", data.background).css;
     const sandEl=document.getElementById("sand");
-    sandEl.style.background=data.sand==="sand001"?"radial-gradient(circle at 15% 35%, rgba(151,121,68,.10) 0 1px, transparent 2px),radial-gradient(circle at 72% 65%, rgba(151,121,68,.08) 0 1px, transparent 2px),#dfcb92":"#b8a477";
+    sandEl.style.background=visualForItem("sands", data.sand).css;
     document.querySelectorAll(".plant").forEach(p=>{
       p.style.display="none";
     });
@@ -1257,11 +1306,7 @@
       tank.appendChild(aqPlant);
     }
     const plantId=data.decoration;
-    aqPlant.className="aq-plant "+(
-      plantId==="decoration002"?"aq-plant-tall":
-      plantId==="decoration003"?"aq-plant-red":
-      "aq-plant-green"
-    );
+    aqPlant.className="aq-plant "+visualForItem("decorations", plantId).class;
     aqPlant.innerHTML="<i></i><i></i><i></i>";
     aqPlant.style.display=plantId?"block":"none";
     if(typeof rebuildFishFromData==="function") rebuildFishFromData(data);
@@ -1277,9 +1322,7 @@
   }
 
   function fishClassForItem(itemId){
-    if(itemId==="fish002") return "fish small aq-blue";
-    if(itemId==="fish003") return "fish small aq-gold";
-    return "fish small";
+    return visualForItem("fish", itemId).class;
   }
 
   // 鱼缸中的鱼继续使用原来的鱼模型与朝向/游动逻辑。
@@ -1389,7 +1432,6 @@
     modal.setAttribute("aria-hidden","true");
   }
   let shopCategory="all";
-  const SHOP_CATEGORY_LABELS={all:"全部",fish:"鱼",decorations:"鱼缸装饰",backgrounds:"背景",sands:"沙子",sounds:"白噪音"};
 
   function renderSettlement(){
     const settlement=buildSettlement(TempAquariumData);
@@ -1413,26 +1455,13 @@
       const d=document.createElement("div"); d.className="v02-item";
       let preview=`<div class="v02-preview" data-preview="${item.id}">`;
       if(item.category==="fish"){
-        if(item.id==="fish002"){
-          preview+=`<div class="v02-preview-fish">🐟</div>`;
-        }else if(item.id==="fish003"){
-          preview+=`<div class="v02-preview-fish">🐠</div>`;
-        }else{
-          preview+=`<div class="v02-preview-fish">🐠</div>`;
-        }
+        preview+=`<div class="v02-preview-fish">${visualForItem("fish", item.id).emoji}</div>`;
       }else if(item.category==="decorations"){
-        if(item.id==="decoration002"){
-          preview+=`<div class="v02-plant-css v02-plant-tall"><i></i><i></i><i></i></div>`;
-        }else if(item.id==="decoration003"){
-          preview+=`<div class="v02-plant-css v02-plant-red"><i></i><i></i><i></i></div>`;
-        }else{
-          preview+=`<div class="v02-plant-css v02-plant-green"><i></i><i></i><i></i></div>`;
-        }
+        preview+=`<div class="v02-plant-css ${visualForItem("decorations", item.id).previewClass}"><i></i><i></i><i></i></div>`;
       }else if(item.category==="backgrounds"){
-        const bgClass=item.id==="background002"?"night":item.id==="background003"?"coral":"";
-        preview+=`<div class="v02-preview-bg ${bgClass}"></div>`;
+        preview+=`<div class="v02-preview-bg ${visualForItem("backgrounds", item.id).previewClass}"></div>`;
       }else if(item.category==="sands"){
-        preview+=`<div class="v02-preview-sand ${item.id==="sand002"?"dark":""}"></div>`;
+        preview+=`<div class="v02-preview-sand ${visualForItem("sands", item.id).previewClass}"></div>`;
       }else{
         preview+=`<div class="v02-preview-sound">🌊</div>`;
       }
@@ -1689,23 +1718,58 @@
     return reward;
   }
 
+  // ===== 专注会话：奖励由服务端结算 =====
+  // 开始时向服务端登记会话，结束时由服务端根据自己记录的时间算出奖励，
+  // 客户端无法凭空声明时长。任何一步失败都回落到本地计算，保证离线也能玩。
+  let focusSessionId = null;
+
+  async function beginServerFocusSession(plannedMinutes, isMember){
+    focusSessionId = null;
+    try{
+      const response = await fetch(`${API_BASE}/game/focus/start`, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ plannedMinutes, isMember })
+      });
+      if(!response.ok) return;
+      const body = await response.json();
+      const id = body && body.data && body.data.sessionId;
+      if(typeof id === "string" && id) focusSessionId = id;
+    }catch(_){ focusSessionId = null; }
+  }
+
+  // 返回 { reward, source }：source 为 "server" 表示服务端结算，"local" 表示离线兜底。
+  async function settleFocusReward(localReward){
+    if(!focusSessionId) return { reward: localReward, source: "local" };
+    const sessionId = focusSessionId;
+    focusSessionId = null; // 一次性使用，防止重复提交刷奖励
+    try{
+      const controller = typeof AbortController === "function" ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), 3000) : null;
+      const response = await fetch(`${API_BASE}/game/focus/complete`, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ sessionId }),
+        signal: controller ? controller.signal : undefined
+      });
+      if(timer) clearTimeout(timer);
+      if(!response.ok) return { reward: localReward, source: "local" };
+      const body = await response.json();
+      const reward = Number(body && body.data && body.data.reward);
+      if(!Number.isFinite(reward) || reward < 0) return { reward: localReward, source: "local" };
+      return { reward, source: "server", detail: body.data };
+    }catch(_){
+      return { reward: localReward, source: "local" };
+    }
+  }
+
 
   let audioCtx = null;
   let masterGain = null;
-  let bgmGain = null;
-  let promptGain = null;
-  let sfxGain = null;
   let audioMuted = false;
+  // 每个分类一个增益节点，按需创建 —— 分类是动态的，不能再写死三个变量。
+  const categoryGains = new Map();
 
-  const AUDIO_DEFAULTS = { bgm:100, prompt:100, sfx:100 };
-  let audioVolumes = {
-    bgm: Number(localStorage.getItem("fishTank_bgmVolume") ?? AUDIO_DEFAULTS.bgm),
-    prompt: Number(localStorage.getItem("fishTank_promptVolume") ?? AUDIO_DEFAULTS.prompt),
-    sfx: Number(localStorage.getItem("fishTank_sfxVolume") ?? AUDIO_DEFAULTS.sfx)
-  };
-  audioVolumes.bgm = Math.max(0, Math.min(100, audioVolumes.bgm));
-  audioVolumes.prompt = Math.max(0, Math.min(100, audioVolumes.prompt));
-  audioVolumes.sfx = Math.max(0, Math.min(100, audioVolumes.sfx));
   let waterAudio = null;
 
   const FALLBACK_AUDIO_SRC = (window.FISHTANK_ASSET_BASE || '') + 'assets/sounds/water-ambient.mp3';
@@ -1718,6 +1782,12 @@
     const volume = Number(category.volume);
     if(!Number.isFinite(volume)) return 1;
     return Math.max(0, Math.min(100, volume)) / 100;
+  }
+  // 当前正在播放的背景音所属的分类（用于给它单独调音量）。
+  function ambientSoundCategory(){
+    const list = serverSoundItems();
+    const sound = list.find(item => item.id === currentAmbientId()) || list[0];
+    return (sound && sound.category) || ambientCategoryKey();
   }
   function currentAmbientId(){ return (TempAquariumData && TempAquariumData.ambientSound) || (AquariumData && AquariumData.ambientSound) || ""; }
   // 装点鱼缸里选中的背景音 → 对应音频文件；找不到就回落到第一个可用音效，再回落到内置文件。
@@ -1749,25 +1819,35 @@
     if(p && typeof p.then === "function") p.then(() => fadeInWater(1200)).catch(()=>{});
   }
 
+  // 取分类的增益节点，没有就现建一个接到 master 上。分类随时可能新增，不能预先写死。
+  // 增益 = 玩家滑块 × 后台分类总控（关闭即 0，音量作为上限系数）。
+  function ensureCategoryGain(key){
+    if(!audioCtx || !masterGain) return null;
+    if(categoryGains.has(key)) return categoryGains.get(key);
+    const gain = audioCtx.createGain();
+    gain.gain.value = ((audioVolumes[key] ?? 100) / 100) * categoryScale(key);
+    gain.connect(masterGain);
+    categoryGains.set(key, gain);
+    return gain;
+  }
+  // 后台配置变化后，已建好的增益节点要跟着重算，否则改了分类音量听不出区别。
+  function refreshCategoryGains(){
+    if(!audioCtx) return;
+    categoryGains.forEach((gain, key) => {
+      gain.gain.setTargetAtTime(((audioVolumes[key] ?? 100) / 100) * categoryScale(key), audioCtx.currentTime, 0.02);
+    });
+  }
+
   function ensureAudio(){
     if(!audioCtx){
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if(!Ctx) return false;
       audioCtx = new Ctx();
       masterGain = audioCtx.createGain();
-      bgmGain = audioCtx.createGain();
-      promptGain = audioCtx.createGain();
-      sfxGain = audioCtx.createGain();
-
       masterGain.gain.value = audioMuted ? 0 : 0.72;
-      bgmGain.gain.value = audioVolumes.bgm / 100;
-      promptGain.gain.value = audioVolumes.prompt / 100;
-      sfxGain.gain.value = audioVolumes.sfx / 100;
-
-      bgmGain.connect(masterGain);
-      promptGain.connect(masterGain);
-      sfxGain.connect(masterGain);
       masterGain.connect(audioCtx.destination);
+      // 为当前已知的分类各建一个增益节点；之后新增的分类由 ensureCategoryGain 懒创建。
+      audioCategoryKeys().forEach(key => ensureCategoryGain(key));
     }
     if(audioCtx.state === "suspended") audioCtx.resume().catch(()=>{});
     return true;
@@ -1790,7 +1870,8 @@
       if(!waterAudio || audioMuted) return;
       const t = Math.min(1, (now-start)/duration);
       const eased = t*t*(3-2*t);
-      waterAudio.volume = 0.38 * (audioVolumes.bgm / 100) * categoryScale("bgm") * eased;
+      const ambientKey = ambientSoundCategory();
+      waterAudio.volume = 0.38 * ((audioVolumes[ambientKey] ?? 100) / 100) * categoryScale(ambientKey) * eased;
       if(t < 1) requestAnimationFrame(fade);
     };
     requestAnimationFrame(fade);
@@ -1875,10 +1956,7 @@
   function tone(freq, duration, type="sine", volume=0.14, when=0, category="sfx"){
     if(!ensureAudio() || audioMuted) return;
 
-    const categoryGain =
-      category === "prompt" ? promptGain :
-      category === "bgm" ? bgmGain :
-      sfxGain;
+    const categoryGain = ensureCategoryGain(category);
     if(!categoryGain) return;
 
     const now = audioCtx.currentTime + when;
@@ -1955,6 +2033,8 @@
     updateDevStatus();
     // 按文档：会员状态以点击“开始专注”瞬间为准。
     sessionIsMember = PlayerData.isMember;
+    // 向服务端登记本次专注，结束时由服务端结算奖励（失败则本地兜底）。
+    beginServerFocusSession(minutes, sessionIsMember);
 
     // 清除现有的呈现动画类，触发泡泡向上浮动消散动画
     appTitle.classList.remove("bubble-appear");
@@ -2023,44 +2103,35 @@ function resetFocus(completed) {
     remaining = minutes * 60;
     renderTime();
 
-    // 手动提前结束：按照实际已经专注的完整分钟数发放泡泡。
-    if (!completed) {
-      const earlyReward = focusRewardMinutes(elapsedMinutes, sessionIsMember);
+    // 提前结束与自然完成走同一套结算，区别只在本地兜底值用哪个分钟数：
+    // 提前结束按实际专注分钟，自然完成按计划分钟。
+    const localMinutes = completed ? Math.floor(durationSeconds / 60) : elapsedMinutes;
+    const localReward = focusRewardMinutes(localMinutes, sessionIsMember);
 
-      if (earlyReward > 0) {
-        PlayerData.bubbles += earlyReward;
+    // 先按本地值即时反馈，动画不等待网络；服务端返回后再校正差额。
+    if (localReward > 0) {
+      PlayerData.bubbles += localReward;
+      saveGame();
+      renderBubbles();
+    }
+
+    completionReward.textContent = `本次专注获得了 ${localReward} 泡泡 🫧`;
+    playCompleteSound();
+    if (completed) timer.classList.remove("complete-pulse");
+    completionFlash.classList.add("show");
+    completionFlash.setAttribute("aria-hidden","false");
+    if (navigator.vibrate) navigator.vibrate([120,70,180]);
+
+    // 服务端结算：以服务端结果为准。差额补正，服务端算得少就扣回。
+    settleFocusReward(localReward).then(settlement => {
+      const delta = settlement.reward - localReward;
+      if (delta !== 0) {
+        PlayerData.bubbles = Math.max(0, PlayerData.bubbles + delta);
         saveGame();
         renderBubbles();
       }
-
-      completionReward.textContent = `本次专注获得了 ${earlyReward} 泡泡 🫧`;
-      completionFlash.classList.add("show");
-      completionFlash.setAttribute("aria-hidden","false");
-      playCompleteSound();
-      if (navigator.vibrate) navigator.vibrate([120,70,180]);
-    }
-
-    // 自然完成：按照本次专注的完整分钟数结算。
-    if (completed) {
-      const reward = focusRewardMinutes(
-        Math.floor(durationSeconds / 60),
-        sessionIsMember
-      );
-
-      if (reward > 0) {
-        PlayerData.bubbles += reward;
-        saveGame();
-        renderBubbles();
-      }
-
-      completionReward.textContent = `本次专注获得了 ${reward} 泡泡 🫧`;
-      playCompleteSound();
-      timer.classList.remove("complete-pulse");
-      completionFlash.classList.add("show");
-      completionFlash.setAttribute("aria-hidden","false");
-
-      if (navigator.vibrate) navigator.vibrate([120,70,180]);
-    }
+      completionReward.textContent = `本次专注获得了 ${settlement.reward} 泡泡 🫧`;
+    }).catch(() => {});
   }
 
   let fishStates = [];
@@ -2248,19 +2319,35 @@ const elemToRemove = nearest.el;
   // 这样点击页面任意位置都能恢复被浏览器拦截的自动播放。
 
   // v0.11 音频分类调节：保持在同一个主 IIFE 内，避免破坏鱼缸主逻辑。
+  // 分类可增删，滑块因此按 AUDIO_CONFIG 动态生成，不再写死三个。
   const audioSettingsToggle = document.getElementById("audioSettingsToggle");
   const audioSettings = document.getElementById("audioSettings");
-  const bgmSlider = document.getElementById("bgmVolume");
-  const promptSlider = document.getElementById("promptVolume");
-  const sfxSlider = document.getElementById("sfxVolume");
+
+  function renderAudioSliders(){
+    const container = document.getElementById("audioSliders");
+    if(!container) return;
+    const keys = audioCategoryKeys();
+    container.innerHTML = keys.map(key => {
+      const volume = audioVolumes[key] ?? 100;
+      const label = escapeHtml(audioCategoryLabel(key));
+      return `<div class="audio-slider-row"><div class="audio-slider-label"><span>${label}</span><span data-volume-value="${escapeHtml(key)}">${volume}%</span></div><input type="range" min="0" max="100" step="1" value="${volume}" data-volume-slider="${escapeHtml(key)}" aria-label="${label}音量"></div>`;
+    }).join("");
+    container.querySelectorAll("[data-volume-slider]").forEach(slider => {
+      slider.addEventListener("input", () => {
+        const key = slider.dataset.volumeSlider;
+        const value = container.querySelector(`[data-volume-value="${CSS.escape(key)}"]`);
+        if(value) value.textContent = slider.value + "%";
+        setAudioCategoryVolume(key, slider.value);
+      });
+    });
+  }
 
   function updateAudioSettingsUI(){
-    const pairs = [
-      ["bgm", bgmSlider, document.getElementById("bgmVolumeValue")],
-      ["prompt", promptSlider, document.getElementById("promptVolumeValue")],
-      ["sfx", sfxSlider, document.getElementById("sfxVolumeValue")]
-    ];
-    pairs.forEach(([key, slider, value]) => {
+    const container = document.getElementById("audioSliders");
+    if(!container) return;
+    audioCategoryKeys().forEach(key => {
+      const slider = container.querySelector(`[data-volume-slider="${CSS.escape(key)}"]`);
+      const value = container.querySelector(`[data-volume-value="${CSS.escape(key)}"]`);
       if(slider) slider.value = audioVolumes[key];
       if(value) value.textContent = audioVolumes[key] + "%";
     });
@@ -2269,32 +2356,25 @@ const elemToRemove = nearest.el;
   function setAudioCategoryVolume(category, value){
     const v = Math.max(0, Math.min(100, Number(value)));
     audioVolumes[category] = v;
-    localStorage.setItem("fishTank_" + category + "Volume", String(v));
+    localStorage.setItem(audioStorageKey(category), String(v));
     if (SaveData && SaveData.Settings && SaveData.Settings.audio) {
       SaveData.Settings.audio[category] = v;
       saveGame();
     }
 
-    if(category === "bgm"){
-      if(waterAudio && !audioMuted && !waterAudio.paused){
-        waterAudio.volume = 0.38 * v / 100 * categoryScale("bgm");
-      }
-      if(bgmGain && audioCtx){
-        bgmGain.gain.setTargetAtTime(v / 100, audioCtx.currentTime, 0.02);
-      }
-    }else if(category === "prompt"){
-      if(promptGain && audioCtx){
-        promptGain.gain.setTargetAtTime(v / 100, audioCtx.currentTime, 0.02);
-      }
-    }else if(category === "sfx"){
-      if(sfxGain && audioCtx){
-        sfxGain.gain.setTargetAtTime(v / 100, audioCtx.currentTime, 0.02);
-      }
+    // 背景白噪音走 HTMLAudio，不在 Web Audio 图里，要单独改它的音量。
+    if(category === ambientSoundCategory() && waterAudio && !audioMuted && !waterAudio.paused){
+      waterAudio.volume = 0.38 * v / 100 * categoryScale(category);
+    }
+    const gain = categoryGains.get(category);
+    if(gain && audioCtx){
+      gain.gain.setTargetAtTime((v / 100) * categoryScale(category), audioCtx.currentTime, 0.02);
     }
 
     updateAudioSettingsUI();
   }
 
+  renderAudioSliders();
   updateAudioSettingsUI();
 
   if(audioSettingsToggle && audioSettings){
@@ -2319,26 +2399,18 @@ const elemToRemove = nearest.el;
     });
   }
 
-  if(bgmSlider){
-    bgmSlider.addEventListener("input", function(e){
-      setAudioCategoryVolume("bgm", e.target.value);
-    });
-  }
-  if(promptSlider){
-    promptSlider.addEventListener("input", function(e){
-      setAudioCategoryVolume("prompt", e.target.value);
-    });
-  }
-  if(sfxSlider){
-    sfxSlider.addEventListener("input", function(e){
-      setAudioCategoryVolume("sfx", e.target.value);
-    });
-  }
+  // 滑块的事件绑定在 renderAudioSliders() 里按分类动态挂，这里不再逐个写死。
 
   // 无论配置有没有拉到，首屏都必须渲染出来：
   // 之前失败时整个 then 分支被跳过，鱼缸会一直空白且没有任何提示。
   async function bootstrapConfig(){
     await syncPublishedConfig();
+    // 内置数据文件和页面不在同一目录时，商品列表会是空的，这个要让用户看见。
+    if(!window.FISHTANK_DEFAULT_DATA) showConfigNotice("内置数据文件 game-data.js 未加载，商品列表为空。请确认它与 index.html 放在同一目录。");
+    // 存档被改过的提示优先级最高：它影响的是账号数据本身。
+    if(window.__fishtankTamperDetected){
+      showConfigNotice(`检测到本地存档被外部修改，泡泡与会员状态已重置（原泡泡 ${window.__fishtankTamperDetected.bubbles}）。如非本人操作，请检查设备安全。`);
+    }
     const bounds = focusDurationBounds();
     minutes = Math.max(bounds.min, Math.min(bounds.max, minutes));
     remaining = minutes * 60;
