@@ -5,6 +5,10 @@ import multer from "multer";
 import { createRepository } from "./repository.js";
 import { UPLOAD_ROOT, MAX_UPLOAD_MB, AUDIO_EXTENSIONS, storeAudio, ensureUploadDir, resolveAudioPaths, currentDriver } from "./uploads.js";
 import { resolveAllowList, createOriginChecker } from "./cors.js";
+import { validateStartRequest } from "./reward.js";
+import { createFocusSessionStore } from "./focus-session.js";
+import { validateAudioConfig } from "./audio-config.js";
+import { resolveAdminApiKey, checkProductionConfig, warnWeakAdminKey } from "./runtime-guard.js";
 
 const app = express();
 const port = Number(process.env.PORT || 80);
@@ -66,13 +70,22 @@ app.use("/uploads", express.static(UPLOAD_ROOT, {
 // Admin API key authentication.
 // When ADMIN_API_KEY is set, all /api/admin/* requests must include
 // an "x-admin-key" header matching the configured value.
-// When not set (e.g. local dev), admin routes remain open for convenience.
-const adminApiKey = process.env.ADMIN_API_KEY || "";
+// When not set (e.g. local dev), admin routes remain open for convenience —
+// 但生产环境不允许这种状态，下面会直接拒绝启动。
+const adminApiKey = resolveAdminApiKey();
 const requireAdminAuth = (req, res, next) => {
   if (!adminApiKey) return next();
   if (req.get("x-admin-key") === adminApiKey) return next();
   return res.status(401).json({ error: "未授权：请提供有效的管理密钥" });
 };
+
+// 生产环境漏配管理密钥是"谁都能改游戏配置"级别的风险，宁可起不来也不能带病上线。
+// 放在建仓库之前：连数据库都不用连，直接退出。
+const productionConfigError = checkProductionConfig({ nodeEnv: process.env.NODE_ENV, adminApiKey });
+if (productionConfigError) {
+  console.error(productionConfigError);
+  process.exit(1);
+}
 
 const types = new Set(["decorations", "fish", "focus", "audio"]);
 const singletonTypes = new Set(["focus", "audio"]);
@@ -82,20 +95,7 @@ const validate = (type, data) => {
   if (type === "decorations" && (!data.id || !data.category || !data.name)) return "商品必须包含 id、category、name";
   if (type === "fish" && (!data.fishid || !data.name)) return "鱼类必须包含 fishid、name";
   if (type === "focus" && (!Number.isFinite(Number(data.minFocusDuration)) || !Array.isArray(data.rewardTiers))) return "专注配置必须包含 minFocusDuration 和 rewardTiers";
-  if (type === "audio") {
-    if (!data.categories || typeof data.categories !== "object") return "音频配置必须包含 categories";
-    if (!Array.isArray(data.sounds)) return "音频配置必须包含 sounds 数组";
-    for (const sound of data.sounds) {
-      if (!sound.id || !sound.name || !sound.category) return "每个音效必须包含 id、name、category";
-      if (!["bgm", "prompt", "sfx"].includes(sound.category)) return `音效分类无效：${sound.category}`;
-      const volume = Number(sound.volume);
-      if (!Number.isFinite(volume) || volume < 0 || volume > 100) return `音效 ${sound.id} 的音量必须在 0-100 之间`;
-    }
-    for (const [key, category] of Object.entries(data.categories)) {
-      const volume = Number(category?.volume);
-      if (!Number.isFinite(volume) || volume < 0 || volume > 100) return `分类 ${key} 的音量必须在 0-100 之间`;
-    }
-  }
+  if (type === "audio") return validateAudioConfig(data);
   return null;
 };
 const repositoryReady = createRepository().then(instance => {
@@ -179,6 +179,41 @@ for (const type of types) {
   });
 }
 
+// ===== 专注会话与奖励结算 =====
+// 服务端记录开始时间，结算时用自己记录的时间推算实际专注时长，
+// 客户端无法凭空声明时长。会话存在内存里，进程重启即失效 —— 这是可接受的：
+// 结算失败时客户端会回落到本地计算，保证离线也能玩。
+const focusSessions = createFocusSessionStore();
+
+async function getPublishedFocusConfig() {
+  const published = await (await getRepository()).list("focus", true);
+  const record = published[0];
+  if (!record) return null;
+  return record.publishedData || record.data;
+}
+
+app.post("/api/game/focus/start", async (req, res) => {
+  try {
+    const focusConfig = await getPublishedFocusConfig();
+    if (!focusConfig) return res.status(503).json({ error: "专注配置不可用" });
+    const errorMessage = validateStartRequest(req.body, focusConfig);
+    if (errorMessage) return res.status(400).json({ error: errorMessage });
+    res.status(201).json({ data: focusSessions.start(req.body) });
+  } catch (error) { sendError(res, error); }
+});
+
+app.post("/api/game/focus/complete", async (req, res) => {
+  try {
+    const sessionId = req.body && req.body.sessionId;
+    if (!sessionId || typeof sessionId !== "string") return res.status(400).json({ error: "缺少 sessionId" });
+    const focusConfig = await getPublishedFocusConfig();
+    if (!focusConfig) return res.status(503).json({ error: "专注配置不可用" });
+    const settlement = focusSessions.settle(sessionId, focusConfig);
+    if (!settlement) return res.status(404).json({ error: "专注会话不存在或已过期" });
+    res.json({ data: settlement });
+  } catch (error) { sendError(res, error); }
+});
+
 // 音频上传：必须注册在 /api/admin/:type 之前，否则会被当成配置类型吃掉。
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -256,7 +291,6 @@ app.post("/api/admin/:type/:id/publish", async (req, res) => {
 app.listen(port, "0.0.0.0", () => {
   console.log(`Fishtank API listening on port ${port}`);
   console.log(`CORS 来源（${originsSource === "env" ? "来自 CORS_ORIGINS" : "内置兜底名单"}）：${allowAllOrigins ? "*（全部放行）" : allowedOrigins.join(", ")}`);
-  if (process.env.NODE_ENV === "production" && !adminApiKey) {
-    console.warn("WARNING: ADMIN_API_KEY is not set. Admin endpoints are unprotected in production.");
-  }
+  console.log(`管理接口鉴权：${adminApiKey ? "已启用（x-admin-key）" : "未启用 —— 仅限本地开发，生产环境会拒绝启动"}`);
+  warnWeakAdminKey(adminApiKey);
 });
