@@ -27,7 +27,7 @@ console.log(`[1/3] 启动服务（端口 ${PORT}）…`);
 // 不设 NODE_ENV：走开发模式的内存仓库，测试不依赖云环境。
 const server = spawn(process.execPath, ["server.js"], {
   cwd: apiDir,
-  env: { ...process.env, PORT, ADMIN_API_KEY: ADMIN_KEY, CORS_ORIGINS: "*" },
+  env: { ...process.env, PORT, EXTRA_PORTS: "", ADMIN_API_KEY: ADMIN_KEY, CORS_ORIGINS: "*" },
   stdio: ["ignore", "inherit", "inherit"]
 });
 

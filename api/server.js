@@ -12,7 +12,20 @@ import { validateAudioConfig } from "./audio-config.js";
 import { resolveAdminApiKey, checkProductionConfig, warnWeakAdminKey } from "./runtime-guard.js";
 
 const app = express();
-const port = Number(process.env.PORT || 80);
+const host = process.env.HOST || "0.0.0.0";
+// 监听端口。
+// 主端口 PORT 默认 8080（非特权端口）：容器以非 root（USER node）运行，
+// 绑 1024 以下的特权端口在部分容器运行时或安全加固策略下会被内核拒绝（EACCES）。
+// EXTRA_PORTS 再额外听一组端口，默认带上 80 —— 云托管控制台的「服务端口」
+// 可能被固定成 80 且创建后不便修改，应用同时听两个端口，平台探针打哪个都能通。
+// 端口配置确定后，把 EXTRA_PORTS 设成空串即可关掉。
+// 改这些值时必须同步改云托管控制台的「服务端口」。
+const primaryPort = Number(process.env.PORT || 8080);
+const extraPorts = String(process.env.EXTRA_PORTS ?? "80")
+  .split(",")
+  .map(value => Number(value.trim()))
+  .filter(value => Number.isInteger(value) && value > 0 && value <= 65535 && value !== primaryPort);
+const listenPorts = [primaryPort, ...extraPorts];
 
 // 云开发 SDK 内部偶发的异步错误不能把整个 API 进程带走，这里兜住并记日志。
 process.on("unhandledRejection", error => {
@@ -306,21 +319,23 @@ async function selfCheck(server) {
   try {
     const address = server.address();
     if (!address || typeof address !== "object") {
-      console.log(`启动自检：监听地址异常（${String(address)}）`);
+      // address() 为 null 的语义就是"没有在监听"。真机上走到这里说明绑定其实没成功，
+      // 所以把 listening 一起打出来，避免下次还要靠猜。
+      console.log(`启动自检：监听地址异常（${String(address)}，server.listening=${server.listening}）`);
       return;
     }
     console.log(`启动自检：已绑定 ${address.address}:${address.port}（family ${address.family}）`);
 
     // 容器里真正要能通的是网卡地址（平台的探针打的就是它），回环地址只是对照。
-    const hosts = ["127.0.0.1"];
+    const candidates = ["127.0.0.1"];
     for (const list of Object.values(os.networkInterfaces())) {
       for (const item of list || []) {
-        if (item.family === "IPv4" && !item.internal) hosts.push(item.address);
+        if (item.family === "IPv4" && !item.internal) candidates.push(item.address);
       }
     }
 
-    for (const host of hosts) {
-      const url = `http://${host}:${address.port}/api/health`;
+    for (const target of candidates) {
+      const url = `http://${target}:${address.port}/api/health`;
       try {
         const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
         console.log(`启动自检：${url} -> ${res.status}`);
@@ -334,10 +349,50 @@ async function selfCheck(server) {
   }
 }
 
-const server = app.listen(port, "0.0.0.0", () => {
-  console.log(`Fishtank API listening on port ${port}`);
-  console.log(`CORS 来源（${originsSource === "env" ? "来自 CORS_ORIGINS" : "内置兜底名单"}）：${allowAllOrigins ? "*（全部放行）" : allowedOrigins.join(", ")}`);
-  console.log(`管理接口鉴权：${adminApiKey ? "已启用（x-admin-key）" : "未启用 —— 仅限本地开发，生产环境会拒绝启动"}`);
-  warnWeakAdminKey(adminApiKey);
-  void selfCheck(server);
-});
+// Express 5 的 app.listen 会把回调同时挂到 server 的 'error' 事件上：
+//     server.once('error', done)
+// 也就是说绑定失败时，这个回调会被当作错误回调调用，第一个参数是 error。
+// 旧代码忽略了参数，于是绑定失败照样打印 "listening on port"，
+// 而 server.address() 返回 null —— 真机日志里因此只有一句
+// 「启动自检：监听地址异常（null）」，应用侧一行错误都没有，
+// 平台那边只能看到 connection refused。三轮部署失败都卡在这个静默上。
+// 现在每个端口各自报告结果，并且至少要有一个端口听上才算启动成功。
+function startListening(listenPort) {
+  const state = { failed: false };
+  return new Promise(resolve => {
+    const server = app.listen(listenPort, host, error => {
+      if (error) {
+        state.failed = true;
+        const code = error.code || error.name || "unknown";
+        console.error(`监听 ${host}:${listenPort} 失败（${code}）—— ${error.message}`);
+        if (code === "EACCES") {
+          console.error("  原因：当前用户无权绑定该端口。容器以非 root（USER node）运行，1024 以下的特权端口会被内核拒绝。");
+        } else if (code === "EADDRINUSE") {
+          console.error("  原因：该端口已被占用，容器里可能有别的进程先占了它。");
+        }
+        return resolve(false);
+      }
+      console.log(`Fishtank API listening on ${host}:${listenPort}`);
+      void selfCheck(server);
+      resolve(true);
+    });
+
+    // 运行期错误（accept 失败、句柄耗尽等）也要可见。
+    // Express 用的是 once('error')，只消费第一次；不自己兜住的话，后续 error 会变成未捕获异常。
+    // 绑定阶段的那一次已经由上面的回调报告过，这里跳过，避免同一件事打两遍。
+    server.on("error", error => {
+      if (state.failed) return;
+      console.error(`HTTP 服务运行期错误（${error.code || error.name || "unknown"}）：${error.message}`);
+    });
+  });
+}
+
+const listening = await Promise.all(listenPorts.map(startListening));
+if (!listening.some(Boolean)) {
+  console.error(`所有端口都无法监听（${listenPorts.join(", ")}），进程退出。`);
+  console.error("请核对云托管控制台的「服务端口」配置，以及容器内是否有其他进程占用该端口。");
+  process.exit(1);
+}
+console.log(`CORS 来源（${originsSource === "env" ? "来自 CORS_ORIGINS" : "内置兜底名单"}）：${allowAllOrigins ? "*（全部放行）" : allowedOrigins.join(", ")}`);
+console.log(`管理接口鉴权：${adminApiKey ? "已启用（x-admin-key）" : "未启用 —— 仅限本地开发，生产环境会拒绝启动"}`);
+warnWeakAdminKey(adminApiKey);

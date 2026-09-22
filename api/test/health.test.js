@@ -42,6 +42,7 @@ const server = spawn(process.execPath, ["server.js"], {
   env: {
     ...process.env,
     PORT,
+    EXTRA_PORTS: "",
     NODE_ENV: "production",
     ADMIN_API_KEY: "health-test-key-0123456789",
     CLOUDBASE_ENV_ID: "test-nonexistent-env-for-health-test",
@@ -97,7 +98,7 @@ try {
     const settled = await health();
     console.log(`     数据层最终状态：${settled.body.repository}`);
     chkTrue("数据层失败后探针仍为 200", settled.status === 200, `status=${settled.status}`);
-    chkTrue("启动日志里有 listening（对照用）", logs.includes("listening on port"), "");
+    chkTrue("启动日志里有 listening（对照用）", new RegExp(`listening on [^\\s]+:${PORT}`).test(logs), "");
 
     // 启动自检是区分「应用没监听」和「平台探不到」的唯一依据，不能悄悄失效。
     const logDeadline = Date.now() + 3000;

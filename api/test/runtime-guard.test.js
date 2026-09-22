@@ -44,7 +44,7 @@ chk("弱密钥不抛错只记录", warnWeakAdminKey("abc", () => {}).includes("3
 
 // ---------- 2. 端到端：真起进程 ----------
 console.log("--- 端到端启动校验 ---");
-const baseEnv = { ...process.env, PORT: "4181", CORS_ORIGINS: "*" };
+const baseEnv = { ...process.env, PORT: "4181", EXTRA_PORTS: "", CORS_ORIGINS: "*" };
 delete baseEnv.ADMIN_API_KEY;
 delete baseEnv.NODE_ENV;
 

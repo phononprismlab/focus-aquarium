@@ -27,6 +27,7 @@ npm test
 | `audio-categories.test.js` | audio config validation, plus the category helpers extracted from `index.html` / `admin.html` |
 | `cors.test.js` | origin parsing, trailing-slash normalisation, wildcard and `null` rules |
 | `health.test.js` | `/api/health` answers immediately even while the data layer is still initialising |
+| `bind-failure.test.js` | a failed `listen` must be loud: reports the real error code, does not print a misleading `listening`, and exits non-zero |
 | `runtime-guard.test.js` | `ADMIN_API_KEY` handling, and a real process refusing to boot in production without it |
 
 The HTTP smoke test starts and stops its own server, so one command is enough:
@@ -73,18 +74,46 @@ A trailing slash on an entry is stripped (`https://a.com/` behaves as `https://a
 Rejected origins get no CORS headers at all — that is what makes the browser block them. The rejection is logged with the offending origin.
 If `CORS_ORIGINS` is unset the service falls back to a built-in list (localhost plus the two known test domains) and logs a warning; check `GET /api/health` → `cors: "fallback"` to detect that in production.
 
+## Ports, and why the listen callback is checked
+
+The service listens on `PORT` (default **8080**) and `HOST` (default `0.0.0.0`). The default is deliberately not `80`: the image runs as the non-root `node` user, and binding a privileged port below 1024 is rejected (`EACCES`) under some container runtimes and hardened security policies.
+
+`EXTRA_PORTS` (comma separated, default `80`) makes the process listen on additional ports with the same app. It exists because the CloudBase console's service port may be pinned to `80` and not editable after the service is created — with both `8080` and `80` bound, the platform probe reaches the app whichever port it dials. A port that fails to bind is reported and skipped; the process only exits when **every** port fails, so a busy port cannot take the whole service down. Once the console's port is settled, set `EXTRA_PORTS` to an empty string to turn this off.
+
+**If you change `PORT`, change the CloudBase console's service port to the same value.** The platform probe dials the container on the configured service port; a mismatch shows up as `connection refused` even though the app is running fine.
+
+`app.listen(port, host, callback)` cannot be trusted to tell you whether the bind worked. Express 5 attaches that callback to the server's `error` event as well:
+
+```js
+app.listen = function listen() {
+  var server = http.createServer(this)
+  var args = slice.call(arguments)
+  if (typeof args[args.length - 1] === 'function') {
+    var done = args[args.length - 1] = once(args[args.length - 1])
+    server.once('error', done)          // ← a failed bind calls the same callback
+  }
+  return server.listen.apply(server, args)
+}
+```
+
+So a failed bind invokes the callback with an `Error` as its first argument. A callback that ignores its parameters therefore logs `listening` on a port nothing is listening on, and `server.address()` returns `null` — which is exactly the shape of the startup self-check line `监听地址异常（null）`. The process does not crash either, because Express consumed the `error` event.
+
+That combination produced three failed deployments in a row: the app log said `listening`, the platform probe said `connection refused`, and no error was logged anywhere. The callback now takes the error, prints the code plus a plain-language cause, and exits non-zero. `bind-failure.test.js` locks this in.
+
+The startup self-check still runs after a successful bind. It probes `/api/health` once via loopback and once via the container's own NIC address, so the log distinguishes "the app never listened" from "the app listens but the platform cannot reach it".
+
 ## Docker
 
 ```
 docker build -t fishtank-api ./api
-docker run --rm -p 8080:80 \
+docker run --rm -p 8080:8080 \
   -e CORS_ORIGINS=https://your-app.example.com \
   -e ADMIN_API_KEY=... \
   -e CLOUDBASE_ENV_ID=... \
   fishtank-api
 ```
 
-The image pins `node:22-bookworm-slim`, sets `NODE_ENV=production`, runs as the non-root `node` user and declares a `HEALTHCHECK` against `/api/health`. `.dockerignore` keeps host `node_modules`, `.env` and `uploads/` out of the image.
+The image pins `node:22-bookworm-slim`, sets `NODE_ENV=production`, listens on `8080`, runs as the non-root `node` user and declares a `HEALTHCHECK` against `/api/health`. `.dockerignore` keeps host `node_modules`, `.env` and `uploads/` out of the image.
 
 > **The image sets `NODE_ENV=production`, so `ADMIN_API_KEY` is mandatory.** A container started without it will exit immediately instead of serving an unprotected admin API. Set it in the CloudBase console (or with `-e`) before deploying this change.
 
