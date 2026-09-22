@@ -12,7 +12,7 @@
 Without `CLOUDBASE_ENV_ID`, the API uses an in-memory repository for local development. Set `CLOUDBASE_ENV_ID` and optionally `CLOUDBASE_COLLECTION` to use CloudBase.
 In production (`NODE_ENV=production`), `CLOUDBASE_ENV_ID` is required and the process exits instead of using the in-memory repository. Set `CORS_ORIGINS` to a comma-separated list of allowed frontend origins. For local pages opened directly from disk, use `null` as an allowed origin when needed.
 
-The admin endpoints currently do not have authentication. Keep the service private or add access control before exposing `/api/admin/*` publicly.
+Set `ADMIN_API_KEY` to protect all `/api/admin/*` endpoints. When set, admin requests must include an `x-admin-key` header matching this value. When unset (local dev), admin endpoints remain open. Always set this in production.
 
 ## Endpoints
 

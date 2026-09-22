@@ -28,11 +28,28 @@ const seed = {
       { id: "tier-2", endMinute: 60, normalBubblePerMinute: 2, memberBubblePerMinute: 3 },
       { id: "tier-3", endMinute: 120, normalBubblePerMinute: 3, memberBubblePerMinute: 5 }
     ]
+  },
+  audio: {
+    categories: {
+      bgm: { label: "背景白噪音", enabled: true, volume: 38 },
+      prompt: { label: "提示音", enabled: true, volume: 100 },
+      sfx: { label: "交互音效", enabled: true, volume: 100 }
+    },
+    sounds: [
+      { id: "water-ambient", name: "海水白噪音", category: "bgm", enabled: true, volume: 100, resourcePath: "assets/sounds/water-ambient.mp3", loop: true },
+      { id: "focus-start", name: "开始专注", category: "prompt", enabled: true, volume: 100, resourcePath: "" },
+      { id: "focus-complete", name: "专注完成", category: "prompt", enabled: true, volume: 100, resourcePath: "" },
+      { id: "feed", name: "投喂饲料", category: "sfx", enabled: true, volume: 100, resourcePath: "" },
+      { id: "fish-startle", name: "鱼儿受惊", category: "sfx", enabled: true, volume: 100, resourcePath: "" }
+    ]
   }
 };
 
+const singletonTypes = new Set(["focus", "audio"]);
+const idForType = (type, data) => type === "fish" ? data.fishid : singletonTypes.has(type) ? type : data.id;
+
 function makeRecord(type, data, published = true) {
-  return { type, id: type === "fish" ? data.fishid : type === "focus" ? "focus" : data.id, data, publishedData: published ? structuredClone(data) : null, published, updatedAt: now() };
+  return { type, id: idForType(type, data), data, publishedData: published ? structuredClone(data) : null, published, updatedAt: now() };
 }
 
 export function createMemoryRepository() {
@@ -87,7 +104,7 @@ export async function createCloudbaseRepository() {
   for (const [type, value] of Object.entries(seed)) {
     const values = Array.isArray(value) ? value : [value];
     for (const data of values) {
-      const configId = type === "fish" ? data.fishid : type === "focus" ? "focus" : data.id;
+      const configId = idForType(type, data);
       const { data: existing } = await db
         .from(tableName)
         .select("id")

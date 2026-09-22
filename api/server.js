@@ -1,6 +1,9 @@
 import cors from "cors";
 import express from "express";
+import path from "node:path";
+import multer from "multer";
 import { createRepository } from "./repository.js";
+import { UPLOAD_ROOT, MAX_UPLOAD_MB, AUDIO_EXTENSIONS, storeAudio, ensureUploadDir } from "./uploads.js";
 
 const app = express();
 const port = Number(process.env.PORT || 80);
@@ -26,18 +29,56 @@ app.use(cors({
     return callback(new Error("CORS origin not allowed"));
   },
   methods: ["GET", "HEAD", "PUT", "POST", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-admin-key"],
   optionsSuccessStatus: 204
 }));
 app.use(express.json({ limit: "2mb" }));
 
-const types = new Set(["decorations", "fish", "focus"]);
-const idFor = (type, data) => type === "fish" ? data.fishid : type === "focus" ? "focus" : data.id;
+// 已上传的音频走静态目录对外提供，不要求管理密钥。
+ensureUploadDir();
+app.use("/uploads", express.static(UPLOAD_ROOT, {
+  fallthrough: false,
+  setHeaders(res, filePath) {
+    if (/\.(mp3|wav|ogg|m4a|aac|flac|webm)$/i.test(filePath)) {
+      res.setHeader("Cache-Control", "public, max-age=31536000");
+      res.setHeader("Accept-Ranges", "bytes");
+    }
+  }
+}));
+
+// Admin API key authentication.
+// When ADMIN_API_KEY is set, all /api/admin/* requests must include
+// an "x-admin-key" header matching the configured value.
+// When not set (e.g. local dev), admin routes remain open for convenience.
+const adminApiKey = process.env.ADMIN_API_KEY || "";
+const requireAdminAuth = (req, res, next) => {
+  if (!adminApiKey) return next();
+  if (req.get("x-admin-key") === adminApiKey) return next();
+  return res.status(401).json({ error: "未授权：请提供有效的管理密钥" });
+};
+
+const types = new Set(["decorations", "fish", "focus", "audio"]);
+const singletonTypes = new Set(["focus", "audio"]);
+const idFor = (type, data) => type === "fish" ? data.fishid : singletonTypes.has(type) ? type : data.id;
 const validate = (type, data) => {
   if (!data || typeof data !== "object") return "请求体必须是对象";
   if (type === "decorations" && (!data.id || !data.category || !data.name)) return "商品必须包含 id、category、name";
   if (type === "fish" && (!data.fishid || !data.name)) return "鱼类必须包含 fishid、name";
   if (type === "focus" && (!Number.isFinite(Number(data.minFocusDuration)) || !Array.isArray(data.rewardTiers))) return "专注配置必须包含 minFocusDuration 和 rewardTiers";
+  if (type === "audio") {
+    if (!data.categories || typeof data.categories !== "object") return "音频配置必须包含 categories";
+    if (!Array.isArray(data.sounds)) return "音频配置必须包含 sounds 数组";
+    for (const sound of data.sounds) {
+      if (!sound.id || !sound.name || !sound.category) return "每个音效必须包含 id、name、category";
+      if (!["bgm", "prompt", "sfx"].includes(sound.category)) return `音效分类无效：${sound.category}`;
+      const volume = Number(sound.volume);
+      if (!Number.isFinite(volume) || volume < 0 || volume > 100) return `音效 ${sound.id} 的音量必须在 0-100 之间`;
+    }
+    for (const [key, category] of Object.entries(data.categories)) {
+      const volume = Number(category?.volume);
+      if (!Number.isFinite(volume) || volume < 0 || volume > 100) return `分类 ${key} 的音量必须在 0-100 之间`;
+    }
+  }
   return null;
 };
 const repositoryReady = createRepository().then(instance => {
@@ -59,33 +100,38 @@ const sendError = (res, error) => res.status(500).json({ error: error.message ||
 
 app.get("/api/health", (req, res) => res.json({ ok: true, storage: process.env.CLOUDBASE_ENV_ID ? "cloudbase" : "memory" }));
 
-// Temporary CloudBase authentication diagnostic endpoint. Remove after deployment diagnosis.
-app.get("/api/debug/cloudbase-auth", async (req, res) => {
-  const apiKey = process.env.CLOUDBASE_APIKEY || "";
-  const result = {
-    hasEnvId: Boolean(process.env.CLOUDBASE_ENV_ID),
-    hasApiKey: Boolean(apiKey),
-    sdkVersion: cloudbaseSdkVersion,
-    databaseTest: { status: "ok" }
-  };
-  try {
-    const { default: cloudbase } = await import("@cloudbase/js-sdk");
-    const app = cloudbase.init({ env: process.env.CLOUDBASE_ENV_ID });
-    await app.database()
-      .collection(process.env.CLOUDBASE_COLLECTION || "fishtank_configs")
-      .where({ type: "decorations" })
-      .limit(1)
-      .get();
-  } catch (error) {
-    const message = apiKey ? String(error?.message || "").replace(apiKey, "[REDACTED]") : String(error?.message || "");
-    result.databaseTest = {
-      status: "failed",
-      code: error?.code,
-      message: message.replace(/(authorization|token|secretid|secretkey|apikey)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]")
+// CloudBase authentication diagnostic — only available in non-production.
+if (process.env.NODE_ENV !== "production") {
+  app.get("/api/debug/cloudbase-auth", async (req, res) => {
+    const apiKey = process.env.CLOUDBASE_APIKEY || "";
+    const result = {
+      hasEnvId: Boolean(process.env.CLOUDBASE_ENV_ID),
+      hasApiKey: Boolean(apiKey),
+      sdkVersion: cloudbaseSdkVersion,
+      databaseTest: { status: "ok" }
     };
-  }
-  res.json(result);
-});
+    try {
+      const { default: cloudbase } = await import("@cloudbase/js-sdk");
+      const app = cloudbase.init({ env: process.env.CLOUDBASE_ENV_ID });
+      await app.database()
+        .collection(process.env.CLOUDBASE_COLLECTION || "fishtank_configs")
+        .where({ type: "decorations" })
+        .limit(1)
+        .get();
+    } catch (error) {
+      const message = apiKey ? String(error?.message || "").replace(apiKey, "[REDACTED]") : String(error?.message || "");
+      result.databaseTest = {
+        status: "failed",
+        code: error?.code,
+        message: message.replace(/(authorization|token|secretid|secretkey|apikey)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]")
+      };
+    }
+    res.json(result);
+  });
+}
+
+// All /api/admin/* routes require the admin API key (when configured).
+app.use("/api/admin", requireAdminAuth);
 
 for (const type of types) {
   app.get(`/api/admin/${type}`, async (req, res) => {
@@ -98,6 +144,46 @@ for (const type of types) {
     } catch (error) { sendError(res, error); }
   });
 }
+
+// 音频上传：必须注册在 /api/admin/:type 之前，否则会被当成配置类型吃掉。
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: Math.max(1, MAX_UPLOAD_MB) * 1024 * 1024, files: 1 },
+  fileFilter(req, file, callback) {
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    if (!AUDIO_EXTENSIONS.includes(ext)) {
+      return callback(new Error(`只支持音频文件：${AUDIO_EXTENSIONS.join(" ")}`));
+    }
+    callback(null, true);
+  }
+});
+
+const uploadSingle = (req, res, next) => upload.single("file")(req, res, error => {
+  if (!error) return next();
+  const message = error.code === "LIMIT_FILE_SIZE"
+    ? `文件超过 ${MAX_UPLOAD_MB}MB 限制`
+    : (error.message || "上传失败");
+  res.status(400).json({ error: message });
+});
+
+app.post("/api/admin/assets", uploadSingle, async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "请选择要上传的音频文件" });
+    const stored = await storeAudio({ buffer: req.file.buffer, originalName: req.file.originalname });
+    res.json({
+      data: {
+        url: stored.url,
+        path: stored.path,
+        driver: stored.driver,
+        size: req.file.size,
+        name: req.file.originalname,
+        fallbackError: stored.fallbackError || ""
+      }
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "上传失败" });
+  }
+});
 
 app.put("/api/admin/:type/:id", async (req, res) => {
   const { type, id } = req.params;
@@ -131,8 +217,9 @@ app.post("/api/admin/:type/:id/publish", async (req, res) => {
   } catch (error) { sendError(res, error); }
 });
 
-app.post("/api/admin/assets", (req, res) => res.status(501).json({ error: "资源上传将在配置 API 接通后实现" }));
-
 app.listen(port, "0.0.0.0", () => {
   console.log(`Fishtank API listening on port ${port}`);
+  if (process.env.NODE_ENV === "production" && !adminApiKey) {
+    console.warn("WARNING: ADMIN_API_KEY is not set. Admin endpoints are unprotected in production.");
+  }
 });
