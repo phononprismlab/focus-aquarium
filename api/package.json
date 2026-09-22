@@ -4,7 +4,11 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "test": "node test/run-unit.mjs",
+    "test:unit": "node test/run-unit.mjs",
+    "test:smoke": "node test/smoke-standalone.mjs",
+    "test:smoke:manual": "node test/smoke.mjs"
   },
   "dependencies": {
     "@cloudbase/js-sdk": "^3.10.0",
