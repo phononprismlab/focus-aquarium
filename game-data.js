@@ -2,23 +2,23 @@
 // 后台是唯一权威数据源；这里的内容只用于离线可玩和首次启动。
 window.FISHTANK_DEFAULT_DATA = {
   shopItems: [
-    { id:"fish001", category:"fish", name:"小丑鱼", description:"色彩明亮的小丑鱼，为鱼缸增添一点活泼的海洋气息。", previewImage:"assets/fish/fish001_preview.webp", price:30, resourcePath:"assets/fish/fish001.webp", isMemberOnly:false, maxInventory:50 },
-    { id:"fish002", category:"fish", name:"蓝尾鱼", description:"带着蓝色尾鳍的小鱼，游动时看起来清爽又灵巧。", previewImage:"assets/fish/fish002_preview.webp", price:35, resourcePath:"assets/fish/fish002.webp", isMemberOnly:false, maxInventory:50 },
-    { id:"fish003", category:"fish", name:"金色小鱼", description:"闪着金色光泽的小鱼，让鱼缸多一点温暖的亮色。", previewImage:"assets/fish/fish003_preview.webp", price:45, resourcePath:"assets/fish/fish003.webp", isMemberOnly:true, maxInventory:50 },
+    { id:"fish001", category:"fish", name:"小丑鱼", description:"色彩明亮的小丑鱼，为鱼缸增添一点活泼的海洋气息。", previewImage:"", price:30, resourcePath:"assets/fish/fish001.webp", isMemberOnly:false, maxInventory:50 },
+    { id:"fish002", category:"fish", name:"蓝尾鱼", description:"带着蓝色尾鳍的小鱼，游动时看起来清爽又灵巧。", previewImage:"", price:35, resourcePath:"assets/fish/fish002.webp", isMemberOnly:false, maxInventory:50 },
+    { id:"fish003", category:"fish", name:"金色小鱼", description:"闪着金色光泽的小鱼，让鱼缸多一点温暖的亮色。", previewImage:"", price:45, resourcePath:"assets/fish/fish003.webp", isMemberOnly:true, maxInventory:50 },
 
-    { id:"decoration001", category:"decorations", name:"水草", description:"柔软舒展的基础水草，适合打造自然的鱼缸底景。", previewImage:"assets/plants/plant001_preview.webp", price:20, resourcePath:"assets/plants/plant001.webp", isMemberOnly:false, maxInventory:1 },
-    { id:"decoration002", category:"decorations", name:"细叶水草", description:"细长挺拔的水草，让鱼缸拥有更丰富的层次。", previewImage:"assets/plants/plant002_preview.webp", price:30, resourcePath:"assets/plants/plant002.webp", isMemberOnly:false, maxInventory:1 },
-    { id:"decoration003", category:"decorations", name:"红色水草", description:"带有红色叶片的水草，为水下景色加入一抹醒目的颜色。", previewImage:"assets/plants/plant003_preview.webp", price:50, resourcePath:"assets/plants/plant003.webp", isMemberOnly:true, maxInventory:1 },
+    { id:"decoration001", category:"decorations", name:"水草", description:"柔软舒展的基础水草，适合打造自然的鱼缸底景。", previewImage:"", price:20, resourcePath:"assets/plants/plant001.webp", isMemberOnly:false, maxInventory:1 },
+    { id:"decoration002", category:"decorations", name:"细叶水草", description:"细长挺拔的水草，让鱼缸拥有更丰富的层次。", previewImage:"", price:30, resourcePath:"assets/plants/plant002.webp", isMemberOnly:false, maxInventory:1 },
+    { id:"decoration003", category:"decorations", name:"红色水草", description:"带有红色叶片的水草，为水下景色加入一抹醒目的颜色。", previewImage:"", price:50, resourcePath:"assets/plants/plant003.webp", isMemberOnly:true, maxInventory:1 },
 
-    { id:"background001", category:"backgrounds", name:"浅海晨光", description:"明亮柔和的浅海背景，像阳光落在清澈的海水里。", previewImage:"assets/backgrounds/background001_preview.webp", price:30, resourcePath:"assets/backgrounds/background001.webp", isMemberOnly:false, maxInventory:1 },
-    { id:"background002", category:"backgrounds", name:"深海夜色", description:"深沉安静的海底夜色，适合营造宁静的晚间氛围。", previewImage:"assets/backgrounds/background002_preview.webp", price:60, resourcePath:"assets/backgrounds/background002.webp", isMemberOnly:true, maxInventory:1 },
-    { id:"background003", category:"backgrounds", name:"珊瑚黄昏", description:"带着珊瑚色调的黄昏海景，让鱼缸显得温暖而梦幻。", previewImage:"assets/backgrounds/background003_preview.webp", price:50, resourcePath:"assets/backgrounds/background003.webp", isMemberOnly:false, maxInventory:1 },
+    { id:"background001", category:"backgrounds", name:"浅海晨光", description:"明亮柔和的浅海背景，像阳光落在清澈的海水里。", previewImage:"", price:30, resourcePath:"assets/backgrounds/background001.webp", isMemberOnly:false, maxInventory:1 },
+    { id:"background002", category:"backgrounds", name:"深海夜色", description:"深沉安静的海底夜色，适合营造宁静的晚间氛围。", previewImage:"", price:60, resourcePath:"assets/backgrounds/background002.webp", isMemberOnly:true, maxInventory:1 },
+    { id:"background003", category:"backgrounds", name:"珊瑚黄昏", description:"带着珊瑚色调的黄昏海景，让鱼缸显得温暖而梦幻。", previewImage:"", price:50, resourcePath:"assets/backgrounds/background003.webp", isMemberOnly:false, maxInventory:1 },
 
-    { id:"sand001", category:"sands", name:"暖色细沙", description:"温暖细腻的浅色沙地，适合作为基础鱼缸底景。", previewImage:"assets/sands/sand001_preview.webp", price:20, resourcePath:"assets/sands/sand001.webp", isMemberOnly:false, maxInventory:1 },
-    { id:"sand002", category:"sands", name:"深海黑沙", description:"沉静的深色沙地，让鱼缸整体显得更加深邃。", previewImage:"assets/sands/sand002_preview.webp", price:35, resourcePath:"assets/sands/sand002.webp", isMemberOnly:false, maxInventory:1 },
+    { id:"sand001", category:"sands", name:"暖色细沙", description:"温暖细腻的浅色沙地，适合作为基础鱼缸底景。", previewImage:"", price:20, resourcePath:"assets/sands/sand001.webp", isMemberOnly:false, maxInventory:1 },
+    { id:"sand002", category:"sands", name:"深海黑沙", description:"沉静的深色沙地，让鱼缸整体显得更加深邃。", previewImage:"", price:35, resourcePath:"assets/sands/sand002.webp", isMemberOnly:false, maxInventory:1 },
 
-    { id:"sound001", category:"sounds", name:"海水白噪音", description:"轻柔的水下环境声，让专注时的鱼缸更加安静。", previewImage:"assets/sounds/sound001_preview.webp", price:25, resourcePath:"assets/sounds/sound001.mp3", isMemberOnly:false, maxInventory:1 },
-    { id:"sound002", category:"sounds", name:"轻柔气泡声", description:"细碎轻盈的气泡声，为专注时光增加一点流动感。", previewImage:"assets/sounds/sound002_preview.webp", price:40, resourcePath:"assets/sounds/sound002.mp3", isMemberOnly:true, maxInventory:1 }
+    { id:"sound001", category:"sounds", name:"海水白噪音", description:"轻柔的水下环境声，让专注时的鱼缸更加安静。", previewImage:"", price:25, resourcePath:"assets/sounds/sound001.mp3", isMemberOnly:false, maxInventory:1 },
+    { id:"sound002", category:"sounds", name:"轻柔气泡声", description:"细碎轻盈的气泡声，为专注时光增加一点流动感。", previewImage:"", price:40, resourcePath:"assets/sounds/sound002.mp3", isMemberOnly:true, maxInventory:1 }
   ],
 
   initialAquarium: {

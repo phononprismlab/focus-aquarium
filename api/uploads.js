@@ -30,15 +30,87 @@ export const AUDIO_MIME = /^audio\//i;
 export const CLOUDBASE_BUCKET = process.env.CLOUDBASE_BUCKET || "aquarium-assets";
 export const PG_REF_SCHEME = "tcbpg://";
 
-export function storageMode() {
-  const configured = (process.env.CLOUDBASE_STORAGE_MODE || "").trim().toLowerCase();
-  if (configured === "pg" || configured === "classic") return configured;
+// 签名有效期：专注会话最长 120 分钟（seed 的 maxFocusDuration），
+// 且前端只在「开商店」那一刻拉一次配置，URL 是那时签发的。
+// 用 1h（3600）会中途静默 404（B3）。这里给到 24h（86400），
+// 覆盖任意时长的专注 + 离线/挂机余量；这些是公开非敏感资源，长有效期无风险。
+// 缓存时长（见文件下方 URL_TTL_MS）跟着它走，不要再单独写死一个数。
+export const SIGN_TTL_SECONDS = Math.max(600, Number(process.env.CLOUDBASE_SIGN_TTL_SECONDS || 86400));
+
+// ---------- 存储决策只有这一个来源（B9）----------
+// 以前 currentDriver() 与 storageMode() 是两个各读各的环境变量的独立函数，
+// 于是能配出自相矛盾的状态：STORAGE_DRIVER=local 却配着 CLOUDBASE_ENV_ID。
+// 服务照常起来、日志里什么都不说，上传却全部写进容器本地磁盘 ——
+// 实例一重建，配置里全是 404。现在两者都从 storagePlan() 派生，
+// 并把「注定要出问题的组合」显式列出来，启动时就能看见。
+export function storagePlan() {
+  const configuredDriver = (process.env.STORAGE_DRIVER || "").trim().toLowerCase();
+  const hasEnvId = Boolean(process.env.CLOUDBASE_ENV_ID);
+  // 配了云环境就默认走云存储（云托管/云函数里密钥由环境注入）。
+  const driver = configuredDriver || (hasEnvId ? "cloudbase" : "local");
+
+  const configuredMode = (process.env.CLOUDBASE_STORAGE_MODE || "").trim().toLowerCase();
   // 默认 pg：本项目的环境就是 PG 模式。传统形态的环境请显式设 CLOUDBASE_STORAGE_MODE=classic。
-  return "pg";
+  const mode = configuredMode === "classic" ? "classic" : "pg";
+  const bucket = driver === "cloudbase" && mode === "pg" ? CLOUDBASE_BUCKET : "";
+  const token = process.env.CLOUDBASE_STORAGE_TOKEN || process.env.CLOUDBASE_APIKEY || "";
+  const production = String(process.env.NODE_ENV || "").toLowerCase() === "production";
+
+  const problems = [];
+  if (production && driver === "local") {
+    problems.push(
+      "生产环境的上传会写进容器本地磁盘（/uploads），实例重建后这些地址必然 404。" +
+      "请设置 STORAGE_DRIVER=cloudbase 并配好 CLOUDBASE_ENV_ID / CLOUDBASE_APIKEY。"
+    );
+  }
+  if (driver === "cloudbase" && !hasEnvId) {
+    problems.push("STORAGE_DRIVER=cloudbase 但没有 CLOUDBASE_ENV_ID，所有上传都会失败。");
+  }
+  if (driver === "cloudbase" && mode === "pg" && !token) {
+    problems.push("PG 模式需要 CLOUDBASE_APIKEY（或 CLOUDBASE_STORAGE_TOKEN），否则网关一律返回 401。");
+  }
+  return { driver, mode, bucket, hasEnvId, hasToken: Boolean(token), production, problems };
+}
+
+export function storageMode() {
+  // 保持旧契约：默认 pg。调用方只关心「走哪条通道」，不关心驱动是谁。
+  return storagePlan().mode === "classic" ? "classic" : "pg";
+}
+
+export function currentDriver() {
+  return storagePlan().driver;
 }
 
 function defaultMimeFor(kind) {
   return kind === "image" ? "image/png" : "audio/mpeg";
+}
+
+// ---------- MIME 归一化（B7）----------
+// multipart 里的 Content-Type 是客户端说了算的，实际会碰到三种脏数据：
+//   1) 空的；2) application/octet-stream（curl、不少上传组件的默认值）；
+//   3) 跟 kind 完全对不上的（音频接口里传 image/png）。
+// 网关会把这个值原样写进 storage.objects 的元数据，之后浏览器按它决定怎么渲染 ——
+// 存成 octet-stream 就是「文件在，但放不出来/显示不出来」。所以这里不信上报值，
+// 只在它可信时采用，否则按后缀重算，最后才用 kind 的默认值兜底。
+const MIME_BY_EXT = {
+  ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg", ".m4a": "audio/mp4",
+  ".aac": "audio/aac", ".flac": "audio/flac", ".webm": "audio/webm",
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+  ".webp": "image/webp", ".svg": "image/svg+xml", ".bmp": "image/bmp", ".avif": "image/avif"
+};
+// 这些值等于「客户端没告诉我们是什么」，不能当依据用。
+const UNINFORMATIVE_MIME = new Set([
+  "", "application/octet-stream", "binary/octet-stream",
+  "application/x-www-form-urlencoded", "text/plain"
+]);
+
+export function effectiveMimeType(kind, originalName, reported = "") {
+  const prefix = kind === "image" ? "image/" : "audio/";
+  // 去掉 "; charset=..." 这类参数，统一小写。
+  const cleaned = String(reported || "").split(";")[0].trim().toLowerCase();
+  if (cleaned && !UNINFORMATIVE_MIME.has(cleaned) && cleaned.startsWith(prefix)) return cleaned;
+  const ext = path.extname(String(originalName || "")).toLowerCase();
+  return MIME_BY_EXT[ext] || defaultMimeFor(kind);
 }
 
 function pgGatewayBase() {
@@ -99,7 +171,7 @@ async function savePg(buffer, originalName, folder, kind, mimeType) {
     method: "POST",
     headers: {
       Authorization: `Bearer ${pgToken()}`,
-      "Content-Type": mimeType || defaultMimeFor(kind),
+      "Content-Type": effectiveMimeType(kind, originalName, mimeType),
       "x-upsert": "true"
     },
     body: buffer
@@ -127,7 +199,7 @@ async function pgSignedUrl(ref) {
       Authorization: `Bearer ${pgToken()}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ expiresIn: 3600 })
+    body: JSON.stringify({ expiresIn: SIGN_TTL_SECONDS })
   });
   if (!response.ok) throw await pgFailure(response);
   const payload = await response.json();
@@ -238,9 +310,37 @@ async function explainCloudbaseFailure(app, cloudPath, cause) {
   return { code: String((cause && cause.code) || (cause && cause.name) || "unknown"), message: messageOf(cause), requestId: "" };
 }
 
-// 临时链接缓存：云开发的访问链接有有效期，缓存时间要明显短于有效期。
+// ---------- 签名链接的缓存与去重（B6）----------
+// 公开接口每被请求一次，就要把它引用到的所有云文件换成签名链接。
+// 冷缓存时一份配置可能有几十个引用，会一次性打出去，于是：
+//   · 同一份配置里同一个文件被多处引用（一条音效既在商店又在调音面板）会各打各的；
+//   · 并发请求（多个玩家同时开商店）会重复签同一个文件；
+//   · 一次打太多会撞上网关限流，也会把容器可用的 socket 占满。
+// 三层处理：结果缓存 → 同一引用的并发合并 → 全局并发上限。
 const urlCache = new Map();
-const URL_TTL_MS = 30 * 60 * 1000;
+// 缓存时长跟着签名有效期走（取一半，留足安全边界）。
+// 之前写死 30 分钟，而签名本身给到 24h，等于白白多打了几十倍网关。
+export const URL_TTL_MS = Math.max(60_000, Math.floor(SIGN_TTL_SECONDS * 1000 * 0.5));
+// 同一引用的并发解析合并到这一个 Promise 上。
+const inflightResolves = new Map();
+// 全局并发上限：多余的排队，不一次性轰出去。
+const RESOLVE_CONCURRENCY = Math.max(1, Number(process.env.CLOUDBASE_RESOLVE_CONCURRENCY || 6));
+let activeResolves = 0;
+const resolveQueue = [];
+
+function acquireResolveSlot() {
+  if (activeResolves < RESOLVE_CONCURRENCY) {
+    activeResolves += 1;
+    return Promise.resolve();
+  }
+  return new Promise(resolve => resolveQueue.push(resolve));
+}
+
+function releaseResolveSlot() {
+  const next = resolveQueue.shift();
+  if (next) return next();
+  activeResolves -= 1;
+}
 
 // 失败后短时间内不再重试，避免每个请求都打云存储接口。
 const failedCache = new Map();
@@ -260,15 +360,27 @@ async function cachedResolve(ref, loader) {
   const cached = urlCache.get(ref);
   if (cached && cached.expire > Date.now()) return cached.url;
   if ((failedCache.get(ref) || 0) > Date.now()) throw new Error("云存储链接暂不可用");
-  try {
-    const url = await loader();
-    urlCache.set(ref, { url, expire: Date.now() + URL_TTL_MS });
-    failedCache.delete(ref);
-    return url;
-  } catch (error) {
-    failedCache.set(ref, Date.now() + FAILED_TTL_MS);
-    throw new Error(messageOf(error));
-  }
+  // 同一个引用的并发解析共用一个请求（去重要在抢并发额度之前做，
+  // 否则重复引用会白白占掉并发名额）。
+  const running = inflightResolves.get(ref);
+  if (running) return running;
+  const task = (async () => {
+    await acquireResolveSlot();
+    try {
+      const url = await loader();
+      urlCache.set(ref, { url, expire: Date.now() + URL_TTL_MS });
+      failedCache.delete(ref);
+      return url;
+    } catch (error) {
+      failedCache.set(ref, Date.now() + FAILED_TTL_MS);
+      throw new Error(messageOf(error));
+    } finally {
+      releaseResolveSlot();
+      inflightResolves.delete(ref);
+    }
+  })();
+  inflightResolves.set(ref, task);
+  return task;
 }
 
 // 把持久化引用换成可直接使用的链接，两种形态都认：
@@ -303,11 +415,71 @@ export async function resolveAudioPaths(value) {
   return value;
 }
 
-export function currentDriver() {
-  const configured = (process.env.STORAGE_DRIVER || "").toLowerCase();
-  if (configured) return configured;
-  // 配了云环境就默认走云存储（云托管/云函数里密钥由环境注入）。
-  return process.env.CLOUDBASE_ENV_ID ? "cloudbase" : "local";
+// ---------- 存储自检（B4）----------
+// 「密钥没有存储权限」这类问题，以前只有真去后台传一次才会暴露，而且失败还可能被
+// 本地回落掩盖成「上传成功」。这里把两件事记下来给 /api/health 读：
+//   · 最后一次真实上传的结果（成功 / 失败 + 错误码 + 时间）
+//   · 网关这个域名通不通
+// 两者都不参与任何请求路径，只是可观测性，不 await、不阻塞。
+const storageState = {
+  upload: "unverified",   // unverified | ok | failed
+  lastError: "",
+  lastErrorCode: "",
+  lastErrorAt: 0,
+  lastOkAt: 0,
+  gateway: "unverified"   // unverified | reachable | unreachable | skipped
+};
+
+export function storageStatus() {
+  return { ...storageState };
+}
+
+function recordStorageSuccess() {
+  storageState.upload = "ok";
+  storageState.lastOkAt = Date.now();
+  storageState.lastError = "";
+  storageState.lastErrorCode = "";
+}
+
+function recordStorageFailure(error) {
+  storageState.upload = "failed";
+  storageState.lastError = messageOf(error);
+  storageState.lastErrorCode = String((error && error.code) || "");
+  storageState.lastErrorAt = Date.now();
+}
+
+// 启动探测：只回答「网关这个域名通不通」，不校验凭据、不写任何对象。
+// 网关对未鉴权请求回 401，所以拿到任何 HTTP 响应就算通 —— 它把
+// 「环境 ID 写错 / 容器出不了网」和「密钥没权限」这两类问题分开了，
+// 而后者才是真正需要一次真实上传才能暴露的（那部分由 storageState.upload 负责）。
+export async function probeStorageGateway({ timeoutMs = 5000 } = {}) {
+  if (storagePlan().driver !== "cloudbase") {
+    storageState.gateway = "skipped";
+    return storageState.gateway;
+  }
+  const env = process.env.CLOUDBASE_ENV_ID || "未配置";
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const response = await fetch(`${pgGatewayBase()}/`, { method: "GET", signal: controller.signal });
+    clearTimeout(timer);
+    storageState.gateway = "reachable";
+    console.log(`存储探测：网关可达（HTTP ${response.status}${response.status === 401 ? "，未鉴权属正常" : ""}），env=${env}`);
+  } catch (error) {
+    storageState.gateway = "unreachable";
+    if (!storageState.lastError) storageState.lastError = messageOf(error);
+    console.warn(`存储探测：网关不可达（${messageOf(error)}），env=${env}。上传会失败，请核对环境 ID 与容器出网。`);
+  }
+  return storageState.gateway;
+}
+
+// 本地回落只在「云存储暂时不可用、但你正在本机开发」时才该发生。
+// 生产环境回落 = 把 /uploads/xxx 这种只在这台实例活着时有效的地址写进配置，
+// 实例一重建就全 404，而且失败被吞掉、后台还以为存成功了（B8）。
+// 所以生产环境直接抛错，让调用方看到真实原因；确实需要回落时用 ALLOW_LOCAL_FALLBACK=1 显式打开。
+export function localFallbackAllowed() {
+  if (/^(1|true|yes)$/i.test(String(process.env.ALLOW_LOCAL_FALLBACK || "").trim())) return true;
+  return String(process.env.NODE_ENV || "").toLowerCase() !== "production";
 }
 
 // kind: "audio" | "image" —— 决定兜底后缀与落盘子目录的默认命名口径。
@@ -317,15 +489,28 @@ export async function storeAudio({ buffer, originalName, kind = "audio", mimeTyp
   if (driver === "cloudbase") {
     try {
       // PG 模式与传统模式是两条完全不同的通道，别混用（见文件顶部注释）。
-      return storageMode() === "pg"
+      const stored = storageMode() === "pg"
         ? await savePg(buffer, originalName, folder, kind, mimeType)
         : await saveCloudbase(buffer, originalName, folder, kind);
+      recordStorageSuccess();
+      return stored;
     } catch (error) {
-      // 回落到容器本地磁盘只在这台实例活着的时候有效，实例一重建文件就没了，
-      // 配置里留下的是一个必然 404 的地址。所以这条日志要带上错误码和 requestId，
-      // 让"为什么云存储不可用"能一次查清，而不是反复猜。
+      // 这条日志要带上错误码和 requestId，让"为什么云存储不可用"能一次查清，而不是反复猜。
+      recordStorageFailure(error);
       const detail = [error.code, error.message].filter(Boolean).join(" | ");
-      console.warn(`云存储上传失败，已回落到本地存储（${detail}）${error.requestId ? ` | requestId=${error.requestId}` : ""}`);
+      const requestSuffix = error.requestId ? ` | requestId=${error.requestId}` : "";
+      if (!localFallbackAllowed()) {
+        console.error(`云存储上传失败，且当前环境不允许回落到本地磁盘（${detail}）${requestSuffix}`);
+        const failure = new Error(
+          `云存储上传失败（${error.code || "unknown"}）：${error.message}。` +
+          "当前环境不允许写入容器本地磁盘 —— 那样存下来的地址在实例重建后必然 404。" +
+          "请先修复云存储配置再上传。"
+        );
+        failure.code = error.code;
+        failure.requestId = error.requestId;
+        throw failure;
+      }
+      console.warn(`云存储上传失败，已回落到本地存储（${detail}）${requestSuffix}`);
       const local = await saveLocal(buffer, originalName, folder, kind);
       return { ...local, fallbackFrom: "cloudbase", fallbackError: error.message, fallbackCode: error.code || "" };
     }

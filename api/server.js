@@ -2,13 +2,15 @@ import cors from "cors";
 import express from "express";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import multer from "multer";
 import { createRepository } from "./repository.js";
-import { UPLOAD_ROOT, MAX_UPLOAD_MB, AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, storeAudio, ensureUploadDir, resolveAudioPaths, currentDriver, storageMode, CLOUDBASE_BUCKET } from "./uploads.js";
+import { UPLOAD_ROOT, MAX_UPLOAD_MB, AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, storeAudio, ensureUploadDir, resolveAudioPaths, storagePlan, storageStatus, probeStorageGateway } from "./uploads.js";
 import { resolveAllowList, createOriginChecker } from "./cors.js";
 import { validateStartRequest } from "./reward.js";
 import { createFocusSessionStore } from "./focus-session.js";
 import { validateAudioConfig } from "./audio-config.js";
+import { validateEventConfig } from "./event-config.js";
 import { resolveAdminApiKey, checkProductionConfig, warnWeakAdminKey } from "./runtime-guard.js";
 
 const app = express();
@@ -61,7 +63,12 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization", "x-admin-key"],
   optionsSuccessStatus: 204
 }));
-app.use(express.json({ limit: "2mb" }));
+// 请求体上限（B11）。配置里塞 base64 图片很容易撞上这个限制，
+// 而 Express 默认会返回一坨 HTML，后台只看到「请求失败」，不知道该干什么。
+// 这里保持上限不变（配置本身就该是小 JSON），但把话说清楚：
+// 图片有专门的 multipart 上传接口，走它就没有体积焦虑。
+const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || "2mb";
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
 // 已上传的音频走静态目录对外提供，不要求管理密钥。
 // 上传目录建不出来不该让整个服务起不来：云存储模式下根本用不到本地目录，
@@ -101,7 +108,7 @@ if (productionConfigError) {
   process.exit(1);
 }
 
-const types = new Set(["decorations", "fish", "focus", "audio"]);
+const types = new Set(["decorations", "fish", "focus", "audio", "events"]);
 const singletonTypes = new Set(["focus", "audio"]);
 const idFor = (type, data) => type === "fish" ? data.fishid : singletonTypes.has(type) ? type : data.id;
 const validate = (type, data) => {
@@ -110,6 +117,9 @@ const validate = (type, data) => {
   if (type === "fish" && (!data.fishid || !data.name)) return "鱼类必须包含 fishid、name";
   if (type === "focus" && (!Number.isFinite(Number(data.minFocusDuration)) || !Array.isArray(data.rewardTiers))) return "专注配置必须包含 minFocusDuration 和 rewardTiers";
   if (type === "audio") return validateAudioConfig(data);
+  // 事件是配置驱动的（不写代码），handler 必须在服务端白名单里，
+  // 否则后台能配出一个玩家端根本不认识的事件 —— 那种错误只在线上才暴露。
+  if (type === "events") return validateEventConfig(data);
   return null;
 };
 // 数据层状态单独存一个字段给 /api/health 读，而不是让健康检查去 await 仓库。
@@ -128,7 +138,11 @@ const repositoryReady = createRepository().then(instance => {
   console.error("Repository initialization failed", error);
   return null;
 });
+let injectedRepository = null;
+// 仅供测试：用内存仓库等替身替换，避免测试去连真实云环境（也不触发云仓库初始化）。
+export function setRepositoryForTest(repo) { injectedRepository = repo; }
 const getRepository = async () => {
+  if (injectedRepository) return injectedRepository;
   const instance = await repositoryReady;
   if (!instance) throw repositoryError || new Error("Repository is unavailable");
   return instance;
@@ -141,13 +155,18 @@ const sendError = (res, error) => res.status(500).json({ error: error.message ||
 // 进而导致反复重启和"部署版本失败"，而这跟业务是否真的可用完全是两回事。
 // 数据层状态读上面那个字段（pending / ok / failed），排查时看得到，但不影响探针结论。
 app.get("/api/health", (req, res) => {
-  const driver = currentDriver();
+  const plan = storagePlan();
   res.json({
     ok: true,
-    storage: driver,
+    storage: plan.driver,
     // PG 模式与传统模式的上传通道完全不同，出问题时这一行能直接告诉你该查哪条路。
-    storageMode: driver === "cloudbase" ? storageMode() : "",
-    storageBucket: driver === "cloudbase" && storageMode() === "pg" ? CLOUDBASE_BUCKET : "",
+    storageMode: plan.driver === "cloudbase" ? plan.mode : "",
+    storageBucket: plan.bucket,
+    // 存储状态：密钥没权限这类问题以前只有真传一次才暴露，现在这里直接说。
+    // 只读内存字段，不碰网络 —— 健康检查绝不能被外部依赖拖住。
+    storageState: plan.driver === "cloudbase" ? storageStatus() : { upload: "unverified", gateway: "skipped" },
+    // 配错的组合（生产走本地磁盘、缺 envId、pg 缺密钥）在这里显式列出来，别等上传失败才发现。
+    storageProblems: plan.problems,
     repository: repositoryStatus,
     cors: allowAllOrigins ? "all" : (originsSource === "env" ? "configured" : "fallback"),
     adminAuth: adminApiKey ? "enabled" : "disabled"
@@ -189,21 +208,40 @@ app.use("/api/admin", requireAdminAuth);
 
 // 公开接口的字段里有 cloud:// 标识时，需要换成可播放 / 可显示的链接，
 // 否则前端 <img src> / <audio src> 会拿到 cloud:// 直接 404。
-// 音频和装点鱼缸商品都可能有此问题，统一在出库时解析。
-const PUBLIC_PATH_RESOLVE_TYPES = new Set(["audio", "decorations"]);
+// 音频、装点鱼缸商品、鱼类资源都可能有此问题，统一在出库时解析。
+// ⚠️ 新增需要解析的配置类型时，务必加进这个 Set：漏掉的话后台上传的资源
+//    下发到玩家端会是裸 tcbpg:// 引用，图片/音频直接 404（B13 就是 fish 漏了这个）。
+const PUBLIC_PATH_RESOLVE_TYPES = new Set(["audio", "decorations", "fish"]);
+
+// 紧急总开关：设置 FISHTANK_DISABLE_CUSTOM_CODE=1 后，公开接口不再下发鱼的动画代码，
+// 玩家端会回退到内置行为 —— 线上自定义动画代码出问题时的「一键刹车」。
+const customCodeDisabled = () => {
+  const value = String(process.env.FISHTANK_DISABLE_CUSTOM_CODE || "").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes";
+};
+function stripCustomFishCode(record) {
+  if (!customCodeDisabled() || !record || !record.data || !("animationCode" in record.data)) return record;
+  const { animationCode, ...rest } = record.data;
+  return { ...record, data: rest };
+}
 for (const type of types) {
   app.get(`/api/admin/${type}`, async (req, res) => {
     try {
       const data = await records(type);
-      // 云存储的 cloud:// 标识只对内使用，出库前换成可播放的临时链接。
-      res.json({ data: PUBLIC_PATH_RESOLVE_TYPES.has(type) ? await resolveAudioPaths(data) : data });
+      // 后台接口返回云存储的**持久化引用**（tcbpg:// / cloud://），不解析成临时签名链接：
+      // 否则后台编辑并保存时会把 1 小时过期的签名 URL 永久写回配置（B1）。
+      // 只有公开接口 /api/game/:type 才解析成可播放/可显示的链接。
+      res.json({ data });
     } catch (error) { sendError(res, error); }
   });
   app.get(`/api/game/${type}`, async (req, res) => {
     try {
       const published = await (await getRepository()).list(type, true);
-      const mapped = published.map(record => ({ ...record, data: record.publishedData || record.data }));
-      res.json({ data: PUBLIC_PATH_RESOLVE_TYPES.has(type) ? await resolveAudioPaths(mapped) : mapped });
+      let mapped = published.map(record => ({ ...record, data: record.publishedData || record.data }));
+      if (PUBLIC_PATH_RESOLVE_TYPES.has(type)) mapped = await resolveAudioPaths(mapped);
+      // 总开关打开时，鱼的动画代码不下发（玩家端回退内置行为）。
+      if (type === "fish") mapped = mapped.map(stripCustomFishCode);
+      res.json({ data: mapped });
     } catch (error) { sendError(res, error); }
   });
 }
@@ -362,6 +400,33 @@ app.post("/api/admin/:type/:id/publish", async (req, res) => {
   } catch (error) { sendError(res, error); }
 });
 
+// 兜底错误处理（B11）。必须注册在所有路由之后。
+// express.json 抛出的两类错误在默认处理器里会变成一坨 HTML，后台拿到的是
+// 「请求失败」四个字，完全不知道是体积问题还是 JSON 写坏了：
+//   · entity.too.large   → 413，多半是有人把图片转成 base64 塞进了配置
+//   · entity.parse.failed→ 400，JSON 语法错误
+// 这里把它们翻成人话。其它错误照旧记日志 + 500。
+app.use((error, req, res, next) => {
+  if (res.headersSent) return next(error);
+  if (error && (error.type === "entity.too.large" || error.status === 413 || error.statusCode === 413)) {
+    return res.status(413).json({
+      error: `请求体超过上限（${JSON_BODY_LIMIT}）。图片请不要以 base64 塞进配置，` +
+        `改用后台的「上传图片」按钮（走 /api/admin/assets/image，单文件上限 ${MAX_UPLOAD_MB}MB）。`
+    });
+  }
+  if (error && error.type === "entity.parse.failed") {
+    return res.status(400).json({ error: "请求体不是合法 JSON，请检查语法。" });
+  }
+  // /uploads 静态目录用 fallthrough:false，缺文件时会 next 一个 404 错误过来。
+  // 这里必须保留原状态码，否则一次「图片不存在」会变成 500，误导排查方向。
+  const status = Number((error && (error.status || error.statusCode)) || 0);
+  if (status >= 400 && status < 500) {
+    return res.status(status).json({ error: status === 404 ? "资源不存在" : ((error && error.message) || "请求失败") });
+  }
+  console.error("未处理的请求错误：", error && error.message ? error.message : error);
+  return res.status(500).json({ error: "服务器错误" });
+});
+
 // 启动自检：绑定成功之后，用回环地址和容器自己的网卡地址各打一次 /api/health，
 // 把结果写进启动日志。存在的意义是把两种完全不同的"部署失败"区分开：
 //   1) 应用根本没监听成功 —— 自检本身就是失败
@@ -440,20 +505,33 @@ function startListening(listenPort) {
   });
 }
 
-const listening = await Promise.all(listenPorts.map(startListening));
-if (!listening.some(Boolean)) {
-  console.error(`所有端口都无法监听（${listenPorts.join(", ")}），进程退出。`);
-  console.error("请核对云托管控制台的「服务端口」配置，以及容器内是否有其他进程占用该端口。");
-  process.exit(1);
+// 把"启动监听 + 打印启动信息"收敛成函数：便于测试显式调用，也便于直接 `node server.js` 时自动启动。
+// 直接运行（node server.js）才自动监听；被 import（如测试）时不自动监听，交给测试去 call startServer()。
+export async function startServer() {
+  const listening = await Promise.all(listenPorts.map(startListening));
+  if (!listening.some(Boolean)) {
+    console.error(`所有端口都无法监听（${listenPorts.join(", ")}），进程退出。`);
+    console.error("请核对云托管控制台的「服务端口」配置，以及容器内是否有其他进程占用该端口。");
+    process.exit(1);
+  }
+  console.log(`CORS 来源（${originsSource === "env" ? "来自 CORS_ORIGINS" : "内置兜底名单"}）：${allowAllOrigins ? "*（全部放行）" : allowedOrigins.join(", ")}`);
+  console.log(`管理接口鉴权：${adminApiKey ? "已启用（x-admin-key）" : "未启用 —— 仅限本地开发，生产环境会拒绝启动"}`);
+  // 上传出问题时，第一眼看的就是这几行：模式选错（PG 环境用 classic 通道）会导致上传必然失败，
+  // 而报错跟 RLS、密钥权限全都无关，极难从现象倒推。
+  // 配错的组合（B9）在这里主动说出来，不要等上传失败才发现。
+  const plan = storagePlan();
+  if (plan.driver === "cloudbase") {
+    console.log(plan.mode === "pg"
+      ? `云存储：PG 模式，桶 ${plan.bucket}（经由 Storage API 网关，需 CLOUDBASE_APIKEY）`
+      : "云存储：传统模式（getUploadMetadata + 直传 COS）");
+  } else {
+    console.log("云存储：未启用（上传写容器本地磁盘 /uploads）");
+  }
+  for (const problem of plan.problems) console.error(`存储配置有问题：${problem}`);
+  // 网关可达性探测：fire-and-forget，只记录、不阻塞启动（探针打不通也不该影响服务起来）。
+  void probeStorageGateway();
+  warnWeakAdminKey(adminApiKey);
 }
-console.log(`CORS 来源（${originsSource === "env" ? "来自 CORS_ORIGINS" : "内置兜底名单"}）：${allowAllOrigins ? "*（全部放行）" : allowedOrigins.join(", ")}`);
-console.log(`管理接口鉴权：${adminApiKey ? "已启用（x-admin-key）" : "未启用 —— 仅限本地开发，生产环境会拒绝启动"}`);
-// 上传出问题时，第一眼看的就是这一行：模式选错（PG 环境用 classic 通道）会导致上传必然失败，
-// 而报错跟 RLS、密钥权限全都无关，极难从现象倒推。
-if (currentDriver() === "cloudbase") {
-  const mode = storageMode();
-  console.log(mode === "pg"
-    ? `云存储：PG 模式，桶 ${CLOUDBASE_BUCKET}（经由 Storage API 网关，需 CLOUDBASE_APIKEY）`
-    : "云存储：传统模式（getUploadMetadata + 直传 COS）");
-}
-warnWeakAdminKey(adminApiKey);
+
+const isMain = process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
+if (isMain) startServer();

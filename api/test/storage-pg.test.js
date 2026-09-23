@@ -29,7 +29,7 @@ const server = http.createServer((req, res) => {
   req.on("data", c => chunks.push(c));
   req.on("end", () => {
     const body = Buffer.concat(chunks);
-    received.push({ method: req.method, url: req.url, headers: req.headers, size: body.length });
+    received.push({ method: req.method, url: req.url, headers: req.headers, size: body.length, body: body.toString() });
     const send = (code, payload) => {
       res.writeHead(code, { "content-type": "application/json" });
       res.end(JSON.stringify(payload));
@@ -119,6 +119,13 @@ chk("sign 用 POST", received[0].method, "POST");
 chk("sign 路径正确", received[0].url.startsWith("/v1/storages/object/sign/aquarium-assets/sounds/"), true);
 chk("带上 Bearer 凭据", received[0].headers.authorization, "Bearer service-role-test-key");
 
+console.log("--- sign 有效期必须覆盖 120 分钟专注（B3）---");
+let signBody = {};
+try { signBody = JSON.parse(received[0].body || "{}"); } catch (_) {}
+chk("sign 请求带 expiresIn", typeof signBody.expiresIn, "number");
+// 旧值 3600 会在 120 分钟专注中途过期（B3）；至少给到 7200（2h）。
+chk("expiresIn 至少覆盖 120 分钟专注(>=7200)", signBody.expiresIn >= 7200, true);
+
 console.log("--- 链接缓存（同一引用只打一次网关）---");
 received.length = 0;
 await resolveCloudUrl(audio.path);
@@ -137,6 +144,17 @@ console.log("--- 解析失败时原样返回引用，不炸掉整份配置 ---")
 const broken = await resolveAudioPaths({ a: "tcbpg://aquarium-assets/missing/obj.mp3", b: "plain/path.mp3" });
 chk("解析不了就保留原引用", broken.a, "tcbpg://aquarium-assets/missing/obj.mp3");
 chk("普通路径原样返回", broken.b, "plain/path.mp3");
+
+console.log("--- 鱼类多资源 [{slot,path}] 形状也要解析（F2）---");
+// 鱼的 resourcePath 现在可能是对象数组：{slot, path}。解析器必须递归进对象，
+// 否则玩家端拿到的是对象里的裸 tcbpg://，图片 404。
+const fishParts = await resolveAudioPaths([
+  { slot: "body", path: "tcbpg://aquarium-assets/fish/a.png" },
+  { slot: "tail", path: "plain/tail.png" }
+]);
+chk("对象数组里的 path 被解析成签名 URL", fishParts[0].path.startsWith("https://cdn.example.com/signed/"), true);
+chk("slot 字段原样保留", fishParts[0].slot, "body");
+chk("非云引用原样返回", fishParts[1].path, "plain/tail.png");
 
 console.log("--- 非云存储的值不动它 ---");
 chk("cloud:// 之外的字符串原样返回", await resolveCloudUrl("/uploads/sounds/a.mp3"), "/uploads/sounds/a.mp3");
