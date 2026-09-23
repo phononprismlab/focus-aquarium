@@ -417,8 +417,14 @@
 /* object-fit 用 contain：完整显示整张图、绝不裁切（正方形图上下被裁的元凶就是 cover）。
    contain 留出的空白露出的正是这层渐变，而它与 .v02-preview 的底色完全一致 → 留白肉眼看不出来。
    这层不透明底色还有第二个作用：把底下的 emoji 占位完全遮住（有图时看不到 emoji）；
-   图片 404 时 onerror 会把 img 移除，emoji 又自动露出来兜底 —— 所以 emoji 要留在 DOM 里，别删。 */
-.v02-preview-img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center;border-radius:13px;display:block;background:linear-gradient(135deg,#a9dfe8,#d9f2ef);}
+   图片 404 时 onerror 会把 img 移除，emoji 又自动露出来兜底 —— 所以 emoji 要留在 DOM 里，别删。
+
+   z-index:1 是必须的，不能靠"绝对定位天然盖住静态内容"：
+   占位元素（.v02-preview-fish 的 drop-shadow、.v02-plant-css 的 position:relative）
+   都因为 filter/定位被提到了"定位层"，和本图同层。同层按 DOM 顺序绘制，而占位元素
+   的 HTML 写在 img 之后 → 占位会压在图上（emoji 盖在预览图正中间就是这么来的）。
+   给图一个正的 z-index，让它稳定地压在所有占位之上。 */
+.v02-preview-img{position:absolute;inset:0;z-index:1;width:100%;height:100%;object-fit:contain;object-position:center;border-radius:13px;display:block;background:linear-gradient(135deg,#a9dfe8,#d9f2ef);}
 .v02-preview-plant{font-size:50px}.v02-preview-bg{width:100%;height:100%;background:linear-gradient(to bottom,#4e8fa8,#9fd7d7 70%,#dfcb92 71%)}
 .v02-preview-bg.night{background:linear-gradient(to bottom,#274c68,#427f91 68%,#6d6751 69%)}
 .v02-preview-sand{width:100%;height:100%;background:linear-gradient(to bottom,#9dd4dc 0 70%,#dfcb92 71%)}
@@ -889,6 +895,7 @@
 <div class="dev-panel" id="devPanel" aria-hidden="true">
   <div class="dev-title">🛠 开发者测试工具</div>
   <div class="dev-sub">仅用于 v0.2 开发测试，不属于正式游戏 UI</div>
+  <div class="dev-sub">奖励由服务端按<b>真实经过的时间</b>结算，所以上面两个"快进"按钮不会发泡泡（测经济请用 +100/+1000）。</div>
   <div class="dev-status" id="devStatus"></div>
   <div class="dev-actions">
     <button type="button" id="devReduceFocus" hidden>减少计时 5 分钟</button>
@@ -2027,8 +2034,11 @@
       d.dataset.tags=normalizeTags(item.tags).join(" ");
       let preview=`<div class="v02-preview" data-preview="${item.id}">`;
       // 后台填了 previewImage 就用图；图加载失败时退回原有的 emoji/CSS 视觉。
+      // loading="lazy" 是必须的：商店是 display:none 的弹窗，但 display:none 里的 <img>
+      // 浏览器照样会下载 —— 后台一上传预览图，玩家每次刷新页面都会在后台把它拉一遍。
+      // 单张实测 318KB，商品全配满就是好几 MB，首屏被它拖慢。lazy 之后商店没打开就不下载。
       if(item.previewImage){
-        preview+=`<img class="v02-preview-img" src="${escapeHtml(item.previewImage)}" alt="${escapeHtml(item.name)}" onerror="this.remove()">`;
+        preview+=`<img class="v02-preview-img" src="${escapeHtml(item.previewImage)}" alt="${escapeHtml(item.name)}" loading="lazy" decoding="async" onerror="this.remove()">`;
       }
       if(item.category==="fish"){
         preview+=`<div class="v02-preview-fish">${visualForItem("fish", item.id).emoji}</div>`;
@@ -2287,11 +2297,14 @@
     }
     return reward;
   }
-  function grantFocusReward(){
-    const completedMinutes=Math.floor(durationSeconds/60);
-    const reward=focusRewardMinutes(completedMinutes,PlayerData.isMember);
-    if(reward>0){PlayerData.bubbles+=reward;saveGame();renderBubbles();}
-    return reward;
+  // 结算落地：只做一次加法，谁算出来的奖励都走这里。
+  function applyFocusReward(reward){
+    const amount=Math.max(0,Math.floor(Number(reward)||0));
+    if(amount<=0)return 0;
+    PlayerData.bubbles+=amount;
+    saveGame();
+    renderBubbles();
+    return amount;
   }
 
   // ===== 专注会话：奖励由服务端结算 =====
@@ -2737,30 +2750,29 @@ function resetFocus(completed) {
     const localMinutes = completed ? Math.floor(durationSeconds / 60) : elapsedMinutes;
     const localReward = focusRewardMinutes(localMinutes, sessionIsMember);
 
-    // 先按本地值即时反馈，动画不等待网络；服务端返回后再校正差额。
-    if (localReward > 0) {
-      PlayerData.bubbles += localReward;
-      saveGame();
-      renderBubbles();
-    }
-
-    completionReward.textContent = `本次专注获得了 ${localReward} 泡泡 🫧`;
     playCompleteSound();
     if (completed) timer.classList.remove("complete-pulse");
     completionFlash.classList.add("show");
     completionFlash.setAttribute("aria-hidden","false");
     if (navigator.vibrate) navigator.vibrate([120,70,180]);
 
-    // 服务端结算：以服务端结果为准。差额补正，服务端算得少就扣回。
-    settleFocusReward(localReward).then(settlement => {
-      const delta = settlement.reward - localReward;
-      if (delta !== 0) {
-        PlayerData.bubbles = Math.max(0, PlayerData.bubbles + delta);
-        saveGame();
-        renderBubbles();
-      }
-      completionReward.textContent = `本次专注获得了 ${settlement.reward} 泡泡 🫧`;
-    }).catch(() => {});
+    // 奖励只有一个来源：服务端结算，本地值只在服务端够不着时兜底。
+    // 不先按本地值发泡泡、等服务端回来再回滚差额 —— 那会让玩家眼睁睁看着
+    // "获得了 25 泡泡"被改成 0、已经进兜的泡泡又消失，像是被吞了奖励。
+    // 所以先显示"结算中"，等结果回来一次性给出数字。
+    completionReward.textContent = "正在结算…";
+    const finishFocusReward = reward => {
+      const granted = applyFocusReward(reward);
+      // 算出 0 说明这次确实没攒够时长（DEV 快进、提前结束都算），
+      // 这时要把话说清楚，否则玩家只会觉得奖励被吞了。
+      completionReward.textContent = granted > 0
+        ? `本次专注获得了 ${granted} 泡泡 🫧`
+        : "这次没攒够时长，没有泡泡。下次专注满 25 分钟就有啦 🫧";
+    };
+    settleFocusReward(localReward).then(
+      settlement => finishFocusReward(settlement.reward),
+      () => finishFocusReward(localReward)
+    );
   }
 
   let fishStates = [];

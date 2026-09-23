@@ -14,7 +14,8 @@ const files = ["reward.test.js", "focus-session.test.js", "audio-categories.test
   "events-api.test.js",
   "admin-events-page.test.js",
   "storage-hardening.test.js",
-  "body-limit.test.js"];
+  "body-limit.test.js",
+  "focus-reward-flow.test.js"];
 
 let failed = 0;
 for (const file of files) {
