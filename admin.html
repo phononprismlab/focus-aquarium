@@ -147,8 +147,9 @@
 				<button class="nav-item" data-module="fish"><span class="nav-icon">◉</span>水产装配</button>
 			<button class="nav-item" data-module="focus"><span class="nav-icon">◌</span>专注配置</button>
 			<button class="nav-item" data-module="audio"><span class="nav-icon">♪</span>音效管理</button>
-			<button class="nav-item" data-module="events"><span class="nav-icon">◇</span>事件设置</button>
-				<button class="nav-item" data-module="payment"><span class="nav-icon">▣</span>付费配置 <span class="reserved">预留</span></button>
+		<button class="nav-item" data-module="events"><span class="nav-icon">◇</span>事件设置</button>
+		<button class="nav-item" data-module="users"><span class="nav-icon">☷</span>玩家管理</button>
+			<button class="nav-item" data-module="payment"><span class="nav-icon">▣</span>付费配置 <span class="reserved">预留</span></button>
 		</nav>
 		<div class="key-section">
 			<div class="nav-label">管理密钥</div>
@@ -193,7 +194,8 @@
 			fish: (DEFAULT_DATA.fishAssembly || []).map(item => ({ ...item, published: true, dirty: false })),
 			focus: JSON.parse(JSON.stringify(DEFAULT_DATA.focusConfig || { minFocusDuration: 25, maxFocusDuration: 120, rewardTiers: [] })),
 			audio: JSON.parse(JSON.stringify(DEFAULT_AUDIO)),
-			events: []
+			events: [],
+			users: []
 		};
 		let editingIndex = null;
 		let editingType = null;
@@ -201,6 +203,9 @@
 		let focusDirty = false;
 		let audioPublished = true;
 		let audioDirty = false;
+		// 玩家管理页：当前筛选条件与列表数据（listUsers 由后台算好聚合，前端只渲染）。
+		let userFilter = { cohort: "", isSupporter: "" };
+		let usersLoaded = false;
 		const API_BASE = window.FISHTANK_API_BASE || "https://focus-aquarium-api-316509-5-1491495221.sh.run.tcloudbase.com/api";
 
 		const main = document.getElementById("main");
@@ -286,13 +291,13 @@
 		}
 		function showToast(message, duration = 2400) { toast.textContent = message; toast.classList.add("show"); clearTimeout(showToast.timer); showToast.timer = setTimeout(() => toast.classList.remove("show"), duration); }
 		function pageHeader(kicker, title, description, action = "") { return `<div class="topbar"><div><div class="eyebrow">${kicker}</div><h2>${title}</h2><p class="subtitle">${description}</p></div>${action}</div>`; }
-		function render() { document.querySelectorAll(".nav-item").forEach(item => item.classList.toggle("active", item.dataset.module === state.module)); renderModule(); }
+		function render() { document.querySelectorAll(".nav-item").forEach(item => item.classList.toggle("active", item.dataset.module === state.module)); renderModule(); if (state.module === "users") refreshUsers(); }
 		// 单个模块渲染失败不能表现成「点了页签没反应」—— 那是最难查的一类现象：
 		// 页面没变、控制台之外什么都看不到。这里接住并在页面上直接说清是哪个模块坏了。
 		function renderModule() {
 			const renderers = {
 				decorations: renderDecorationList, fish: renderFishList, focus: renderFocus,
-				audio: renderAudio, events: renderEventList, payment: renderPlaceholder
+				audio: renderAudio, events: renderEventList, users: renderUserList, payment: renderPlaceholder
 			};
 			const renderer = renderers[state.module];
 			if (!renderer) return;
@@ -844,6 +849,89 @@
 			} catch (error) { showToast(`保存失败：${error.message}`); }
 		}
 		function renderPlaceholder() { const title = state.module === "events" ? "事件设置" : "付费配置"; main.innerHTML = pageHeader(state.module === "events" ? "EVENT SETTINGS" : "PAYMENT CONFIG", title, "该模块将在后续版本中接入。", "") + `<section class="panel"><div class="empty"><strong>功能预留中</strong>这里暂时没有可配置内容。</div></section>`; }
+		// ===== 玩家管理 =====
+		// 列表数据来自后台 GET /admin/users（注册时间排序、可筛选 cohort / 赞赏状态，且已带聚合：
+		// 专注时长、专注次数、鱼数）。前端只负责渲染与导出，不下钻任何个人明细。
+		async function loadUsers() {
+			const params = new URLSearchParams();
+			if (userFilter.cohort) params.set("cohort", userFilter.cohort);
+			if (userFilter.isSupporter) params.set("isSupporter", userFilter.isSupporter);
+			const query = params.toString();
+			try {
+				const body = await apiRequest(`/admin/users${query ? `?${query}` : ""}`);
+				state.users = body.data.users || [];
+				usersLoaded = true;
+			} catch (error) {
+				showToast(`玩家列表加载失败：${error.message}`);
+				state.users = [];
+			}
+		}
+		// 切到本页签时调用：先拉数据再渲染（避免切页瞬间空白闪一下）。
+		async function refreshUsers() { await loadUsers(); if (state.module === "users") renderUserList(); }
+		function userRowHtml(u) {
+			const regTime = u.createdAt ? new Date(u.createdAt).toLocaleString() : "—";
+			const supporter = u.isSupporter
+				? `<span class="badge published">赞赏者</span>${esc(u.supporterNote || "")}`
+				: "—";
+			return `<tr class="${u.isSupporter ? "supporter" : ""}">
+				<td><div class="item-name">${esc(u.nickname || "（未命名）")}</div><div class="item-id">${esc(u.userId)}</div></td>
+				<td>${esc(u.cohort || "")}</td>
+				<td>${regTime}</td>
+				<td>${u.focusCount}</td>
+				<td>${u.focusMinutesTotal}</td>
+				<td>${u.fishCount}</td>
+				<td>${supporter}</td>
+			</tr>`;
+		}
+		function renderUserList() {
+			const cohortOptions = ["", "early", "public"].map(c => `<option value="${c}" ${userFilter.cohort === c ? "selected" : ""}>${c === "" ? "全部 cohort" : c}</option>`).join("");
+			const supporterOptions = ["", "true", "false"].map(v => `<option value="${v}" ${userFilter.isSupporter === v ? "selected" : ""}>${v === "" ? "全部" : v === "true" ? "仅赞赏者" : "仅非赞赏者"}</option>`).join("");
+			const supporters = state.users.filter(u => u.isSupporter).length;
+			const tableHtml = state.users.length
+				? `<div class="table-wrap"><table><thead><tr><th>玩家</th><th>cohort</th><th>注册时间</th><th>专注次数</th><th>累计专注(分)</th><th>鱼数</th><th>赞赏</th></tr></thead><tbody>${state.users.map(userRowHtml).join("")}</tbody></table></div>`
+				: `<div class="empty"><strong>${usersLoaded ? "还没有玩家" : "加载中…"}</strong>${usersLoaded ? "用户注册后会显示在这里" : "正在拉取玩家列表"}</div>`;
+			main.innerHTML = pageHeader("PLAYER MANAGEMENT", "玩家管理", "按注册时间从早到晚排序；可按 cohort 与赞赏状态筛选，赞赏者单独高亮。", `<button class="button primary" id="exportUsersCsv">导出 CSV</button>`)
+				+ `<section class="panel"><div class="panel-head"><div><h3>筛选</h3></div></div><div class="filter-row">
+					<label>cohort <select id="filterCohort">${cohortOptions}</select></label>
+					<label>赞赏状态 <select id="filterSupporter">${supporterOptions}</select></label>
+					<button class="button secondary" id="applyUserFilter">应用筛选</button>
+					<span class="count">共 ${state.users.length} 人（赞赏者 ${supporters}）</span>
+				</div></section>`
+				+ `<section class="panel"><div class="panel-head"><div><h3>玩家列表</h3><p>按注册时间从早到晚</p></div></div>${tableHtml}</section>`;
+			document.getElementById("exportUsersCsv").onclick = exportUsersCsv;
+			document.getElementById("applyUserFilter").onclick = async () => {
+				userFilter.cohort = document.getElementById("filterCohort").value;
+				userFilter.isSupporter = document.getElementById("filterSupporter").value;
+				await loadUsers();
+				renderUserList();
+			};
+		}
+		// CSV 单元格转义：含逗号/引号/换行的用双引号包住并把内部引号翻倍（RFC 4180）。
+		function csvCell(value) {
+			const s = String(value ?? "");
+			return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+		}
+		function exportUsersCsv() {
+			if (!state.users.length) { showToast("没有可导出的数据"); return; }
+			const header = ["userId", "nickname", "cohort", "createdAt", "isSupporter", "supporterNote", "focusCount", "focusMinutesTotal", "fishCount"];
+			const lines = [header.join(",")];
+			for (const u of state.users) {
+				const cells = [u.userId, u.nickname || "", u.cohort || "", u.createdAt ? new Date(u.createdAt).toISOString() : "", u.isSupporter ? "true" : "false", u.supporterNote || "", u.focusCount, u.focusMinutesTotal, u.fishCount];
+				lines.push(cells.map(csvCell).join(","));
+			}
+			// ﻿(BOM) 让 Excel 正确识别 UTF-8，否则中文会乱码。
+			const csv = "﻿" + lines.join("\r\n");
+			const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement("a");
+			a.href = url;
+			a.download = `fishtank-users-${new Date().toISOString().slice(0, 10)}.csv`;
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
+			URL.revokeObjectURL(url);
+			showToast(`已导出 ${state.users.length} 名玩家`);
+		}
 		function formData(form) { const data = Object.fromEntries(new FormData(form).entries()); data.isMemberOnly = form.elements.isMemberOnly?.checked || false; data.price = Number(data.price || 0); data.maxInventory = Number(data.maxInventory || 0); return data; }
 		async function publishItem(type, index) {
 			const item = state[type][index];

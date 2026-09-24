@@ -270,6 +270,24 @@ function stripCustomFishCode(record) {
   const { animationCode, ...rest } = record.data;
   return { ...record, data: rest };
 }
+
+// 后台用户列表：按注册时间排序 + cohort 筛选 + 赞赏状态筛选。
+// 聚合（专注时长/次数、鱼数）由数据层一次性算好，不触发 N+1。受 requireAdminAuth 保护。
+app.get("/api/admin/users", async (req, res) => {
+  try {
+    const store = await getPlayerStore();
+    const cohort = typeof req.query.cohort === "string" && req.query.cohort ? req.query.cohort : undefined;
+    const raw = req.query.isSupporter;
+    const isSupporter = raw === "" || raw === "true" || raw === "1"
+      ? true
+      : raw === "false" || raw === "0"
+        ? false
+        : undefined;
+    const users = await store.listUsers({ cohort, isSupporter });
+    res.json({ data: { users, count: users.length } });
+  } catch (error) { sendError(res, error); }
+});
+
 for (const type of types) {
   app.get(`/api/admin/${type}`, async (req, res) => {
     try {

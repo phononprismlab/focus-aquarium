@@ -399,6 +399,30 @@ export function planSettlement({ save, target, items }) {
 
 const nowIso = () => new Date().toISOString();
 
+// 服务端当天 00:00 的时间戳（毫秒），按服务端本地时区。
+// 专注聚合的「今日」边界统一以此为准（先按服务端时区，后续要时区再调）。
+function startOfTodayMs(nowFn = Date.now) {
+  const d = new Date(nowFn());
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+// 单个用户已结算的专注记录聚合。只计 settled_at > 0 的已结算记录。
+function aggregateFocusStats(rows, nowFn = Date.now) {
+  const settled = (Array.isArray(rows) ? rows : []).filter(r => Number(r.settled_at) > 0);
+  const todayStart = startOfTodayMs(nowFn);
+  const todayRows = settled.filter(r => Number(r.settled_at) >= todayStart);
+  const sumMinutes = list => list.reduce((sum, r) => sum + (Number(r.counted_minutes) || 0), 0);
+  return {
+    focusCount: settled.length,
+    focusMinutes: sumMinutes(settled),
+    bubblesEarned: settled.reduce((sum, r) => sum + (Number(r.reward) || 0), 0),
+    focusMinutesTotal: sumMinutes(settled),
+    focusCountToday: todayRows.length,
+    focusMinutesToday: sumMinutes(todayRows)
+  };
+}
+
 // ===== 内存实现（本地开发 / 单测）=====
 export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
   const users = new Map();
@@ -433,6 +457,38 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
       return user ? { ...user } : null;
     },
 
+    // 后台用户列表：按注册时间升序返回，并附带聚合数据（专注时长/次数、鱼数）。
+    // 聚合在数据层一次性算好，避免后台页面触发「每用户一次查询」的 N+1。
+    async listUsers({ cohort, isSupporter } = {}) {
+      const focusByUser = new Map();
+      for (const r of focusRecords.values()) {
+        if (!Number(r.settled_at)) continue;
+        if (!focusByUser.has(r.user_id)) focusByUser.set(r.user_id, []);
+        focusByUser.get(r.user_id).push(r);
+      }
+      let list = [...users.values()];
+      if (cohort) list = list.filter(u => u.cohort === cohort);
+      if (isSupporter !== undefined) list = list.filter(u => Boolean(u.is_supporter) === isSupporter);
+      list.sort((a, b) => (Number(a.created_at) || 0) - (Number(b.created_at) || 0));
+      return list.map(u => {
+        const focus = aggregateFocusStats(focusByUser.get(u.user_id) || [], now);
+        const save = saves.get(u.user_id);
+        const fish = save && save.data && save.data.AquariumData && Array.isArray(save.data.AquariumData.fish)
+          ? save.data.AquariumData.fish.length : 0;
+        return {
+          userId: u.user_id,
+          nickname: u.nickname || "",
+          cohort: u.cohort || "",
+          createdAt: u.created_at || 0,
+          isSupporter: Boolean(u.is_supporter),
+          supporterNote: u.supporter_note || "",
+          focusMinutesTotal: focus.focusMinutesTotal,
+          focusCount: focus.focusCount,
+          fishCount: fish
+        };
+      });
+    },
+
     async getSave(uid) {
       const row = saves.get(uid);
       if (!row) return null;
@@ -461,11 +517,7 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
 
     async stats(uid) {
       const rows = [...focusRecords.values()].filter(r => r.user_id === uid && r.settled_at);
-      return {
-        focusCount: rows.length,
-        focusMinutes: rows.reduce((sum, r) => sum + (Number(r.counted_minutes) || 0), 0),
-        bubblesEarned: rows.reduce((sum, r) => sum + (Number(r.reward) || 0), 0)
-      };
+      return aggregateFocusStats(rows, now);
     },
 
     // 仅供测试观察
@@ -521,6 +573,51 @@ export function createCloudbasePlayerStore(db, { now = () => Date.now() } = {}) 
 
     async getUser(uid) {
       return selectOne(TABLE_USERS, "user_id", uid);
+    },
+
+    // 后台用户列表：按注册时间升序返回，并附带聚合数据（专注时长/次数、鱼数）。
+    // 三趟查询（users / focus_records / saves）一次性拉回，按 user_id 在内存里聚合，
+    // 不论用户多少都只有这三次查询，不触发 N+1。
+    // ⚠️ 只用 select("*")/eq/throwOnError 这套已在线上验证过的 SDK 面貌：
+    //    这个查询构造器没有 order 方法（也没有验证过列名列表 select），
+    //    排序与列裁剪都在 JS 侧做 —— 用户量级（几百）下这点开销可以忽略。
+    async listUsers({ cohort, isSupporter } = {}) {
+      let q = db.from(TABLE_USERS).select("*");
+      if (cohort) q = q.eq("cohort", cohort);
+      if (isSupporter !== undefined) q = q.eq("is_supporter", isSupporter ? 1 : 0);
+      const { data: userRows } = await q.throwOnError();
+      const { data: focusRows } = await db.from(TABLE_FOCUS_RECORDS).select("*").throwOnError();
+      const { data: saveRows } = await db.from(TABLE_SAVES).select("*").throwOnError();
+      const focusByUser = new Map();
+      for (const r of (focusRows || [])) {
+        if (!Number(r.settled_at)) continue;
+        if (!focusByUser.has(r.user_id)) focusByUser.set(r.user_id, []);
+        focusByUser.get(r.user_id).push(r);
+      }
+      const fishByUser = new Map();
+      for (const s of (saveRows || [])) {
+        let d = s.data;
+        if (typeof d === "string") { try { d = JSON.parse(d); } catch { d = null; } }
+        const fish = d && d.AquariumData && Array.isArray(d.AquariumData.fish) ? d.AquariumData.fish.length : 0;
+        fishByUser.set(s.user_id, fish);
+      }
+      return (userRows || [])
+        .slice()
+        .sort((a, b) => (Number(a.created_at) || 0) - (Number(b.created_at) || 0))
+        .map(u => {
+          const focus = aggregateFocusStats(focusByUser.get(u.user_id) || [], now);
+          return {
+            userId: u.user_id,
+            nickname: u.nickname || "",
+            cohort: u.cohort || "",
+            createdAt: u.created_at || 0,
+            isSupporter: Boolean(u.is_supporter === true || u.is_supporter === 1),
+            supporterNote: u.supporter_note || "",
+            focusMinutesTotal: focus.focusMinutesTotal,
+            focusCount: focus.focusCount,
+            fishCount: fishByUser.get(u.user_id) || 0
+          };
+        });
     },
 
     async getSave(uid) {
@@ -590,13 +687,8 @@ export function createCloudbasePlayerStore(db, { now = () => Date.now() } = {}) 
     },
 
     async stats(uid) {
-      const { data } = await db.from(TABLE_FOCUS_RECORDS).select("*").eq("user_id", uid).throwOnError();
-      const rows = (Array.isArray(data) ? data : []).filter(r => Number(r.settled_at) > 0);
-      return {
-        focusCount: rows.length,
-        focusMinutes: rows.reduce((sum, r) => sum + (Number(r.counted_minutes) || 0), 0),
-        bubblesEarned: rows.reduce((sum, r) => sum + (Number(r.reward) || 0), 0)
-      };
+      const { data } = await db.from(TABLE_FOCUS_RECORDS).select("counted_minutes,settled_at,reward").eq("user_id", uid).throwOnError();
+      return aggregateFocusStats(data, now);
     }
   };
 }

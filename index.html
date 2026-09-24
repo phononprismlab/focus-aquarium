@@ -418,6 +418,11 @@
 
 /* ===== v0.2 商店与数据系统 ===== */
 .v02-topbar{position:absolute;left:18px;top:18px;z-index:1000;display:flex;align-items:center;gap:10px;}
+/* 专注聚合状态条：只读展示「今日 / 累计」，不暴露逐条明细。挂在右上角下方，最小侵入。 */
+.v02-focus{position:absolute;right:18px;top:18px;z-index:1000;display:flex;flex-direction:column;align-items:flex-end;gap:3px;padding:8px 13px;border:1px solid rgba(255,255,255,.5);background:rgba(30,80,95,.32);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 3px 12px rgba(0,0,0,.12);border-radius:14px;color:#fff;font-family:inherit;line-height:1.4;pointer-events:none;}
+.v02-focus[hidden]{display:none;}
+.v02-focus .focus-today{font-size:12px;letter-spacing:.04em;font-weight:700;}
+.v02-focus .focus-total{font-size:11px;letter-spacing:.04em;opacity:.85;}
 .v02-bubbles,.v02-shop-btn{border:1px solid rgba(255,255,255,.58);background:rgba(30,80,95,.35);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 3px 12px rgba(0,0,0,.12);color:#fff;border-radius:999px;font-family:inherit;}
 .v02-bubbles{padding:9px 14px;font-size:13px;letter-spacing:.05em;}
 .v02-shop-btn{padding:10px 16px;cursor:pointer;font-size:13px;}
@@ -868,6 +873,17 @@
 .guide-skip{background:#e4eeef;color:#48646a}
 .guide-next{background:#4d8a8c;color:#fff;box-shadow:0 4px 10px rgba(77,138,140,.3)}
 
+/* ===== 同步码保存引导（建号后只弹一次，R6 风险缓解）===== */
+.sync-guide{position:fixed;inset:0;z-index:5500;display:flex;align-items:center;justify-content:center;background:rgba(12,34,38,.4)}
+.sync-guide[hidden]{display:none}
+.sync-guide-card{width:min(360px,calc(100vw - 36px));padding:22px 22px 18px;border-radius:20px;background:#f6fbfb;color:#22393d;box-shadow:0 18px 44px rgba(16,44,48,.34)}
+.sync-guide-title{font-size:16px;font-weight:700;margin-bottom:12px}
+.sync-guide-text{font-size:13px;line-height:1.75;color:#4a666b;margin:0 0 18px;text-align:left}
+.sync-guide-actions{display:flex;gap:10px;justify-content:center}
+.sync-guide-actions button{border:0;border-radius:12px;padding:10px 18px;font-size:14px;cursor:pointer}
+.sync-guide-go{background:#4d8a8c;color:#fff;box-shadow:0 4px 10px rgba(77,138,140,.3)}
+.sync-guide-skip{background:#e4eeef;color:#48646a}
+
 </style>
 </head>
 
@@ -879,12 +895,27 @@
   <button type="button" class="config-notice-close" id="configNoticeClose" aria-label="关闭提示">×</button>
 </div>
 
+<div class="sync-guide" id="syncGuide" hidden role="dialog" aria-modal="true" aria-labelledby="syncGuideTitle">
+  <div class="sync-guide-card">
+    <div class="sync-guide-title" id="syncGuideTitle">你的鱼缸只在这台设备上</div>
+    <p class="sync-guide-text">账号信息存在你这个浏览器里。换手机或电脑时，在设置（•••）里点「生成同步码」，把那段码填到新设备上，就能把鱼缸原样搬过去 —— 进度不会丢。<br><br>同步码 10 分钟内有效，换设备时现生成就行，不用提前存。</p>
+    <div class="sync-guide-actions">
+      <button type="button" class="sync-guide-go" id="syncGuideGo">去生成同步码</button>
+      <button type="button" class="sync-guide-skip" id="syncGuideSkip">以后再说</button>
+    </div>
+  </div>
+</div>
+
 <div class="app">
 <main class="tank" id="tank">
   <div class="water-glow"></div>
   <div class="v02-topbar">
     <div class="v02-bubbles" id="bubbleDisplay">🫧 0</div>
     <button type="button" class="v02-shop-btn" id="shopOpenBtn">装点鱼缸</button>
+  </div>
+  <div class="v02-focus" id="focusStatus" hidden aria-live="polite">
+    <div class="focus-today" id="focusToday">今日专注 0 次 · 0 分钟</div>
+    <div class="focus-total" id="focusTotal">累计 0 次 · 0 分钟</div>
   </div>
 
 
@@ -1134,6 +1165,9 @@
   // 云同步总开关：账号就绪（拿到令牌）后才打开。任何一步失败都保持 false，
   // 此时应用退化成「纯本地存档」，行为与接入前完全一致。
   let CLOUD_SYNC_ENABLED = false;
+  // 专注聚合统计（只读展示，不拉逐条明细）。数据完全来自 GET /api/game/me 的聚合字段；
+  // 离线玩家没有这部分数据，状态条保持隐藏。放在这里同样为了避开 TDZ。
+  let focusStats = { focusCount:0, focusMinutesTotal:0, focusCountToday:0, focusMinutesToday:0 };
   // 本地最后一次成功推送的时间戳（毫秒），用来判断「本地有没有还没推上去的改动」。
   let lastPushedAt = 0;
   let cloudPushTimer = 0;
@@ -1747,6 +1781,7 @@
       msg.className="account-note ok";
       // 采用云端（原设备的）存档。
       await syncCloudSave();
+      refreshFocusStats();
       renderBubbles();
       renderAquarium(AquariumData);
       msg.textContent="恢复成功，鱼缸已经搬过来了";
@@ -1755,6 +1790,36 @@
       msg.className="account-note bad";
     }
   }
+
+  // ===== 同步码保存引导（建号后只弹一次，R6 缓解）=====
+  const SYNC_GUIDE_KEY = "fishtank_sync_guide_v1";
+  function maybeShowSyncGuide(){
+    if(!CLOUD_SYNC_ENABLED || !ACCOUNT_TOKEN) return;
+    let seen = false;
+    try { seen = localStorage.getItem(SYNC_GUIDE_KEY) === "1"; } catch(_) { /* 隐私模式读不到：当没看过，下次还会弹 */ }
+    if(seen) return;
+    const el = document.getElementById("syncGuide");
+    if(el) el.hidden = false;
+  }
+  function syncGuideGo(){
+    const el = document.getElementById("syncGuide");
+    if(el) el.hidden = true;
+    try { localStorage.setItem(SYNC_GUIDE_KEY, "1"); } catch(_) { /* 存不下就当已看，下次不弹 */ }
+    // 打开设置面板并把同步码生成出来，用户直接就能复制。
+    const panel = document.getElementById("audioSettings");
+    if(panel){ panel.classList.add("show"); panel.setAttribute("aria-hidden", "false"); }
+    const toggle = document.getElementById("audioSettingsToggle");
+    if(toggle) toggle.setAttribute("aria-expanded", "true");
+    generateSyncCode().catch(error => console.warn("[sync] 引导弹窗生成同步码失败：", error.message));
+  }
+  function syncGuideSkip(){
+    const el = document.getElementById("syncGuide");
+    if(el) el.hidden = true;
+    try { localStorage.setItem(SYNC_GUIDE_KEY, "1"); } catch(_) { /* 同上 */ }
+  }
+
+  document.getElementById("syncGuideGo").addEventListener("click", syncGuideGo);
+  document.getElementById("syncGuideSkip").addEventListener("click", syncGuideSkip);
 
   document.getElementById("syncCodeBtn").addEventListener("click",()=>{
     generateSyncCode().catch(error=>console.warn("[sync] 生成同步码失败：",error.message));
@@ -3265,8 +3330,8 @@ function resetFocus(completed) {
         : "这次没攒够时长，没有泡泡。下次专注满 25 分钟就有啦 🫧";
     };
     settleFocusReward(localReward).then(
-      settlement => finishFocusReward(settlement.reward),
-      () => finishFocusReward(localReward)
+      settlement => { finishFocusReward(settlement.reward); refreshFocusStats(); },
+      () => { finishFocusReward(localReward); refreshFocusStats(); }
     );
   }
 
@@ -3713,6 +3778,40 @@ const elemToRemove = nearest.el;
     return { token, uid };
   }
 
+  // ===== 专注聚合统计（只读展示，不拉逐条明细）=====
+  // 完全消费 GET /api/game/me 的四个聚合字段；离线玩家没有这部分数据，状态条保持隐藏。
+  // 文档明确禁止：任何把 focus_records 明细下发给前端的接口 / 逐条历史页 / 标注入口。这里只展示汇总。
+  function renderFocusStats(){
+    const el = document.getElementById("focusStatus");
+    if(!el) return;
+    // 没账号（没令牌）就没有聚合数据，隐藏状态条。
+    if(!CLOUD_SYNC_ENABLED || !ACCOUNT_TOKEN){ el.hidden = true; return; }
+    const todayEl = document.getElementById("focusToday");
+    const totalEl = document.getElementById("focusTotal");
+    if(todayEl) todayEl.textContent = `今日专注 ${focusStats.focusCountToday} 次 · ${focusStats.focusMinutesToday} 分钟`;
+    if(totalEl) totalEl.textContent = `累计 ${focusStats.focusCount} 次 · ${focusStats.focusMinutesTotal} 分钟`;
+    el.hidden = false;
+  }
+
+  // 拉取并刷新专注聚合统计。失败（无令牌 / 网络错 / 非 2xx）安静跳过，不影响主流程。
+  async function refreshFocusStats(){
+    if(!CLOUD_SYNC_ENABLED || !ACCOUNT_TOKEN) return;
+    try{
+      const response = await fetch(`${API_BASE}/game/me`, { method:"GET", headers: cloudHeaders(), cache:"no-store" });
+      if(!response.ok) return;
+      const body = await response.json();
+      const d = (body && body.data) || {};
+      // 只取四个聚合字段；任何缺失按 0 兜底，绝不把逐条明细塞进前端。
+      focusStats = {
+        focusCount: Number(d.focusCount) || 0,
+        focusMinutesTotal: Number(d.focusMinutesTotal) || 0,
+        focusCountToday: Number(d.focusCountToday) || 0,
+        focusMinutesToday: Number(d.focusMinutesToday) || 0
+      };
+      renderFocusStats();
+    }catch(_){ /* 聚合展示失败不影响主流程 */ }
+  }
+
   async function ensureAccount(){
     if(window.FISHTANK_DISABLE_ACCOUNT) return;
 
@@ -3725,6 +3824,8 @@ const elemToRemove = nearest.el;
       CLOUD_SYNC_ENABLED=true;
       updateDevStatus();
       syncCloudSave();
+      refreshFocusStats();
+      maybeShowSyncGuide();
       return;
     }
 
@@ -3771,6 +3872,8 @@ const elemToRemove = nearest.el;
     updateDevStatus();
     // 首次建号：云端必然还没有存档，把本地存档推上去（syncCloudSave 的 ① 分支）。
     syncCloudSave();
+    refreshFocusStats();
+    maybeShowSyncGuide();
   }
 
   // 推迟到空闲再建号。失败只写 console：玩家不该因为账号层出问题而受影响，
