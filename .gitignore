@@ -1,3 +1,7 @@
 node_modules/
 .env
 api/uploads/
+
+# CloudBase 自定义登录私钥：只允许配在服务端环境变量里，绝不进仓库。
+# 文件长得像 tcb_custom_login_key(<envId>).json
+*custom_login_key*.json
