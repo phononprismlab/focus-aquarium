@@ -9,6 +9,7 @@
       "outputDir": ".",
       "deployPath": "/",
       "ignore": [
+        "account-check.html",
         "api",
         "api/**/*",
         ".vscode",

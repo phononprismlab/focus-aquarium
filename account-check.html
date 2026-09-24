@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>账号闭环自检 · 鱼儿乐水族</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px;
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #0d1c20; color: #e6f2f0; line-height: 1.7;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 500; margin: 0 0 4px; }
+  .sub { font-size: 13px; color: #8fa8a4; margin: 0 0 24px; }
+  .card {
+    background: #13272c; border: 1px solid rgba(255,255,255,.08);
+    border-radius: 12px; padding: 16px 18px; margin-bottom: 14px;
+  }
+  .card h2 { font-size: 14px; font-weight: 500; margin: 0 0 12px; color: #b8d8d2; }
+  .row { display: flex; gap: 10px; padding: 5px 0; font-size: 13px; border-top: 1px solid rgba(255,255,255,.05); }
+  .row:first-of-type { border-top: 0; }
+  .k { flex: 0 0 168px; color: #8fa8a4; }
+  .v { flex: 1; word-break: break-all; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+  button {
+    font: inherit; font-size: 14px; padding: 10px 18px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,.2); background: transparent; color: #e6f2f0;
+    cursor: pointer; touch-action: manipulation;
+  }
+  button:hover { border-color: rgba(255,255,255,.4); }
+  button:disabled { opacity: .4; cursor: default; }
+  button.primary { background: #1d9e75; border-color: #1d9e75; color: #04231a; }
+  .ok { color: #5dcaa5; }
+  .bad { color: #f09595; }
+  .warn { color: #ef9f27; }
+  .muted { color: #8fa8a4; }
+  pre {
+    margin: 10px 0 0; padding: 10px 12px; background: #0b171a; border-radius: 8px;
+    font-size: 12px; overflow-x: auto; color: #b8d8d2; white-space: pre-wrap; word-break: break-all;
+  }
+  .hint { font-size: 12px; color: #8fa8a4; margin: 8px 0 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>账号闭环自检</h1>
+  <p class="sub">验证「服务端签发票据 → 浏览器拿票据登录 → 读到 user_id」这条链路。这是一个一次性自检页，正式上线前要删掉。</p>
+
+  <div class="card">
+    <h2>1 · 服务端账号配置</h2>
+    <div id="healthRows"><span class="muted">正在读取 /api/health …</span></div>
+    <pre id="healthRaw" hidden></pre>
+  </div>
+
+  <div class="card">
+    <h2>2 · 签发并登录</h2>
+    <p class="hint" style="margin-top:0">点一下：后端签一张票据，浏览器用它登录，然后把拿到的 user_id 显示出来。本地存过的 uid 会复用（模拟"老设备再打开"）。</p>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px">
+      <button class="primary" id="runBtn">签发并登录</button>
+      <button id="newBtn">换个新身份</button>
+    </div>
+    <div id="steps" style="margin-top:14px"></div>
+  </div>
+</div>
+
+<!-- config.js 里的 API 地址是唯一来源。本地预览时它会被改写成同源的 /api 走代理，
+     线上指向真实 API —— 两边都不会撞 CORS。 -->
+<script src="config.js"></script>
+<script src="https://static.cloudbase.net/cloudbase-js-sdk/3.10.0/cloudbase.full.js"></script>
+<script>
+// ⚠️ 这个页面只用于验证账号闭环，正式上线前删除（和 DEV 面板一样是"上线前必做"项）。
+(function () {
+  var API_BASE = (window.FISHTANK_API_BASE || "https://focus-aquarium-api-316509-5-1491495221.sh.run.tcloudbase.com/api").replace(/\/+$/, "");
+  // 环境 ID 从健康检查里拿（服务端知道自己的环境），避免这里再硬编码一份。
+  var ENV_ID = "";
+  var UID_KEY = "fishtank_account_uid_check";
+
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  };
+  function row(k, v, cls) {
+    return '<div class="row"><div class="k">' + esc(k) + '</div><div class="v' + (cls ? " " + cls : "") + '">' + v + "</div></div>";
+  }
+  function readStoredUid() {
+    try { return localStorage.getItem(UID_KEY) || ""; } catch (e) { return ""; }
+  }
+  function storeUid(uid) {
+    try { localStorage.setItem(UID_KEY, uid); } catch (e) { /* 无痕模式等，忽略 */ }
+  }
+
+  // ---- 1. 服务端状态 ----
+  fetch(API_BASE + "/api/health").then(function (r) { return r.json(); }).then(function (h) {
+    var a = h.account || {};
+    ENV_ID = a.env || "";
+    var html = "";
+    html += row("API", esc(API_BASE));
+    html += row("账号已配置", a.configured ? '<span class="ok">是</span>' : '<span class="bad">否</span>');
+    if (!a.configured) {
+      html += row("原因", '<span class="bad">' + esc(a.error || "未知") + "</span>");
+      html += row("该怎么办", "在云托管服务的环境变量里配 CLOUDBASE_CUSTOM_LOGIN_KEY，然后重新部署");
+    } else {
+      html += row("私钥环境", esc(a.env || ""));
+      html += row("与环境一致", a.envMatch === true ? '<span class="ok">是</span>' : (a.envMatch === false ? '<span class="bad">否（' + esc(a.mismatch ? a.mismatch.keyEnv + " ≠ " + a.mismatch.targetEnv : "") + '）</span>' : '<span class="muted">未知</span>'));
+      html += row("密钥 ID", esc(a.keyId || ""));
+    }
+    $("healthRows").innerHTML = html;
+  }).catch(function (e) {
+    $("healthRows").innerHTML = '<span class="bad">读不到 /api/health：' + esc(e.message) + "</span>";
+  });
+
+  // ---- 2. 签发并登录 ----
+  function log(cls, text) {
+    var div = document.createElement("div");
+    div.className = "row";
+    div.innerHTML = '<div class="k"></div><div class="v ' + cls + '">' + text + "</div>";
+    $("steps").appendChild(div);
+  }
+
+  function run(forceNew) {
+    $("steps").innerHTML = "";
+    $("runBtn").disabled = true;
+    $("newBtn").disabled = true;
+
+    var storedUid = forceNew ? "" : readStoredUid();
+    var body = storedUid ? { uid: storedUid } : {};
+    log("muted", storedUid ? "本机已有 uid，复用它（模拟老设备）" : "本机没有 uid，服务端会新建一个");
+
+    fetch(API_BASE + "/api/account/ticket", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    })
+      .then(function (r) { return r.json().then(function (b) { return { status: r.status, body: b }; }); })
+      .then(function (res) {
+        if (res.status !== 200) {
+          log("bad", "签发失败 HTTP " + res.status + "：" + esc(res.body.error || ""));
+          if (res.body.hint) log("muted", esc(res.body.hint));
+          throw new Error("ticket-failed");
+        }
+        var d = res.body.data;
+        log("ok", "票据已签发（" + d.ticket.length + " 字符，有效期 " + d.ticketValidSeconds + " 秒）");
+        log("muted", "uid = " + esc(d.uid) + (d.generated ? "（服务端新建）" : "（沿用本机）"));
+        storeUid(d.uid);
+        return signIn(d.ticket);
+      })
+      .catch(function (e) {
+        if (e.message !== "ticket-failed") log("bad", "出错：" + esc(e.message));
+        $("runBtn").disabled = false;
+        $("newBtn").disabled = false;
+      });
+  }
+
+  function signIn(ticket) {
+    if (typeof cloudbase === "undefined") {
+      log("bad", "CloudBase JS SDK 没加载成功（检查网络能否访问 static.cloudbase.net）");
+      return Promise.reject(new Error("sdk-missing"));
+    }
+    if (!ENV_ID) {
+      log("bad", "拿不到环境 ID —— 先看上面第 1 步是否正常");
+      return Promise.reject(new Error("no-env"));
+    }
+    var app = cloudbase.init({ env: ENV_ID });
+    var auth = app.auth({ persistence: "local" });
+    log("muted", "正在用票据登录环境 " + esc(ENV_ID) + " …");
+    return auth.signInWithCustomTicket(ticket).then(function () {
+      log("ok", "登录成功");
+      return auth.getLoginState();
+    }).then(function (state) {
+      var user = auth.currentUser;
+      var uid = (user && user.uid) || "";
+      log("ok", "user_id = " + esc(uid));
+      if (state) log("muted", "登录态：" + (state.isLoggedIn || state.loginState ? "已登录" : "未登录"));
+      if (user && user.customUserId) log("muted", "customUserId = " + esc(user.customUserId));
+      if (!uid) log("warn", "登录后没读到 uid —— 把上面几行发我");
+    });
+  }
+
+  $("runBtn").onclick = function () { run(false); };
+  $("newBtn").onclick = function () { run(true); };
+})();
+</script>
+</body>
+</html>
