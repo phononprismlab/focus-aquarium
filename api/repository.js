@@ -237,13 +237,38 @@ export function createMemoryRepository() {
   };
 }
 
+// RDB 客户端单例。配置仓库与玩家数据层（player-store.js）共用同一个实例 ——
+// 两边各 init 一次会得到两个互不相干的客户端，各带一份连接与鉴权状态，
+// 没有任何好处，只是白白多一份开销。
+let rdbInstance = null;
+let rdbPromise = null;
+export async function getRdb() {
+  if (rdbInstance) return rdbInstance;
+  if (!rdbPromise) {
+    rdbPromise = (async () => {
+      const { default: cloudbase } = await import("@cloudbase/js-sdk");
+      const app = cloudbase.init({
+        env: process.env.CLOUDBASE_ENV_ID,
+        accessKey: process.env.CLOUDBASE_APIKEY
+      });
+      rdbInstance = app.rdb();
+      return rdbInstance;
+    })();
+    // 初始化失败时清掉缓存的 promise：否则后续每次调用都会拿到同一个 rejected promise，
+    // 一次网络抖动就会让进程内再也建不出客户端。
+    rdbPromise.catch(() => { rdbPromise = null; });
+  }
+  return rdbPromise;
+}
+
+// 仅供测试：注入替身，或重置单例。
+export function setRdbForTest(instance) {
+  rdbInstance = instance;
+  rdbPromise = instance ? Promise.resolve(instance) : null;
+}
+
 export async function createCloudbaseRepository() {
-  const { default: cloudbase } = await import("@cloudbase/js-sdk");
-  const app = cloudbase.init({
-    env: process.env.CLOUDBASE_ENV_ID,
-    accessKey: process.env.CLOUDBASE_APIKEY
-  });
-  const db = app.rdb();
+  const db = await getRdb();
   const tableName = "fishtank_configs";
 
   // 种子迁移：把 seed 的默认集合并进已部署的数据库（B2）。

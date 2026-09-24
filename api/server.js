@@ -13,6 +13,8 @@ import { validateAudioConfig } from "./audio-config.js";
 import { validateEventConfig } from "./event-config.js";
 import { resolveAdminApiKey, checkProductionConfig, warnWeakAdminKey } from "./runtime-guard.js";
 import { accountStatus, issueTicket, normalizeUid, checkRateLimit, resetAccountCache, resetRateLimit, RATE_LIMIT } from "./account.js";
+import { readRequestUid, issueSessionToken, verifySessionToken, sessionSecretStatus } from "./session-token.js";
+import { createPlayerStore, mergeSaveForWrite, planPurchase, planSettlement, normalizeBubbles } from "./player-store.js";
 
 const app = express();
 const host = process.env.HOST || "0.0.0.0";
@@ -151,6 +153,40 @@ const getRepository = async () => {
 const records = async type => (await getRepository()).list(type, false);
 const sendError = (res, error) => res.status(500).json({ error: error.message || "服务器错误" });
 
+// ===== 玩家数据层（账号 / 存档 / 专注记录）=====
+// 与配置仓库分开初始化：配置仓库启动时要串行补齐十几条种子数据（网络往返），
+// 玩家数据层只是取到一个 RDB 客户端对象（不发网络请求），两者互不阻塞。
+let playerStore;
+let playerStoreError;
+let playerStoreStatus = "pending";
+const playerStoreReady = createPlayerStore().then(instance => {
+  playerStore = instance;
+  playerStoreStatus = "ok";
+  console.log(`Player store initialized (${instance.driver})`);
+  return instance;
+}).catch(error => {
+  playerStoreError = error;
+  playerStoreStatus = "failed";
+  console.error("Player store initialization failed", error);
+  return null;
+});
+let injectedPlayerStore = null;
+// 仅供测试：注入内存实现，避免测试去连真实云环境。
+export function setPlayerStoreForTest(store) { injectedPlayerStore = store; }
+const getPlayerStore = async () => {
+  if (injectedPlayerStore) return injectedPlayerStore;
+  const instance = await playerStoreReady;
+  if (!instance) throw playerStoreError || new Error("Player store is unavailable");
+  return instance;
+};
+
+// 新账号的 cohort。灰度期所有注册都来自名单，所以默认 early；
+// 公开发布时把 FISHTANK_COHORT 设成 public（或改成按日期切换）。
+const cohortForNewUser = () => {
+  const value = String(process.env.FISHTANK_COHORT || "").trim().toLowerCase();
+  return value === "public" ? "public" : "early";
+};
+
 // 健康检查供容器编排使用：只回答"这个进程还活着吗"，永远立刻返回 200，不碰数据层。
 // 数据层是外部依赖，慢或者不可用都不该让探针失败 —— 探针失败会被判成实例故障，
 // 进而导致反复重启和"部署版本失败"，而这跟业务是否真的可用完全是两回事。
@@ -169,12 +205,16 @@ app.get("/api/health", (req, res) => {
     // 配错的组合（生产走本地磁盘、缺 envId、pg 缺密钥）在这里显式列出来，别等上传失败才发现。
     storageProblems: plan.problems,
     repository: repositoryStatus,
+    playerStore: playerStoreStatus,
     cors: allowAllOrigins ? "all" : (originsSource === "env" ? "configured" : "fallback"),
     adminAuth: adminApiKey ? "enabled" : "disabled",
     // 自定义登录私钥的配置状态。配错的表现一律只是"登录失败"，前端查不出是哪一环，
     // 所以把结构性事实（有没有配、环境和目标一不一致）直接放在健康检查里。
     // 只读缓存的解析结果，不发网络请求 —— 健康检查绝不能被外部依赖拖住。
-    account: accountStatus()
+    account: accountStatus(),
+    // 会话令牌的密钥来源：explicit（显式配了 FISHTANK_SESSION_SECRET）
+    // / derived（从 ADMIN_API_KEY 派生）/ none（都没配，存档接口会全部 401）。
+    sessionKey: sessionSecretStatus().source
   });
 });
 
@@ -259,7 +299,7 @@ for (const type of types) {
 // 🔴 安全边界：票据就是"以某个 uid 登录"的凭证，接口不能变成随便领的水龙头。
 //    三道闸：① uid 格式严格校验 ② 不传 uid 时服务端生成高熵随机值（不可枚举）
 //    ③ 按 IP 限流。跨设备的身份迁移靠同步码（v2），不是靠猜 uid。
-app.post("/api/account/ticket", (req, res) => {
+app.post("/api/account/ticket", async (req, res) => {
   // 先限流再做别的：凭证解析失败也要算进配额，否则可以拿错误请求刷。
   const limiter = checkRateLimit(req.ip || "unknown");
   if (!limiter.allowed) {
@@ -276,11 +316,47 @@ app.post("/api/account/ticket", (req, res) => {
     });
   }
 
-  const normalized = normalizeUid(req.body && req.body.uid);
+  // ===== 这一步决定「你是谁」—— 整条账号链上唯一的身份入口 =====
+  // 三种情况，只有前两种能拿到票据：
+  const body = (req.body && typeof req.body === "object") ? req.body : {};
+  let normalized;
+  let generated = false;
+  if (body.token !== undefined) {
+    // ① 带会话令牌 = 续期，或在另一台设备上恢复登录态。只认令牌里的 uid。
+    const verified = verifySessionToken(body.token);
+    if (verified.error) {
+      return res.status(401).json({ error: verified.error, expired: verified.expired === true });
+    }
+    normalized = normalizeUid(verified.uid);
+  } else if (body.uid !== undefined && String(body.uid).trim()) {
+    // ② 🔴 只给 uid、不给令牌 —— 这就是「凭知道 uid 去登别人的账号」。
+    //    uid 会出现在 localStorage、浏览器网络面板、用户截图里，它**不是凭证**。
+    //    这条路必须堵死，否则云存档等于没有门（这也正是同步码存在的意义）。
+    return res.status(403).json({
+      error: "缺少会话令牌：uid 不能单独作为登录凭证",
+      hint: "首次建号请不要传 uid（服务端会生成一个）；恢复登录态请传 token。"
+    });
+  } else {
+    // ③ 什么都不传 = 首次建号。服务端生成高熵随机 uid（不可枚举）。
+    normalized = normalizeUid(undefined);
+    generated = true;
+  }
   if (normalized.error) return res.status(400).json({ error: normalized.error });
 
   try {
     const issued = issueTicket(normalized.uid);
+    const session = issueSessionToken(issued.uid);
+
+    // 建号。失败**不阻断签发** —— 表还没建好、数据库抖动，都不该让玩家连登录都做不到；
+    // 存档接口在第一次真正写入时会再试一次 ensureUser。
+    let created = false;
+    try {
+      const result = await (await getPlayerStore()).ensureUser(issued.uid, { cohort: cohortForNewUser() });
+      created = result.created === true;
+    } catch (error) {
+      console.warn(`建号失败（不影响登录，首次写存档时会重试）：${error.message}`);
+    }
+
     res.json({
       data: {
         ticket: issued.ticket,
@@ -289,10 +365,16 @@ app.post("/api/account/ticket", (req, res) => {
         //    下面的 ttlSeconds 是登录态的刷新时长，不是票据有效期。
         ticketValidSeconds: 600,
         sessionTtlSeconds: issued.ttlSeconds,
-        generated: normalized.generated,
+        generated,
         // 环境 ID 由服务端下发：前端 init SDK 必须知道它，写死在前端就会有两份
         // 配置要同步（换环境时前端静默登错环境）。服务端本来就知道，直接给。
-        env: issued.env
+        env: issued.env,
+        // 会话令牌：后续所有 /api/game/* 接口靠它证明「我是这个 uid」。
+        // 与票据的分工：票据交给 CloudBase SDK 换登录态（10 分钟一次性）；
+        // 令牌是我们自己签的，用于 HTTP 接口（180 天，前端每次打开静默续期）。
+        token: session.token || "",
+        tokenExpiresAt: session.expiresAt || 0,
+        created
       }
     });
   } catch (error) {
@@ -320,7 +402,30 @@ app.post("/api/game/focus/start", async (req, res) => {
     if (!focusConfig) return res.status(503).json({ error: "专注配置不可用" });
     const errorMessage = validateStartRequest(req.body, focusConfig);
     if (errorMessage) return res.status(400).json({ error: errorMessage });
-    res.status(201).json({ data: focusSessions.start(req.body) });
+    const session = focusSessions.start(req.body);
+
+    // 会话同时在 focus_records 里落一行（未结算）。
+    // ⚠️ **登录不是专注的前提** —— 未登录、离线都照常能专注，只是这条记录不进服务端统计。
+    //    写库失败也只记日志：专注是核心动作，不能被数据库抖动挡住。
+    const auth = readRequestUid(req);
+    if (!auth.error) {
+      try {
+        await (await getPlayerStore()).addFocusRecord({
+          id: session.sessionId,
+          user_id: auth.uid,
+          planned_minutes: session.plannedMinutes,
+          counted_minutes: 0,
+          reward: 0,
+          natural: false,
+          started_at: session.startedAt,
+          settled_at: 0
+        });
+      } catch (error) {
+        console.warn(`专注会话落库失败（不影响专注）：${error.message}`);
+      }
+    }
+
+    res.status(201).json({ data: session });
   } catch (error) { sendError(res, error); }
 });
 
@@ -332,7 +437,207 @@ app.post("/api/game/focus/complete", async (req, res) => {
     if (!focusConfig) return res.status(503).json({ error: "专注配置不可用" });
     const settlement = focusSessions.settle(sessionId, focusConfig);
     if (!settlement) return res.status(404).json({ error: "专注会话不存在或已过期" });
+
+    // 结算结果写回 focus_records，供后台统计与 /api/game/me 的累计时长使用。
+    // ⚠️ 这里**不写存档泡泡**：V1.0 泡泡是客户端权威（见 player-store.js 的说明），
+    //    前端自己落地奖励并随后 push 存档；两边都加会变成双倍奖励。
+    const auth = readRequestUid(req);
+    if (!auth.error) {
+      try {
+        await (await getPlayerStore()).settleFocusRecord(sessionId, {
+          countedMinutes: settlement.countedMinutes,
+          reward: settlement.reward,
+          natural: settlement.naturalCompletion
+        });
+      } catch (error) {
+        console.warn(`专注结算落库失败（不影响奖励发放）：${error.message}`);
+      }
+    }
+
     res.json({ data: settlement });
+  } catch (error) { sendError(res, error); }
+});
+
+// ===== 云存档 =====
+//
+// 三个接口都要身份：没有会话令牌一律 401。
+// 存档层不可用时返回 503 + 原因 —— 前端据此回落到纯本地模式（最坏情况 = 现在的行为）。
+
+// 身份 + 存档层就绪的公共前置，省得每个接口重复同样三行。
+async function requireIdentity(req, res) {
+  const auth = readRequestUid(req);
+  if (auth.error) {
+    res.status(401).json({ error: auth.error, expired: auth.expired === true });
+    return null;
+  }
+  let store;
+  try {
+    store = await getPlayerStore();
+  } catch (error) {
+    res.status(503).json({ error: "云存档暂时不可用，本地进度不受影响", detail: error.message });
+    return null;
+  }
+  return { uid: auth.uid, store };
+}
+
+// 拉存档。没有记录时返回 exists:false，而不是造一份空存档 ——
+// 「服务端还没有你的数据」和「你的数据是空的」是两件事，前端要能区分（前者不该覆盖本地）。
+app.get("/api/game/save", async (req, res) => {
+  const identity = await requireIdentity(req, res);
+  if (!identity) return;
+  try {
+    const row = await identity.store.getSave(identity.uid);
+    res.json({
+      data: {
+        exists: Boolean(row && row.data),
+        save: row ? row.data : null,
+        updatedAt: row ? row.updated_at : 0
+      }
+    });
+  } catch (error) { sendError(res, error); }
+});
+
+// 推存档。字段分权在 mergeSaveForWrite 里，这里只负责取服务端现值再交给它合并。
+app.put("/api/game/save", async (req, res) => {
+  const identity = await requireIdentity(req, res);
+  if (!identity) return;
+  try {
+    const stored = await identity.store.getSave(identity.uid);
+    const merged = mergeSaveForWrite(stored ? stored.data : null, req.body, {
+      saveVersion: String((req.body && req.body.saveVersion) || "")
+    });
+    const clientTs = Number(req.body && req.body.clientTs);
+    const row = await identity.store.putSave(identity.uid, merged.save, {
+      saveVersion: merged.save.saveVersion,
+      clientTs: Number.isFinite(clientTs) ? clientTs : Date.now()
+    });
+    res.json({
+      data: {
+        save: row.data,
+        updatedAt: row.updated_at,
+        // 服务端丢弃/修正了什么。不展示给玩家，只用于对账与排查。
+        adjustments: merged.problems,
+        firstPush: merged.firstPush
+      }
+    });
+  } catch (error) { sendError(res, error); }
+});
+
+// 购买。价格与库存上限一律取**已发布的服务端配置**，客户端只能报 itemId ——
+// 否则前端改个价格就能一块钱买走背景。
+app.post("/api/game/shop/buy", async (req, res) => {
+  const identity = await requireIdentity(req, res);
+  if (!identity) return;
+  try {
+    const itemId = String((req.body && req.body.itemId) || "").trim();
+    if (!itemId) return res.status(400).json({ error: "缺少 itemId" });
+
+    const published = await (await getRepository()).list("decorations", true);
+    const record = published.find(r => r.id === itemId);
+    if (!record) return res.status(404).json({ error: "商品不存在或已下架" });
+    const item = record.publishedData || record.data;
+    // V1.0 不卖会员，所以会员商品买不到。上线前必须把后台的 isMemberOnly 全关掉，
+    // 否则这几件就是商店里永远买不了的死件（上线判据里专门有一条盯它）。
+    if (item.isMemberOnly === true) {
+      return res.status(403).json({ error: `「${item.name || itemId}」需要会员，当前版本暂未开放` });
+    }
+
+    const stored = await identity.store.getSave(identity.uid);
+    if (!stored || !stored.data) {
+      return res.status(409).json({ error: "还没有云存档，请先让本地存档同步一次再购买" });
+    }
+
+    const category = String(item.category || "");
+    const ownedCount = Number((((stored.data.PlayerData || {}).inventory || {})[category] || {})[itemId] || 0);
+    const plan = planPurchase({ save: stored.data, item, ownedCount });
+    if (plan.error) {
+      // 402 = 「泡泡不够」，前端据此把提示做成「还差 N」而不是通用错误。
+      const status = plan.code === "INSUFFICIENT" ? 402 : 400;
+      return res.status(status).json({ error: plan.error, code: plan.code, short: plan.short || 0 });
+    }
+
+    const row = await identity.store.putSave(identity.uid, plan.save, {
+      saveVersion: plan.save.saveVersion,
+      clientTs: Date.now()
+    });
+    res.json({
+      data: { save: row.data, paid: plan.paid, balance: plan.balance, ownedCount: plan.ownedCount }
+    });
+  } catch (error) { sendError(res, error); }
+});
+
+// 批量结算：商店里「改完鱼缸点保存」的入口。
+//
+// 与 shop/buy 的分工：buy 是单件即时购买，settle 才是玩家实际会走的路径 ——
+// 前端的商店允许自由调整鱼缸，一次保存可能同时买几条鱼、退还一个背景，必须原子完成。
+// 客户端提交的是**目标鱼缸**（想要的最终状态），不是「买什么」；
+// 差额由服务端拿它和上一次的鱼缸算，价格与上限全部以服务端配置为准。
+app.post("/api/game/shop/settle", async (req, res) => {
+  const identity = await requireIdentity(req, res);
+  if (!identity) return;
+  try {
+    const published = await (await getRepository()).list("decorations", true);
+    const items = new Map(published.map(record => [record.id, record.publishedData || record.data]));
+
+    const stored = await identity.store.getSave(identity.uid);
+    if (!stored || !stored.data) {
+      return res.status(409).json({ error: "还没有云存档，请先让本地存档同步一次再保存鱼缸" });
+    }
+
+    const plan = planSettlement({ save: stored.data, target: req.body, items });
+    if (plan.error) {
+      // 402 = 「泡泡不够」，前端据此显示「还差 N」；其余是配置/上限问题，按 400 处理。
+      const status = plan.code === "INSUFFICIENT" ? 402 : 400;
+      return res.status(status).json({
+        error: plan.error,
+        code: plan.code,
+        short: plan.short || 0,
+        paid: plan.paid || 0,
+        refund: plan.refund || 0
+      });
+    }
+
+    const row = await identity.store.putSave(identity.uid, plan.save, {
+      saveVersion: plan.save.saveVersion,
+      clientTs: Date.now()
+    });
+    res.json({
+      data: {
+        save: row.data,
+        paid: plan.paid,
+        refund: plan.refund,
+        total: plan.total,
+        balance: plan.balance,
+        // rows 是服务端算出来的收据明细，前端直接拿它渲染，不要用自己算的那份。
+        rows: plan.rows
+      }
+    });
+  } catch (error) { sendError(res, error); }
+});
+
+// 我的资料。同步码与跨设备切换留给 v2，这里先做只读。
+app.get("/api/game/me", async (req, res) => {
+  const identity = await requireIdentity(req, res);
+  if (!identity) return;
+  try {
+    const [user, save, stats] = await Promise.all([
+      identity.store.getUser(identity.uid),
+      identity.store.getSave(identity.uid),
+      identity.store.stats(identity.uid)
+    ]);
+    const data = (save && save.data) || {};
+    res.json({
+      data: {
+        userId: identity.uid,
+        nickname: (user && user.nickname) || "",
+        cohort: (user && user.cohort) || "",
+        createdAt: (user && user.created_at) || 0,
+        isSupporter: Boolean(user && (user.is_supporter === true || user.is_supporter === 1)),
+        bubbles: data.PlayerData ? normalizeBubbles(data.PlayerData.bubbles) : 0,
+        fishCount: Array.isArray((data.AquariumData || {}).fish) ? data.AquariumData.fish.length : 0,
+        ...stats
+      }
+    });
   } catch (error) { sendError(res, error); }
 });
 

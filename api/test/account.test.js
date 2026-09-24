@@ -275,25 +275,55 @@ console.log("\n--- 6. HTTP：正常签发（首开自动建号） ---");
     // 改漏一处的表现是"静默登到另一个环境"，是最难查的一类错。
     chk("响应里下发 env（供前端 init SDK）", created.body.data?.env, KEY_ENV);
 
-    const existing = await postTicket(base, { uid: "dominik-device-01" });
-    chk("传入 uid → 200", existing.status, 200);
-    chk("传入的 uid 原样返回", existing.body.data?.uid, "dominik-device-01");
-    chk("generated=false", existing.body.data?.generated, false);
+    // ===== 契约变更（云存档落地时）：uid 不再能单独换票据 =====
+    // 旧行为是「传一个合法 uid 就签发」，等于「知道 uid 就能登别人的号」——
+    // 而 uid 会出现在 localStorage、网络面板、用户截图里。云存档一上线，
+    // 这条路就是存档的门，必须堵死。现在只有两种方式能拿到票据：
+    //   ① 什么都不传（首次建号，服务端生成 uid）
+    //   ② 带会话令牌（续期 / 换设备恢复）
+    const byUid = await postTicket(base, { uid: "dominik-device-01" });
+    chk("只传 uid、不给令牌 → 403", byUid.status, 403);
+    chkTrue("403 说清 uid 不能单独作凭证", (byUid.body.error || "").includes("不能单独作为登录凭证"), byUid.body.error);
+    chkTrue("403 给出正确做法（提示 token）", (byUid.body.hint || "").includes("token"), byUid.body.hint);
+
+    // 会话令牌：后续所有 /api/game/* 接口都靠它证明身份。
+    const token = created.body.data?.token || "";
+    chkTrue("签发响应带会话令牌", token.length > 0, `${token.length} 字符`);
+    chkTrue("令牌带未来有效期", Number(created.body.data?.tokenExpiresAt) > Date.now());
+    const renewed = await postTicket(base, { token });
+    chk("带令牌续期 → 200", renewed.status, 200);
+    chk("续期后 uid 保持不变（否则等于换了个账号）", renewed.body.data?.uid, created.body.data?.uid);
+    chk("续期不标记 generated", renewed.body.data?.generated, false);
+    chkTrue("续期仍然发新令牌", typeof renewed.body.data?.token === "string" && renewed.body.data.token.length > 0);
 
     const health = await (await fetch(`${base}/api/health`)).json();
     chk("health 里有 account 段", health.account.configured, true);
   } finally { server.kill(); }
 }
 
-console.log("\n--- 7. HTTP：非法 uid 必须 400，不能放行 ---");
+console.log("\n--- 7. HTTP：uid 不能单独作为登录凭证（这是云存档的门） ---");
 {
   const { server, base } = await startServer({ [CREDENTIALS_ENV]: toBase64(makeCredentials()) }, takePort());
   try {
-    for (const [name, uid] of [["含斜杠", "bad/uid"], ["超长", "a".repeat(33)], ["太短", "ab"]]) {
+    // 合法的、非法的、别人的 uid 各试一遍。
+    // 关键不是「格式对不对」，而是**一律不放行** —— 格式校验只对服务端生成路径有意义，
+    // 那条路径的格式已经由第 2 段的纯函数测试锁住了。
+    for (const [name, uid] of [
+      ["合法格式", "dominik-device-01"],
+      ["含斜杠", "bad/uid"],
+      ["超长", "a".repeat(33)],
+      ["太短", "ab"]
+    ]) {
       const res = await postTicket(base, { uid });
-      chk(`${name} → 400`, res.status, 400);
-      chkTrue(`${name} → 报错说明允许什么格式`, (res.body.error || "").includes("4–32 位"), res.body.error);
+      chk(`${name}的 uid → 403`, res.status, 403);
     }
+    // 伪造与损坏的令牌同样不能放行。签名对不上就什么都不是。
+    const forged = await postTicket(base, { token: "v1.eyJ1aWQiOiJoYWNrZXIifQ.aaaa" });
+    chk("伪造令牌 → 401", forged.status, 401);
+    const malformed = await postTicket(base, { token: "not-a-token" });
+    chk("格式错误的令牌 → 401", malformed.status, 401);
+    const wrongVersion = await postTicket(base, { token: "v9.abc.def" });
+    chk("未知令牌版本 → 401", wrongVersion.status, 401);
   } finally { server.kill(); }
 }
 
