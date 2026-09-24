@@ -241,7 +241,24 @@
   }
 
   .mode { font-size: 13px; letter-spacing: .1em; color: #435b60; margin-bottom: 4px; }
-  .time { display: block; font-size: clamp(38px, 5.5vw, 52px); line-height: 1; font-weight: 700; color: #101b1e; cursor: ns-resize; margin: 4px 0; }
+  /* 时长可调。之前只有滚轮监听，手机上没有滚轮 = 时长被锁死在 25:00。
+     现在 −/+ 是手机端主入口（每次 5 分钟），滚轮保留做桌面端的 1 分钟微调。
+     数字比原来略小（38→34 起），是为了在 224px 的圆泡里塞下两侧按钮。 */
+  .time-row { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 4px 0; }
+  .time { display: block; font-size: clamp(34px, 5vw, 46px); line-height: 1; font-weight: 700; color: #101b1e; cursor: ns-resize; }
+  .time-step {
+    width: 30px; height: 30px; flex: 0 0 30px; padding: 0; border: 0; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255, 255, 255, .75); color: #3d5559; font-size: 19px; line-height: 1;
+    cursor: pointer; user-select: none; -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+    box-shadow: 0 2px 6px rgba(36, 68, 75, .16), inset 0 0 0 1px rgba(255, 255, 255, .7);
+    transition: transform .1s ease, background .2s ease;
+  }
+  .time-step:hover { background: #fff; transform: scale(1.08); }
+  .time-step:active { transform: scale(.94); }
+  /* 专注中不能改时长。用 disabled 而不是隐藏：圆泡内布局不跳动。 */
+  .time-step:disabled { opacity: .28; cursor: default; transform: none; }
   .time-sub { font-size: 11px; color: #5a7378; max-width: 85%; }
 
   .start, .end {
@@ -461,6 +478,12 @@
 .v02-dress,.v02-quantity button{border:0;border-radius:10px;padding:7px 11px;background:#5a8588;color:#fff;cursor:pointer;font:700 12px inherit}.v02-dress:disabled{background:#c6d5d7;color:#718184;cursor:not-allowed}.v02-quantity{display:flex;align-items:center;gap:8px}.v02-quantity button{width:28px;height:28px;padding:0;font-size:17px;line-height:1}.v02-quantity span{min-width:16px;text-align:center;font-weight:700;color:#40595e}
 .v02-footer{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:16px;padding-top:14px;border-top:1px solid #dfeaec}.v02-save{border:0;border-radius:13px;padding:10px 18px;background:#4d8a8c;color:#fff;cursor:pointer;font-family:inherit}.v02-cancel{border:0;border-radius:13px;padding:10px 18px;background:#e1eeee;color:#40595e;cursor:pointer;font-family:inherit}.v02-message{margin-right:auto;font-size:12px;color:#667d81;min-height:18px}
 .v02-settlement{margin-right:auto;min-height:18px;font-size:12px;color:#537075;font-weight:700}
+/* 泡泡不够：当场把差额写出来，别等玩家点了"保存鱼缸"才用一张小票告诉他。 */
+.v02-settlement.short{color:#b4553a}
+/* 这一分类没有商品时的空态（后台清空了该类，或配置没拉到）。 */
+.v02-empty{grid-column:1/-1;padding:34px 18px;text-align:center;font-size:13px;line-height:1.8;color:#5f7b80;background:rgba(246,251,251,.72);border-radius:16px;border:1px dashed #b9d3d6}
+.v02-item-tip{font-size:11px;color:#b4553a;margin-top:6px}
+.v02-quantity button:disabled{background:#c6d5d7;color:#718184;cursor:not-allowed}
 @media(max-width:700px){.v02-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.v02-shop{padding:12px}.v02-shop-header{padding:16px 16px 0}.v02-shop-content{padding-left:16px;padding-right:16px}.v02-preview{height:100px}}
 @media(max-width:480px){.v02-grid{grid-template-columns:1fr}.v02-topbar{left:12px;top:12px}.v02-bubbles{display:none}.v02-shop-btn{padding:9px 13px}}
 
@@ -803,6 +826,35 @@
 .config-notice-retry{border:1px solid #e0a860 !important}
 .config-notice-close{padding:5px 8px !important;background:transparent !important;font-size:16px !important;line-height:1}
 
+/* ===== 三步新手引导 =====
+   层级放在随机事件弹窗(3300)之上、配置提示条(6000)之下：
+   配置有问题时提示条要能盖在引导上面。 */
+.guide{position:fixed;inset:0;z-index:4000}
+.guide[hidden]{display:none}
+/* 聚光洞：一块大到铺满全屏的外阴影，中间按目标元素的尺寸留空。
+   目标在浮动气泡里、位置每帧都在变，所以 rect 由 JS 逐帧更新（见 updateGuideSpot）。 */
+.guide-spot{
+  position:fixed;left:0;top:0;width:0;height:0;border-radius:16px;pointer-events:none;
+  box-shadow:0 0 0 9999px rgba(12,34,38,.44);
+}
+.guide-card{
+  position:fixed;left:50%;bottom:26px;transform:translateX(-50%);
+  width:min(340px,calc(100vw - 32px));padding:18px 20px 16px;border-radius:20px;
+  background:#f6fbfb;color:#22393d;text-align:center;
+  box-shadow:0 14px 34px rgba(16,44,48,.3);
+}
+/* 目标在屏幕下半部时把卡片挪到上面，别把要指的地方盖住。 */
+.guide-card.above{bottom:auto;top:22px}
+.guide-dots{display:flex;gap:6px;justify-content:center;margin-bottom:11px}
+.guide-dots i{width:6px;height:6px;border-radius:50%;background:#bdd6d9}
+.guide-dots i.on{background:#4d8a8c}
+.guide-title{font-size:15px;font-weight:700;margin-bottom:5px}
+.guide-text{font-size:12.5px;line-height:1.7;color:#4a666b}
+.guide-actions{display:flex;gap:10px;justify-content:center;margin-top:14px}
+.guide-actions button{border:0;border-radius:12px;padding:9px 20px;font-size:14px;cursor:pointer}
+.guide-skip{background:#e4eeef;color:#48646a}
+.guide-next{background:#4d8a8c;color:#fff;box-shadow:0 4px 10px rgba(77,138,140,.3)}
+
 </style>
 </head>
 
@@ -849,8 +901,12 @@
 
     <section class="timer" id="timer">
       <div class="mode" id="mode">准备专注</div>
-      <div class="time" id="time">25:00</div>
-      <div class="time-sub" id="hint">点击开始专注后解锁投喂</div>
+      <div class="time-row" id="timeRow">
+        <button type="button" class="time-step" id="timeMinus" aria-label="减少专注时长" title="减少 5 分钟">−</button>
+        <div class="time" id="time">25:00</div>
+        <button type="button" class="time-step" id="timePlus" aria-label="增加专注时长" title="增加 5 分钟">+</button>
+      </div>
+      <div class="time-sub" id="hint">点 − / + 调时长 · 开始专注后解锁投喂</div>
       <button class="start" id="start">开始专注</button>
       <button class="end" id="end">结束专注</button>
     </section>
@@ -942,6 +998,20 @@
   <div class="v02-focus-blocker-card" role="dialog" aria-modal="true">
     <div class="v02-focus-blocker-message">小鱼正在看着你，要专心哦</div>
     <button type="button" class="v02-focus-blocker-confirm" id="focusShopBlockerConfirm">确认</button>
+  </div>
+</div>
+
+<!-- 三步新手引导：只在首次打开出现，可跳过。内容在 GUIDE_STEPS 里，改文案只改那一处。 -->
+<div class="guide" id="guide" hidden aria-hidden="true">
+  <div class="guide-spot" id="guideSpot"></div>
+  <div class="guide-card" id="guideCard" role="dialog" aria-labelledby="guideTitle">
+    <div class="guide-dots" id="guideDots"></div>
+    <div class="guide-title" id="guideTitle"></div>
+    <div class="guide-text" id="guideText"></div>
+    <div class="guide-actions">
+      <button type="button" class="guide-skip" id="guideSkip">跳过</button>
+      <button type="button" class="guide-next" id="guideNext">下一步</button>
+    </div>
   </div>
 </div>
 
@@ -2015,7 +2085,14 @@
     const parts=[];
     if(settlement.paid>0) parts.push(`需支付 ${settlement.paid} 🫧`);
     if(settlement.refund>0) parts.push(`可返还 ${settlement.refund} 🫧`);
-    document.getElementById("shopSettlement").textContent=parts.join("　");
+    // 泡泡不够就当场说清还差多少，别等玩家点了"保存鱼缸"才用一张小票告诉他。
+    const short=settlement.paid-(PlayerData.bubbles+settlement.refund);
+    if(short>0) parts.push(`还差 ${short} 🫧（现有 ${PlayerData.bubbles} 🫧）`);
+    // 一个泡泡都没有的新玩家打开商店只会一脸茫然：先说清泡泡从哪来。
+    if(parts.length===0 && PlayerData.bubbles<=0) parts.push("还没有泡泡 —— 专注满 25 分钟就能攒到 🫧");
+    const el=document.getElementById("shopSettlement");
+    el.textContent=parts.join("　");
+    el.classList.toggle("short",short>0);
   }
 
   function renderShop(){
@@ -2025,6 +2102,15 @@
     });
     const allItems=currentShopItems();
     const visibleItems=shopCategory==="all"?allItems:allItems.filter(item=>item.category===shopCategory);
+    // 空态：以前这一类没东西时这里什么都不渲染，玩家看到一整片空白，像页面坏了。
+    if(visibleItems.length===0){
+      const empty=document.createElement("div");
+      empty.className="v02-empty";
+      empty.textContent=allItems.length===0
+        ? "商店还没上货。等鱼缸管理员把鱼和装饰配好，这里就有东西可买了。"
+        : "这个分类暂时是空的，去「全部」看看别的吧。";
+      grid.appendChild(empty);
+    }
     visibleItems.forEach(item=>{
       const owned=getInv(item);
       const previewCount=item.category==="fish"?fishCountIn(TempAquariumData,item.id):0;
@@ -2052,16 +2138,20 @@
         preview+=`<div class="v02-preview-sound">🌊</div>`;
       }
       preview+=`</div>`;
+      // 鱼是唯一有数量概念的分类。到上限后以前点 + 完全没反应，看着像卡住了，
+      // 所以按钮置灰、并且明说上限是多少。到 0 时 − 也置灰（点它本来也没意义）。
+      const fishAtMax=item.category==="fish" && previewCount>=item.maxInventory;
       let action="";
       if(item.category==="fish"){
-        action=`<div class="v02-quantity"><button type="button" data-minus="${item.id}">−</button><span>${previewCount}</span><button type="button" data-plus="${item.id}">+</button></div>`;
+        action=`<div class="v02-quantity"><button type="button" data-minus="${item.id}" ${previewCount<=0?'disabled':''}>−</button><span>${previewCount}</span><button type="button" data-plus="${item.id}" ${fishAtMax?'disabled':''}>+</button></div>`;
       }else{
         action=`<button type="button" class="v02-dress" data-preview-action="${item.id}" ${equipped?'disabled':''}>${equipped?'装扮中':'装扮'}</button>`;
       }
       d.innerHTML=preview+
         `<div class="v02-item-name"><span class="v02-item-name-text">${item.name}</span>${item.isMemberOnly?'<span class="v02-member-badge">★ 会员</span>':''}</div>`+
         `<div class="v02-item-meta"><span class="v02-description">${item.description||""}</span></div>`+
-        `<div class="v02-item-actions"><span class="v02-price">${item.price} 🫧</span><span class="v02-owned">已拥有 ${owned}</span>${action}</div>`;
+        `<div class="v02-item-actions"><span class="v02-price">${item.price} 🫧</span><span class="v02-owned">已拥有 ${owned}</span>${action}</div>`+
+        (fishAtMax?`<div class="v02-item-tip">已经养满啦，这个品种最多 ${item.maxInventory} 条。</div>`:"");
       grid.appendChild(d);
     });
     grid.querySelectorAll('[data-preview]').forEach(el=>el.addEventListener('click',()=>{
@@ -2650,18 +2740,62 @@ function categoryScale(key){
     return { min: Number.isFinite(min) ? min : 25, max: Number.isFinite(max) ? Math.max(min, max) : 120 };
   }
 
+  // 空闲态提示。HTML 里的初始文案必须和这里逐字一致（focus-reward-flow.test.js 会比对），
+  // 否则首屏会先显示一句、JS 一跑又换成另一句。
+  const HINT_IDLE = "点 − / + 调时长 · 开始专注后解锁投喂";
+
   function renderTime() {
     timeEl.textContent = `${String(Math.floor(remaining / 60)).padStart(2, "0")}:${String(remaining % 60).padStart(2, "0")}`;
+  }
+
+  // 改时长的唯一入口：滚轮和 −/+ 按钮都走这里，边界只写一遍。
+  function stepFocusMinutes(delta) {
+    if (running) return false;
+    const bounds = focusDurationBounds();
+    const next = Math.max(bounds.min, Math.min(bounds.max, minutes + delta));
+    if (next === minutes) return false;
+    minutes = next;
+    remaining = minutes * 60;
+    renderTime();
+    return true;
+  }
+
+  // 专注中不能改时长；后台把 min/max 配成同一个值（时长锁死）时也不给点。
+  function syncTimeStepButtons() {
+    const bounds = focusDurationBounds();
+    const locked = bounds.max <= bounds.min;
+    document.querySelectorAll(".time-step").forEach(btn => { btn.disabled = running || locked; });
   }
 
   timeEl.addEventListener("wheel", (e) => {
     if (running) return;
     e.preventDefault();
-    const bounds = focusDurationBounds();
-    minutes = Math.max(bounds.min, Math.min(bounds.max, minutes + (e.deltaY < 0 ? 1 : -1)));
-    remaining = minutes * 60;
-    renderTime();
+    stepFocusMinutes(e.deltaY < 0 ? 1 : -1);
   }, { passive: false });
+
+  // 手机上没有滚轮，−/+ 是唯一入口。点一下 5 分钟；按住 400ms 后连续变，
+  // 否则从 25 分钟调到 120 分钟得点 19 次。
+  const TIME_STEP_MINUTES = 5;
+  const TIME_HOLD_DELAY_MS = 400;
+  const TIME_HOLD_REPEAT_MS = 120;
+  [["timeMinus", -TIME_STEP_MINUTES], ["timePlus", TIME_STEP_MINUTES]].forEach(([id, delta]) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    let holdTimer = 0, repeatTimer = 0;
+    const stopHold = () => { clearTimeout(holdTimer); clearInterval(repeatTimer); holdTimer = 0; repeatTimer = 0; };
+    btn.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      if (!stepFocusMinutes(delta)) return;
+      holdTimer = setTimeout(() => {
+        repeatTimer = setInterval(() => { if (!stepFocusMinutes(delta)) stopHold(); }, TIME_HOLD_REPEAT_MS);
+      }, TIME_HOLD_DELAY_MS);
+    });
+    ["pointerup", "pointercancel", "pointerleave", "lostpointercapture"].forEach(evt => btn.addEventListener(evt, stopHold));
+    // 键盘（Enter/Space）触发的 click 的 detail 是 0，指针触发的 click 已经在
+    // pointerdown 里算过一次了 —— 不区分的话点一下会加 10 分钟。
+    btn.addEventListener("click", (e) => { if (e.detail === 0) stepFocusMinutes(delta); });
+  });
+  syncTimeStepButtons();
 
   startBtn.onclick = () => {
     unlockAudio(); ensureAudio(); playStartSound();
@@ -2670,6 +2804,7 @@ function categoryScale(key){
     startedAt = Date.now(); 
     durationSeconds = minutes * 60;
     updateDevStatus();
+    syncTimeStepButtons();
     // 按文档：会员状态以点击“开始专注”瞬间为准。
     sessionIsMember = PlayerData.isMember;
     // 向服务端登记本次专注，结束时由服务端结算奖励（失败则本地兜底）。
@@ -2730,6 +2865,7 @@ function resetFocus(completed) {
       timerFrame = 0;
     }
     updateDevStatus();
+    syncTimeStepButtons();
 
     appTitle.style.visibility = "visible";
     appTitle.classList.remove("bubble-dissolve");
@@ -2737,7 +2873,7 @@ function resetFocus(completed) {
     appTitle.classList.add("bubble-appear");
 
     modeEl.textContent = completed ? "专注完成" : "准备专注";
-    hintEl.textContent = completed ? "棒极了！点击开始开启下次专注" : "点击开始专注后解锁投喂";
+    hintEl.textContent = completed ? "棒极了！点击开始开启下次专注" : HINT_IDLE;
     startBtn.style.display = "inline-block";
     endBtn.style.display = "none";
 
@@ -3046,6 +3182,103 @@ const elemToRemove = nearest.el;
 
   // 滑块的事件绑定在 renderAudioSliders() 里按分类动态挂，这里不再逐个写死。
 
+  // ===== 三步新手引导 =====
+  // 之前完全没有引导：新用户进来只看到一个圆泡和三个按钮，不知道先干什么。
+  // 三步对应「设时长 → 开始专注 → 用泡泡买鱼」，也就是第一次能走通的最短闭环。
+  const GUIDE_SEEN_KEY = "fishtank_guide_v1";
+  const GUIDE_STEPS = [
+    {
+      target: "#timeRow",
+      title: "先挑一个专注时长",
+      text: "点 − / + 每次调 5 分钟，25 到 120 分钟都行。电脑上也可以滚轮微调 1 分钟。"
+    },
+    {
+      target: "#start",
+      title: "然后开始专注",
+      text: "专注时点水面可以投喂、点鱼儿会加速。中途结束也算数，按你实际专注的分钟数结算泡泡。"
+    },
+    {
+      target: "#shopOpenBtn",
+      title: "攒够泡泡就装点鱼缸",
+      text: "泡泡只来自专注时长。用它在商店里买鱼、装饰和背景，把鱼缸变成你自己的样子。"
+    }
+  ];
+
+  const guide = document.getElementById("guide");
+  const guideSpot = document.getElementById("guideSpot");
+  const guideCard = document.getElementById("guideCard");
+  const guideDots = document.getElementById("guideDots");
+  const guideTitle = document.getElementById("guideTitle");
+  const guideText = document.getElementById("guideText");
+  let guideIndex = 0, guideFrame = 0;
+
+  // 读不到 localStorage（隐私模式）时按「已看过」处理：存不住的东西就别每次都弹。
+  function guideSeen(){
+    try { return localStorage.getItem(GUIDE_SEEN_KEY) === "1"; }
+    catch(_) { return true; }
+  }
+  function markGuideSeen(){
+    try { localStorage.setItem(GUIDE_SEEN_KEY, "1"); } catch(_) { /* 存不住就算了，最多下次再弹一遍 */ }
+  }
+
+  // 目标可能在浮动气泡里（.timer 有 4s 无限动画），位置每帧都在变，所以逐帧跟着量。
+  function updateGuideSpot(){
+    const step = GUIDE_STEPS[guideIndex];
+    const target = step ? document.querySelector(step.target) : null;
+    if(!target || guide.hidden){ guideFrame = 0; return; }
+    const rect = target.getBoundingClientRect();
+    const pad = 8;
+    guideSpot.style.left = `${rect.left - pad}px`;
+    guideSpot.style.top = `${rect.top - pad}px`;
+    guideSpot.style.width = `${rect.width + pad * 2}px`;
+    guideSpot.style.height = `${rect.height + pad * 2}px`;
+    guideFrame = requestAnimationFrame(updateGuideSpot);
+  }
+
+  function renderGuideStep(){
+    // 目标元素不存在（配置或页面结构变了）就跳过这一步，别指着一个不存在的地方。
+    while(guideIndex < GUIDE_STEPS.length && !document.querySelector(GUIDE_STEPS[guideIndex].target)) guideIndex += 1;
+    const step = GUIDE_STEPS[guideIndex];
+    if(!step){ endGuide(); return; }
+    guideDots.innerHTML = GUIDE_STEPS.map((_, i) => `<i class="${i === guideIndex ? "on" : ""}"></i>`).join("");
+    guideTitle.textContent = step.title;
+    guideText.textContent = step.text;
+    document.getElementById("guideNext").textContent = guideIndex === GUIDE_STEPS.length - 1 ? "开始吧" : "下一步";
+    const rect = document.querySelector(step.target).getBoundingClientRect();
+    // 目标在屏幕下半部就把卡片挪到上面，不然卡片会盖住要指的地方。
+    guideCard.classList.toggle("above", rect.top + rect.height / 2 > window.innerHeight * 0.5);
+  }
+
+  function nextGuideStep(){
+    guideIndex += 1;
+    renderGuideStep();
+  }
+
+  function endGuide(){
+    markGuideSeen();
+    if(guideFrame) cancelAnimationFrame(guideFrame);
+    guideFrame = 0;
+    guide.hidden = true;
+    guide.setAttribute("aria-hidden", "true");
+  }
+
+  function startGuide(){
+    guideIndex = 0;
+    guide.hidden = false;
+    guide.setAttribute("aria-hidden", "false");
+    renderGuideStep();
+    if(guideFrame) cancelAnimationFrame(guideFrame);
+    guideFrame = requestAnimationFrame(updateGuideSpot);
+  }
+
+  if(guide){
+    document.getElementById("guideSkip").addEventListener("click", endGuide);
+    document.getElementById("guideNext").addEventListener("click", nextGuideStep);
+    // 点空白处也算下一步，省得非要去够那个按钮（手机上尤其）。
+    guide.addEventListener("click", (e) => { if(e.target === guide) nextGuideStep(); });
+    window.addEventListener("resize", () => { if(!guide.hidden) renderGuideStep(); });
+  }
+
   // 无论配置有没有拉到，首屏都必须渲染出来：
   // 之前失败时整个 then 分支被跳过，鱼缸会一直空白且没有任何提示。
   async function bootstrapConfig(){
@@ -3070,6 +3303,9 @@ const elemToRemove = nearest.el;
     // 离线事件在进入时结算一次 —— 必须放在 startEventLoop() 之后，
     // 因为首次进入是「只记录不判定」，得先让 lastSeenAt 有值。
     checkOfflineEvents();
+    // 新手引导放在最后：页面已经渲染完，聚光洞才能量到正确位置。
+    // 配置没拉到时不引导 —— 那时候先把提示条给玩家看，别用引导盖住它。
+    if(window.FISHTANK_DEFAULT_DATA && !guideSeen()) startGuide();
   }
   bootstrapConfig();
 
