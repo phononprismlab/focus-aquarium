@@ -12,6 +12,7 @@ import { createFocusSessionStore } from "./focus-session.js";
 import { validateAudioConfig } from "./audio-config.js";
 import { validateEventConfig } from "./event-config.js";
 import { resolveAdminApiKey, checkProductionConfig, warnWeakAdminKey } from "./runtime-guard.js";
+import { accountStatus, issueTicket, normalizeUid, checkRateLimit, resetAccountCache, resetRateLimit, RATE_LIMIT } from "./account.js";
 
 const app = express();
 const host = process.env.HOST || "0.0.0.0";
@@ -169,7 +170,11 @@ app.get("/api/health", (req, res) => {
     storageProblems: plan.problems,
     repository: repositoryStatus,
     cors: allowAllOrigins ? "all" : (originsSource === "env" ? "configured" : "fallback"),
-    adminAuth: adminApiKey ? "enabled" : "disabled"
+    adminAuth: adminApiKey ? "enabled" : "disabled",
+    // 自定义登录私钥的配置状态。配错的表现一律只是"登录失败"，前端查不出是哪一环，
+    // 所以把结构性事实（有没有配、环境和目标一不一致）直接放在健康检查里。
+    // 只读缓存的解析结果，不发网络请求 —— 健康检查绝不能被外部依赖拖住。
+    account: accountStatus()
   });
 });
 
@@ -245,6 +250,53 @@ for (const type of types) {
     } catch (error) { sendError(res, error); }
   });
 }
+
+// ===== 账号：自定义登录票据签发 =====
+//
+// 最小闭环只有这一步：服务端用自定义登录私钥签一张票据，前端拿它去 CloudBase 认证。
+// 用户表 / 云存档 / 同步码是后面的事（账号方案 v2），这里刻意不做。
+//
+// 🔴 安全边界：票据就是"以某个 uid 登录"的凭证，接口不能变成随便领的水龙头。
+//    三道闸：① uid 格式严格校验 ② 不传 uid 时服务端生成高熵随机值（不可枚举）
+//    ③ 按 IP 限流。跨设备的身份迁移靠同步码（v2），不是靠猜 uid。
+app.post("/api/account/ticket", (req, res) => {
+  // 先限流再做别的：凭证解析失败也要算进配额，否则可以拿错误请求刷。
+  const limiter = checkRateLimit(req.ip || "unknown");
+  if (!limiter.allowed) {
+    return res.status(429).json({
+      error: `请求过于频繁，请 ${limiter.retryAfterSeconds} 秒后再试`
+    });
+  }
+
+  // 没配私钥就说没配，不要伪装成 500 —— 那是"部署问题"不是"服务器坏了"。
+  if (!accountStatus().configured) {
+    return res.status(503).json({
+      error: "账号功能未启用：服务端尚未配置自定义登录私钥",
+      hint: `在云托管服务的环境变量里配置 ${"CLOUDBASE_CUSTOM_LOGIN_KEY"}，然后重新部署`
+    });
+  }
+
+  const normalized = normalizeUid(req.body && req.body.uid);
+  if (normalized.error) return res.status(400).json({ error: normalized.error });
+
+  try {
+    const issued = issueTicket(normalized.uid);
+    res.json({
+      data: {
+        ticket: issued.ticket,
+        uid: issued.uid,
+        // ⚠️ 票据本身只有 10 分钟有效期（SDK 固定），拿到必须尽快去登录；
+        //    下面的 ttlSeconds 是登录态的刷新时长，不是票据有效期。
+        ticketValidSeconds: 600,
+        sessionTtlSeconds: issued.ttlSeconds,
+        generated: normalized.generated
+      }
+    });
+  } catch (error) {
+    // 签发失败基本都是私钥坏了/失效了，报错里可能夹着 PEM 片段，统一换成人话。
+    res.status(500).json({ error: error.message || "签发票据失败" });
+  }
+});
 
 // ===== 专注会话与奖励结算 =====
 // 服务端记录开始时间，结算时用自己记录的时间推算实际专注时长，
