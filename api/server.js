@@ -289,7 +289,10 @@ app.post("/api/account/ticket", (req, res) => {
         //    下面的 ttlSeconds 是登录态的刷新时长，不是票据有效期。
         ticketValidSeconds: 600,
         sessionTtlSeconds: issued.ttlSeconds,
-        generated: normalized.generated
+        generated: normalized.generated,
+        // 环境 ID 由服务端下发：前端 init SDK 必须知道它，写死在前端就会有两份
+        // 配置要同步（换环境时前端静默登错环境）。服务端本来就知道，直接给。
+        env: issued.env
       }
     });
   } catch (error) {

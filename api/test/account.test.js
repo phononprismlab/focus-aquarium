@@ -271,6 +271,9 @@ console.log("\n--- 6. HTTP：正常签发（首开自动建号） ---");
     chkTrue("票据非空", typeof created.body.data?.ticket === "string" && created.body.data.ticket.length > 0);
     chk("明示票据有效期 600 秒（SDK 固定，拿到要尽快用）", created.body.data?.ticketValidSeconds, 600);
     chkTrue("会话时长是秒数", typeof created.body.data?.sessionTtlSeconds === "number" && created.body.data.sessionTtlSeconds > 0);
+    // 前端 init SDK 必须知道环境 ID。由服务端下发，前端就不必硬编码 —— 否则换环境要改两处，
+    // 改漏一处的表现是"静默登到另一个环境"，是最难查的一类错。
+    chk("响应里下发 env（供前端 init SDK）", created.body.data?.env, KEY_ENV);
 
     const existing = await postTicket(base, { uid: "dominik-device-01" });
     chk("传入 uid → 200", existing.status, 200);
