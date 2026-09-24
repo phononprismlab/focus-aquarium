@@ -1090,6 +1090,11 @@
   let SHOP_ITEMS = cloneData(DEFAULT_DATA.shopItems || []);
 
   const API_BASE = window.FISHTANK_API_BASE || "https://focus-aquarium-api-316509-5-1491495221.sh.run.tcloudbase.com/api";
+  // 本机账号 uid（CloudBase 自定义登录）。空 = 还没建号。
+  // ⚠️ 必须在这里声明、不能挪到文件尾部的账号代码块里：updateDevStatus() 在脚本
+  //    顶层被同步调用一次（早于尾部那些声明），let 的 TDZ 会直接抛 ReferenceError，
+  //    把整个应用带崩。见文件尾部「账号」一段。
+  let ACCOUNT_UID = "";
   // 后台「音效管理」下发的音频配置：{ categories:{bgm,prompt,sfx}, sounds:[...] }
   // 拉取失败时保持 null，前端沿用内置默认值，保证离线可用。
   let AUDIO_CONFIG = null;
@@ -2272,6 +2277,7 @@
     });
     el.innerHTML=`泡泡：<b>${PlayerData.bubbles}</b> 🫧<br>
       会员：<b>${PlayerData.isMember?"是":"否"}</b><br>
+      账号：<b>${ACCOUNT_UID||"未建号"}</b><br>
       库存：${counts.length?counts.join("、"):"空"}`;
   }
   function devRefresh(){
@@ -3308,6 +3314,86 @@ const elemToRemove = nearest.el;
     if(window.FISHTANK_DEFAULT_DATA && !guideSeen()) startGuide();
   }
   bootstrapConfig();
+
+  // ===== 账号：给这台设备一个稳定的 uid（将来云存档 / 同步码的锚点）=====
+  // V1.0 还没有任何界面用到它，这里只是"把号先建好"，好处是等云存档落地时
+  // 老玩家的本机存档已经带着 uid，迁移不用回填。
+  //
+  // 四条硬约束，核心是「账号层绝不能拖累主流程」：
+  //   ① 绝不阻塞、绝不弹窗 —— 账号挂了，番茄钟必须照常能用（离线优先）。
+  //   ② SDK 未压缩 965KB（gzip 后仍不小），所以只在**确实缺 uid**时才懒加载，
+  //      且推迟到浏览器空闲；已有 uid 时连 SDK 都不会下载。
+  //   ③ 失败不落 uid，下次打开自然重试；错误只进 console，不打扰玩家。
+  //   ④ 环境 ID 由服务端随票据下发，前端不硬编码（否则换环境要改两处，改漏一处
+  //      的表现是"静默登到另一个环境"，最难查）。
+  const ACCOUNT_UID_KEY = "fishtank_account_uid";
+  const ACCOUNT_SDK_URL = "https://static.cloudbase.net/cloudbase-js-sdk/3.10.0/cloudbase.full.js";
+  let accountSdkPromise = null;
+
+  function loadAccountSdk(){
+    if(accountSdkPromise) return accountSdkPromise;
+    accountSdkPromise = new Promise((resolve,reject)=>{
+      const el=document.createElement("script");
+      el.src=ACCOUNT_SDK_URL;
+      el.async=true;
+      el.onload=()=>resolve();
+      el.onerror=()=>{ accountSdkPromise=null; reject(new Error("CloudBase SDK 加载失败")); };
+      document.head.appendChild(el);
+    });
+    return accountSdkPromise;
+  }
+
+  // requestIdleCallback 不是所有浏览器都有（Safari 到 17 才有），退回定时器。
+  function whenIdle(fn){
+    if(typeof window.requestIdleCallback==="function") window.requestIdleCallback(fn,{timeout:5000});
+    else window.setTimeout(fn,2500);
+  }
+
+  async function ensureAccount(){
+    if(window.FISHTANK_DISABLE_ACCOUNT) return;
+    let stored="";
+    try{ stored=localStorage.getItem(ACCOUNT_UID_KEY)||""; }catch(e){ /* 隐私模式读不到，当作没有 */ }
+    if(stored){ ACCOUNT_UID=stored; return; }
+
+    const response=await fetch(`${API_BASE}/account/ticket`,{
+      method:"POST",
+      headers:{"content-type":"application/json"},
+      body:"{}"
+    });
+    if(!response.ok) throw new Error(`签发失败 HTTP ${response.status}`);
+    const issued=((await response.json())||{}).data||{};
+    if(!issued.ticket||!issued.env) throw new Error("签发响应缺少 ticket/env");
+
+    await loadAccountSdk();
+    const app=window.cloudbase.init({env:issued.env});
+    const auth=app.auth({persistence:"local"});
+    // ⚠️ signInWithCustomTicket 的参数是**函数**（返回 Promise<ticket>），不是票据字符串。
+    //    传字符串时 SDK 会试图调用它，抛 "AuthError: e is not a function"，而且
+    //    **一个网络请求都不发** —— 症状看起来完全像"服务端配置错了"。
+    //    官方签名：signInWithCustomTicket(getTickFn?: GetCustomSignTicketFn)
+    const result=await auth.signInWithCustomTicket(()=>Promise.resolve(issued.ticket));
+    // ⚠️ 它用 {data,error} 信封 resolve，失败**不抛异常**，必须自己查，否则会把
+    //    失败当成功，报出"登录成功但 uid 为空"这种误导结论。
+    if(result&&result.error) throw new Error(`登录失败：${result.error.message||result.error.code||"未知错误"}`);
+    // ⚠️ uid 在三个地方长得不一样，不能只认一个：
+    //    auth.currentUser.uid  —— SDK 的 User 对象（有 uid / sub）
+    //    result.data.user.id   —— 服务端返回的**原始**记录，字段叫 id，**没有 uid**
+    //    result.data.session.sub —— 会话的 subject，等于 uid
+    const sdkUser=auth.currentUser||{};
+    const payload=(result&&result.data)||{};
+    const uid=sdkUser.uid||(payload.user&&payload.user.id)||(payload.session&&payload.session.sub)||"";
+    if(!uid) throw new Error("登录成功但没读到 uid");
+
+    try{ localStorage.setItem(ACCOUNT_UID_KEY,uid); }catch(e){ /* 存不下就算了，下次重建 */ }
+    ACCOUNT_UID=uid;
+    updateDevStatus();
+  }
+
+  // 推迟到空闲再建号。失败只写 console：玩家不该因为账号层出问题而受影响，
+  // 而且不落 uid 就代表下次打开会自动重试。
+  whenIdle(()=>{
+    ensureAccount().catch(error=>console.warn("[account] 建号失败（不影响使用，下次打开会重试）：",error.message));
+  });
 
   const retryButton = document.getElementById("configNoticeRetry");
   if(retryButton) retryButton.addEventListener("click", async () => {
