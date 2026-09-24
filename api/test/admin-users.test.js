@@ -343,5 +343,25 @@ adminApi.state.users = SAMPLE_USERS;
 adminApi.renderUserList();
 chkTrue("R5 反向：列表随数据变化（空 vs 有数据 HTML 不同）", emptyHtml !== main.innerHTML);
 
+// ===== 5. 埋点概览面板（同页新增区块）=====
+console.log("\n--- 5. 埋点概览面板 ---");
+adminApi.state.trackSummary = [
+  { event: "open", today: 2, last7d: 15, total: 42 },
+  { event: "focus_start", today: 1, last7d: 8, total: 20 },
+  { event: "focus_complete", today: 1, last7d: 7, total: 17 },
+  { event: "purchase", today: 0, last7d: 2, total: 5 }
+];
+adminApi.renderUserList();
+const trackHtml = main.innerHTML;
+chkTrue("页面含「埋点概览」区块", trackHtml.includes("埋点概览"));
+chkTrue("区块副标题列出四个事件", trackHtml.includes("打开 / 开始专注 / 完成专注 / 购买成功"));
+chkTrue("概览表头有 今日 / 最近 7 天 / 累计", trackHtml.includes("最近 7 天") && trackHtml.includes("累计"));
+chkTrue("渲染了四个事件的中文标签", ["打开", "开始专注", "完成专注", "购买成功"].every(label => trackHtml.includes(label)));
+chkTrue("渲染了今日/7日/累计数值", trackHtml.includes(">42<") && trackHtml.includes(">15<") && trackHtml.includes(">2<"));
+
+adminApi.state.trackSummary = null;
+adminApi.renderUserList();
+chkTrue("概览失败时显示兜底文案且不影响列表", main.innerHTML.includes("埋点概览暂不可用") && main.innerHTML.includes("玩家列表"));
+
 console.log(`\n===== 后台玩家管理测试：${pass} 通过 / ${fail} 失败 =====`);
 process.exit(fail === 0 ? 0 : 1);

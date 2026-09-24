@@ -46,6 +46,10 @@ import { getRdb } from "./repository.js";
 export const TABLE_USERS = "users";
 export const TABLE_SAVES = "saves";
 export const TABLE_FOCUS_RECORDS = "focus_records";
+export const TABLE_TRACKING_EVENTS = "tracking_events";
+// 埋点白名单（定稿第三步）：open=打开页面（客户端上报）；
+// focus_start / focus_complete / purchase 由服务端在权威时机直接落库，不接受客户端代报。
+export const TRACKING_EVENTS = ["open", "focus_start", "focus_complete", "purchase"];
 
 // 库存分类键。与前端 ensureInventory 里的五个分类保持一致。
 export const INVENTORY_CATEGORIES = ["fish", "decorations", "backgrounds", "sands", "sounds"];
@@ -428,6 +432,8 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
   const users = new Map();
   const saves = new Map();
   const focusRecords = new Map();
+  const trackingEvents = [];
+  let trackingSeq = 0;
 
   return {
     driver: "memory",
@@ -518,6 +524,29 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
     async stats(uid) {
       const rows = [...focusRecords.values()].filter(r => r.user_id === uid && r.settled_at);
       return aggregateFocusStats(rows, now);
+    },
+
+    // 埋点落库。调用方（server.js）保证 event 已过白名单、写入失败不挡主流程。
+    async addTrackingEvent({ userId, event, detail = "", at = now() } = {}) {
+      const row = { id: ++trackingSeq, user_id: userId, event, detail: String(detail || ""), at };
+      trackingEvents.push(row);
+      return { ...row };
+    },
+
+    // 埋点概览：四个事件各给 今日 / 最近 7 天 / 累计 三个数。
+    // 「今日」按服务端当天 00:00，「最近 7 天」含今天往前共 7 天。
+    async trackSummary() {
+      const dayStart = startOfTodayMs(now);
+      const weekStart = dayStart - 6 * 24 * 60 * 60 * 1000;
+      return TRACKING_EVENTS.map(event => {
+        const rows = trackingEvents.filter(r => r.event === event);
+        return {
+          event,
+          today: rows.filter(r => r.at >= dayStart).length,
+          last7d: rows.filter(r => r.at >= weekStart).length,
+          total: rows.length
+        };
+      });
     },
 
     // 仅供测试观察
@@ -689,6 +718,32 @@ export function createCloudbasePlayerStore(db, { now = () => Date.now() } = {}) 
     async stats(uid) {
       const { data } = await db.from(TABLE_FOCUS_RECORDS).select("counted_minutes,settled_at,reward").eq("user_id", uid).throwOnError();
       return aggregateFocusStats(data, now);
+    },
+
+    // 埋点落库。id 由应用层生成：控制台表单建不了 bigserial，tracking_events.id
+    // 按 varchar 主键建（2026-09-24 实测），字符串 id 与 at 排序够用，V1.0 量级下
+    // 同毫秒碰撞概率可忽略。id 长度约 23 字符，列长 ≥32 即可。
+    async addTrackingEvent({ userId, event, detail = "", at = now() } = {}) {
+      const id = `te_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      await db.from(TABLE_TRACKING_EVENTS).insert([{ id, user_id: userId, event, detail: String(detail || ""), at }], { defaultToNull: false }).throwOnError();
+      return { id, user_id: userId, event, detail: String(detail || ""), at };
+    },
+
+    // 埋点概览：一次性拉回 event/at 在 JS 里聚合（同 listUsers 的取舍 ——
+    // 只用已验证的 select("*") 面貌；V1.0 量级下全表聚合开销可忽略）。
+    async trackSummary() {
+      const { data } = await db.from(TABLE_TRACKING_EVENTS).select("*").throwOnError();
+      const dayStart = startOfTodayMs(now);
+      const weekStart = dayStart - 6 * 24 * 60 * 60 * 1000;
+      return TRACKING_EVENTS.map(event => {
+        const rows = (data || []).filter(r => r.event === event);
+        return {
+          event,
+          today: rows.filter(r => Number(r.at) >= dayStart).length,
+          last7d: rows.filter(r => Number(r.at) >= weekStart).length,
+          total: rows.length
+        };
+      });
     }
   };
 }

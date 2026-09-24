@@ -195,7 +195,8 @@
 			focus: JSON.parse(JSON.stringify(DEFAULT_DATA.focusConfig || { minFocusDuration: 25, maxFocusDuration: 120, rewardTiers: [] })),
 			audio: JSON.parse(JSON.stringify(DEFAULT_AUDIO)),
 			events: [],
-			users: []
+			users: [],
+			trackSummary: null
 		};
 		let editingIndex = null;
 		let editingType = null;
@@ -867,7 +868,20 @@
 			}
 		}
 		// 切到本页签时调用：先拉数据再渲染（避免切页瞬间空白闪一下）。
-		async function refreshUsers() { await loadUsers(); if (state.module === "users") renderUserList(); }
+		// 埋点概览与用户列表并行拉取；概览失败静默置空（表还没建时不该一直弹 toast）。
+		async function refreshUsers() {
+			await Promise.all([loadUsers(), loadTrackSummary()]);
+			if (state.module === "users") renderUserList();
+		}
+		async function loadTrackSummary() {
+			try {
+				const body = await apiRequest("/admin/track/summary");
+				state.trackSummary = body.data.events || [];
+			} catch (error) {
+				console.warn("埋点概览加载失败：", error.message);
+				state.trackSummary = null;
+			}
+		}
 		function userRowHtml(u) {
 			const regTime = u.createdAt ? new Date(u.createdAt).toLocaleString() : "—";
 			const supporter = u.isSupporter
@@ -890,7 +904,13 @@
 			const tableHtml = state.users.length
 				? `<div class="table-wrap"><table><thead><tr><th>玩家</th><th>cohort</th><th>注册时间</th><th>专注次数</th><th>累计专注(分)</th><th>鱼数</th><th>赞赏</th></tr></thead><tbody>${state.users.map(userRowHtml).join("")}</tbody></table></div>`
 				: `<div class="empty"><strong>${usersLoaded ? "还没有玩家" : "加载中…"}</strong>${usersLoaded ? "用户注册后会显示在这里" : "正在拉取玩家列表"}</div>`;
+			// 埋点概览：open=打开、focus_start=开始专注、focus_complete=完成专注、purchase=购买成功。
+			const TRACK_LABELS = { open: "打开", focus_start: "开始专注", focus_complete: "完成专注", purchase: "购买成功" };
+			const trackHtml = !state.trackSummary
+				? `<div class="empty"><strong>埋点概览暂不可用</strong>接口失败或 tracking_events 表还没建；不影响本页其它功能。</div>`
+				: `<div class="table-wrap"><table><thead><tr><th>事件</th><th>今日</th><th>最近 7 天</th><th>累计</th></tr></thead><tbody>${state.trackSummary.map(row => `<tr><td>${esc(TRACK_LABELS[row.event] || row.event)}</td><td>${row.today}</td><td>${row.last7d}</td><td>${row.total}</td></tr>`).join("")}</tbody></table></div>`;
 			main.innerHTML = pageHeader("PLAYER MANAGEMENT", "玩家管理", "按注册时间从早到晚排序；可按 cohort 与赞赏状态筛选，赞赏者单独高亮。", `<button class="button primary" id="exportUsersCsv">导出 CSV</button>`)
+				+ `<section class="panel"><div class="panel-head"><div><h3>埋点概览</h3><p>打开 / 开始专注 / 完成专注 / 购买成功</p></div></div>${trackHtml}</section>`
 				+ `<section class="panel"><div class="panel-head"><div><h3>筛选</h3></div></div><div class="filter-row">
 					<label>cohort <select id="filterCohort">${cohortOptions}</select></label>
 					<label>赞赏状态 <select id="filterSupporter">${supporterOptions}</select></label>

@@ -1168,6 +1168,8 @@
   // 专注聚合统计（只读展示，不拉逐条明细）。数据完全来自 GET /api/game/me 的聚合字段；
   // 离线玩家没有这部分数据，状态条保持隐藏。放在这里同样为了避开 TDZ。
   let focusStats = { focusCount:0, focusMinutesTotal:0, focusCountToday:0, focusMinutesToday:0 };
+  // 埋点「打开」：每次页面加载只报一次（ensureAccount 可能在接管同步码后再跑，用旗标防重复）。
+  let openTracked = false;
   // 本地最后一次成功推送的时间戳（毫秒），用来判断「本地有没有还没推上去的改动」。
   let lastPushedAt = 0;
   let cloudPushTimer = 0;
@@ -3812,6 +3814,16 @@ const elemToRemove = nearest.el;
     }catch(_){ /* 聚合展示失败不影响主流程 */ }
   }
 
+  // 埋点：打开页面。fire-and-forget —— 失败（无令牌 / 网络错 / 表还没建）只写 console，
+  // 与 refreshFocusStats 同一套安静模式：观测能力永远不能挡住玩家主流程。
+  async function trackOpen(){
+    if(!CLOUD_SYNC_ENABLED || !ACCOUNT_TOKEN || openTracked) return;
+    openTracked = true;
+    try{
+      await fetch(`${API_BASE}/game/track`, { method:"POST", headers: cloudHeaders(), body: JSON.stringify({ event:"open" }) });
+    }catch(error){ console.warn("[track] 打开事件上报失败：", error && error.message); }
+  }
+
   async function ensureAccount(){
     if(window.FISHTANK_DISABLE_ACCOUNT) return;
 
@@ -3825,6 +3837,7 @@ const elemToRemove = nearest.el;
       updateDevStatus();
       syncCloudSave();
       refreshFocusStats();
+      trackOpen();
       maybeShowSyncGuide();
       return;
     }
@@ -3873,6 +3886,7 @@ const elemToRemove = nearest.el;
     // 首次建号：云端必然还没有存档，把本地存档推上去（syncCloudSave 的 ① 分支）。
     syncCloudSave();
     refreshFocusStats();
+    trackOpen();
     maybeShowSyncGuide();
   }
 

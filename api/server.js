@@ -288,6 +288,15 @@ app.get("/api/admin/users", async (req, res) => {
   } catch (error) { sendError(res, error); }
 });
 
+// 埋点概览：四个事件各给 今日 / 最近 7 天 / 累计。受 requireAdminAuth 保护。
+app.get("/api/admin/track/summary", async (req, res) => {
+  try {
+    const store = await getPlayerStore();
+    const events = await store.trackSummary();
+    res.json({ data: { events } });
+  } catch (error) { sendError(res, error); }
+});
+
 for (const type of types) {
   app.get(`/api/admin/${type}`, async (req, res) => {
     try {
@@ -487,6 +496,9 @@ app.post("/api/game/focus/start", async (req, res) => {
       } catch (error) {
         console.warn(`专注会话落库失败（不影响专注）：${error.message}`);
       }
+      // 埋点：开始专注。fire-and-forget，失败只记日志，绝不挡住专注主流程。
+      (await getPlayerStore()).addTrackingEvent({ userId: auth.uid, event: "focus_start", at: Date.now() })
+        .catch(error => console.warn(`埋点 focus_start 写入失败：${error.message}`));
     }
 
     res.status(201).json({ data: session });
@@ -508,17 +520,39 @@ app.post("/api/game/focus/complete", async (req, res) => {
     const auth = readRequestUid(req);
     if (!auth.error) {
       try {
-        await (await getPlayerStore()).settleFocusRecord(sessionId, {
+        const settled = await (await getPlayerStore()).settleFocusRecord(sessionId, {
           countedMinutes: settlement.countedMinutes,
           reward: settlement.reward,
           natural: settlement.naturalCompletion
         });
+        // 防重放：同一会话重复结算不重复埋点（alreadySettled = 这次没真正落账）。
+        if (settled && settled.alreadySettled === false) {
+          (await getPlayerStore()).addTrackingEvent({ userId: auth.uid, event: "focus_complete", at: Date.now() })
+            .catch(error => console.warn(`埋点 focus_complete 写入失败：${error.message}`));
+        }
       } catch (error) {
         console.warn(`专注结算落库失败（不影响奖励发放）：${error.message}`);
       }
     }
 
     res.json({ data: settlement });
+  } catch (error) { sendError(res, error); }
+});
+
+// ===== 埋点上报 =====
+// 客户端只负责「打开」这一个事件 —— 开始/完成专注与购买由服务端在权威时机直接落库，
+// 不接受客户端代报（客户端说"我买好了"不算数，服务端自己经手的事自己记）。
+// 埋点是观测能力，写入失败对玩家不可见：前端 fire-and-forget，这里照常返回。
+app.post("/api/game/track", async (req, res) => {
+  const identity = await requireIdentity(req, res);
+  if (!identity) return;
+  const event = String((req.body && req.body.event) || "").trim();
+  if (event !== "open") {
+    return res.status(400).json({ error: `只接受 open 事件；${event || "(空)"} 由服务端自动记录，不需要也不会收客户端上报` });
+  }
+  try {
+    await identity.store.addTrackingEvent({ userId: identity.uid, event, at: Date.now() });
+    res.status(201).json({ data: { ok: true } });
   } catch (error) { sendError(res, error); }
 });
 
@@ -624,6 +658,9 @@ app.post("/api/game/shop/buy", async (req, res) => {
       saveVersion: plan.save.saveVersion,
       clientTs: Date.now()
     });
+    // 埋点：购买成功（单件直购路径）。免费商品也算一次取得，paid 记在 detail 里。
+    identity.store.addTrackingEvent({ userId: identity.uid, event: "purchase", detail: JSON.stringify({ itemId, paid: plan.paid }), at: Date.now() })
+      .catch(error => console.warn(`埋点 purchase 写入失败：${error.message}`));
     res.json({
       data: { save: row.data, paid: plan.paid, balance: plan.balance, ownedCount: plan.ownedCount }
     });
@@ -665,6 +702,11 @@ app.post("/api/game/shop/settle", async (req, res) => {
       saveVersion: plan.save.saveVersion,
       clientTs: Date.now()
     });
+    // 埋点：购买成功（批量结算路径）。paid=0 的保存（只撤下/免费）不算购买。
+    if (plan.paid > 0) {
+      identity.store.addTrackingEvent({ userId: identity.uid, event: "purchase", detail: JSON.stringify({ paid: plan.paid, rows: (plan.rows || []).length }), at: Date.now() })
+        .catch(error => console.warn(`埋点 purchase 写入失败：${error.message}`));
+    }
     res.json({
       data: {
         save: row.data,
