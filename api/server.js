@@ -14,6 +14,7 @@ import { validateEventConfig } from "./event-config.js";
 import { resolveAdminApiKey, checkProductionConfig, warnWeakAdminKey } from "./runtime-guard.js";
 import { accountStatus, issueTicket, normalizeUid, checkRateLimit, resetAccountCache, resetRateLimit, RATE_LIMIT } from "./account.js";
 import { readRequestUid, issueSessionToken, verifySessionToken, sessionSecretStatus } from "./session-token.js";
+import { issueSyncCode, verifySyncCode } from "./sync-code.js";
 import { createPlayerStore, mergeSaveForWrite, planPurchase, planSettlement, normalizeBubbles } from "./player-store.js";
 
 const app = express();
@@ -383,6 +384,51 @@ app.post("/api/account/ticket", async (req, res) => {
   }
 });
 
+// 用同步码接管账号：在另一台设备上继续玩同一个号。
+//
+// 🔴 这个接口**不需要身份** —— 来兑换的人此刻手上一个凭证都没有，同步码就是他
+//    唯一的凭证。所以限流必须放在最前面，否则它就是一个随便撞的开放接口。
+//
+// 兑换成功 = 拿到该 uid 的会话令牌，之后与正常登录完全一样（不再需要走
+// CloudBase 自定义登录：uid 和令牌服务端都直接给了，省掉 965KB 的 SDK）。
+app.post("/api/account/sync/redeem", async (req, res) => {
+  const limiter = checkRateLimit(req.ip || "unknown");
+  if (!limiter.allowed) {
+    return res.status(429).json({ error: `请求过于频繁，请 ${limiter.retryAfterSeconds} 秒后再试` });
+  }
+
+  const body = (req.body && typeof req.body === "object") ? req.body : {};
+  const verified = verifySyncCode(body.code);
+  if (verified.error) {
+    // 410 = 过期。与「码不对」分开：过期要玩家回原设备重新生成，
+    // 「不对」多半是复制漏了字符，两种提示完全不同。
+    return res.status(verified.expired ? 410 : 400).json({ error: verified.error });
+  }
+
+  const session = issueSessionToken(verified.uid);
+  if (session.error) {
+    return res.status(503).json({ error: session.error });
+  }
+
+  // 建号。与 /account/ticket 一样：失败不阻断，存档接口首次写入时会重试。
+  try {
+    await (await getPlayerStore()).ensureUser(verified.uid, { cohort: cohortForNewUser() });
+  } catch (error) {
+    console.warn(`同步码兑换后建号失败（不影响使用）：${error.message}`);
+  }
+
+  res.json({
+    data: {
+      uid: verified.uid,
+      token: session.token,
+      tokenExpiresAt: session.expiresAt,
+      // 旧设备的令牌**照样有效**：多端共用同一个账号。不踢下线是有意的 ——
+      // 玩家可能只是想在手机上看看，不该顺手把电脑踢出去。
+      previousDeviceStillValid: true
+    }
+  });
+});
+
 // ===== 专注会话与奖励结算 =====
 // 服务端记录开始时间，结算时用自己记录的时间推算实际专注时长，
 // 客户端无法凭空声明时长。会话存在内存里，进程重启即失效 —— 这是可接受的：
@@ -639,6 +685,25 @@ app.get("/api/game/me", async (req, res) => {
       }
     });
   } catch (error) { sendError(res, error); }
+});
+
+// ===== 跨设备同步码 =====
+// 一台设备生成码，另一台设备输入码就能接管同一个账号（换手机/换电脑不用从头玩）。
+// 生成码要身份（得先有自己的账号）；兑换码不要身份 —— 见 /api/account/sync/redeem。
+app.post("/api/game/sync/code", async (req, res) => {
+  const identity = await requireIdentity(req, res);
+  if (!identity) return;
+  const issued = issueSyncCode(identity.uid);
+  // 走到这里只可能是没配会话密钥 —— 那是部署问题，说清楚而不是报 500。
+  if (issued.error) return res.status(503).json({ error: issued.error });
+  res.json({
+    data: {
+      code: issued.code,
+      expiresAt: issued.expiresAt,
+      ttlSeconds: issued.ttlSeconds,
+      hint: `把这串码复制到另一台设备上，${issued.ttlSeconds / 60} 分钟内有效`
+    }
+  });
 });
 
 // 音频上传：必须注册在 /api/admin/:type 之前，否则会被当成配置类型吃掉。

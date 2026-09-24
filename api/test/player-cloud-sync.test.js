@@ -108,9 +108,11 @@ chkTrue("读凭证的 helper 同时读 token 与 uid",
   /return \{ token, uid \};/.test(playerCode));
 chkTrue("签发响应缺令牌时当失败处理（否则账号白建）",
   /签发响应缺少会话令牌/.test(playerCode));
-// 两条路径（有令牌短路 / 建号成功）都要打开云同步开关。
-chk("CLOUD_SYNC_ENABLED=true 出现次数（短路 + 建号）",
-  (playerCode.match(/CLOUD_SYNC_ENABLED=true/g) || []).length, 2);
+// ensureAccount 的两条路径（有令牌短路 / 建号成功）都要打开云同步开关。
+// ⚠️ 只数 ensureAccount 里的：兑换同步码也会开一次（见 sync-code.test.js），
+//    按全文件计数会在加新入口时误报。
+chk("ensureAccount 里 CLOUD_SYNC_ENABLED=true 出现次数（短路 + 建号）",
+  (extractFunction(playerCode, "ensureAccount").match(/CLOUD_SYNC_ENABLED=true/g) || []).length, 2);
 // 🔴 TDZ：saveGame() 在启动时（老存档补签名）就被同步调用，云同步状态声明晚了会白屏。
 {
   // ⚠️ 锚点必须是 saveGame() 的**首次调用**（启动时给老存档补签名那两处），

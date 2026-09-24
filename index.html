@@ -393,6 +393,19 @@
 .audio-slider-label span:last-child { opacity: 0.78; font-variant-numeric: tabular-nums; }
 .audio-settings input[type="range"] { display: block; width: 100%; height: 4px; margin: 0; accent-color: #fff; cursor: pointer; }
 
+/* 3. 账号同步（沿用调音面板的视觉，不另起一套设计） */
+.account-block { margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.28); }
+.account-line { margin-bottom: 9px; font-size: 12px; letter-spacing: 0.1em; opacity: 0.95; }
+.account-row { display: flex; gap: 8px; }
+.account-row.gap-top { margin-top: 8px; }
+.account-row button { flex: 1; padding: 7px 0; border: 1px solid rgba(255, 255, 255, 0.5); border-radius: 10px; background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 12px; cursor: pointer; }
+.account-row button:hover { background: rgba(255, 255, 255, 0.2); }
+.account-tip { margin-top: 8px; font-size: 11px; line-height: 1.5; opacity: 0.75; }
+.account-field { margin-top: 9px; width: 100%; box-sizing: border-box; padding: 8px 9px; border: 1px solid rgba(255, 255, 255, 0.45); border-radius: 10px; background: rgba(0, 0, 0, 0.18); color: #fff; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.45; resize: vertical; }
+.account-note { margin-top: 7px; font-size: 11px; line-height: 1.5; }
+.account-note.ok { color: #b6f2c8; }
+.account-note.bad { color: #ffc4c4; }
+
 /* 3. 移动端响应式尺寸调整 */
 @media (max-width: 600px) {
   .audio-controls { top: 12px; right: 12px; height: 48px; padding: 5px; }
@@ -882,9 +895,28 @@
     
     <!-- 调音面板挂载在按钮框下方 -->
     <div class="audio-settings" id="audioSettings" aria-hidden="true">
-      <div class="audio-settings-title">音频设置</div>
+      <div class="audio-settings-title">设置</div>
       <!-- 滑块按后台配置的音效分类动态生成，分类可增删，这里不再写死 -->
       <div id="audioSliders"></div>
+      <div class="account-block" id="accountBlock">
+        <div class="account-line">账号同步</div>
+        <div class="account-row">
+          <button type="button" id="syncCodeBtn">生成同步码</button>
+          <button type="button" id="syncRedeemBtn">输入同步码</button>
+        </div>
+        <div class="account-tip" id="syncCodeTip">换设备时，用同步码把鱼缸搬过去</div>
+        <div id="syncCodeOut" hidden>
+          <textarea class="account-field" id="syncCodeText" rows="3" readonly aria-label="同步码"></textarea>
+          <div class="account-row gap-top"><button type="button" id="syncCodeCopy">复制这串码</button></div>
+          <div class="account-note" id="syncCodeTimer"></div>
+        </div>
+        <div id="syncRedeemIn" hidden>
+          <textarea class="account-field" id="syncRedeemText" rows="3" placeholder="粘贴另一台设备上的同步码" aria-label="输入同步码"></textarea>
+          <div class="account-tip">恢复后，这台设备现在的进度会被原设备的鱼缸替换。</div>
+          <div class="account-row gap-top"><button type="button" id="syncRedeemGo">恢复我的鱼缸</button></div>
+          <div class="account-note" id="syncRedeemMsg"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1105,6 +1137,9 @@
   // 本地最后一次成功推送的时间戳（毫秒），用来判断「本地有没有还没推上去的改动」。
   let lastPushedAt = 0;
   let cloudPushTimer = 0;
+  // 同步码倒计时的 interval id。放在这里同样是为了避开 TDZ —— 上面的云同步状态
+  // 声明早于启动期的 saveGame() 调用，这块跟着放一起最省心。
+  let syncCodeTimerId = 0;
   const ACCOUNT_TOKEN_KEY = "fishtank_account_token";
   const CLOUD_PUSHED_AT_KEY = "fishtank_save_pushed_at";
   // 上次成功推送的时间戳。同步时用它判断「本地有没有还没推上去的改动」。
@@ -1613,6 +1648,129 @@
     });
     return {paid,refund,total:paid-refund,problems,rows};
   }
+  // ===== 跨设备同步码 =====
+  // 一台设备生成码、另一台设备输入码，就能接管同一个账号 —— 换设备不用从头玩。
+  //   生成码：要令牌（得先有自己的账号）→ POST /api/game/sync/code
+  //   兑换码：**不需要**令牌（来兑换的人此刻一个凭证都没有，码就是他唯一的凭证）
+  //           → POST /api/account/sync/redeem，服务端直接把 uid 和令牌都给回来，
+  //             所以不用再走 CloudBase 自定义登录，也就不用下载 965KB 的 SDK。
+  async function generateSyncCode(){
+    const tip=document.getElementById("syncCodeTip");
+    const out=document.getElementById("syncCodeOut");
+    const text=document.getElementById("syncCodeText");
+    if(!CLOUD_SYNC_ENABLED||!ACCOUNT_TOKEN){
+      tip.textContent="云存档还没就绪，稍等一下再试";
+      tip.className="account-tip bad";
+      return;
+    }
+    tip.textContent="正在生成…";
+    tip.className="account-tip";
+    try{
+      const response=await fetch(`${API_BASE}/game/sync/code`,{ method:"POST", headers:cloudHeaders() });
+      const body=await response.json().catch(()=>null);
+      if(!response.ok) throw new Error((body&&body.error)||`HTTP ${response.status}`);
+      const data=(body&&body.data)||{};
+      if(!data.code) throw new Error("服务端没有返回同步码");
+      text.value=data.code;
+      out.hidden=false;
+      tip.textContent="";
+      startSyncCodeCountdown(Number(data.expiresAt)||0);
+    }catch(error){
+      tip.textContent=`生成失败：${error.message}`;
+      tip.className="account-tip bad";
+    }
+  }
+
+  function startSyncCodeCountdown(expiresAt){
+    const el=document.getElementById("syncCodeTimer");
+    if(syncCodeTimerId) clearInterval(syncCodeTimerId);
+    const tick=()=>{
+      const left=Math.max(0,expiresAt-Date.now());
+      const mm=Math.floor(left/60000);
+      const ss=Math.floor((left%60000)/1000);
+      el.textContent=left>0 ? `${mm}:${String(ss).padStart(2,"0")} 后失效` : "已失效，请重新生成一个";
+      if(left<=0){ clearInterval(syncCodeTimerId); syncCodeTimerId=0; }
+    };
+    tick();
+    syncCodeTimerId=setInterval(tick,1000);
+  }
+
+  async function copySyncCode(){
+    const text=document.getElementById("syncCodeText");
+    const tip=document.getElementById("syncCodeTip");
+    try{
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        await navigator.clipboard.writeText(text.value);
+        tip.textContent="已复制，去另一台设备上粘贴（10 分钟内）";
+        return;
+      }
+    }catch(_){ /* http 页面下 clipboard 不可用，走下面的兜底 */ }
+    text.select();
+    let ok=false;
+    try{ ok=document.execCommand("copy"); }catch(_){ ok=false; }
+    tip.textContent=ok ? "已复制，去另一台设备上粘贴（10 分钟内）" : "复制失败，请手动选中上面的码";
+  }
+
+  async function redeemSyncCode(){
+    const input=document.getElementById("syncRedeemText");
+    const msg=document.getElementById("syncRedeemMsg");
+    const code=String((input&&input.value)||"").trim();
+    if(!code){ msg.textContent="先把码粘贴进来"; msg.className="account-note bad"; return; }
+    msg.textContent="正在恢复…";
+    msg.className="account-note";
+    try{
+      const response=await fetch(`${API_BASE}/account/sync/redeem`,{
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body:JSON.stringify({ code })
+      });
+      const body=await response.json().catch(()=>null);
+      if(!response.ok) throw new Error((body&&body.error)||`HTTP ${response.status}`);
+      const data=(body&&body.data)||{};
+      // 缺任一个都等于没恢复成功：没有令牌的话所有 /api/game/* 都进不去，
+      // 静默写进 localStorage 会造出一个「看起来登录了、其实什么都用不了」的账号。
+      if(!data.token||!data.uid) throw new Error("恢复响应不完整，请重试");
+      try{
+        localStorage.setItem(ACCOUNT_UID_KEY,data.uid);
+        localStorage.setItem(ACCOUNT_TOKEN_KEY,data.token);
+      }catch(_){ /* 隐私模式存不下：本次能用，下次打开要重新恢复 */ }
+      ACCOUNT_UID=data.uid;
+      ACCOUNT_TOKEN=data.token;
+      CLOUD_SYNC_ENABLED=true;
+      // 🔴 接管后必须把「本地上次推送时间」清零。这台设备很可能自己玩过、也推过存档，
+      //    不清零的话 syncCloudSave 会比对时间戳后判定「本地更新」→ 把本地推上去，
+      //    **覆盖掉刚恢复的原设备存档** —— 「恢复」就变成了「覆盖」，进度真丢了。
+      //    清零之后云端时间戳必定更大，一定走「采用云端」分支。
+      markPushed(0);
+      updateDevStatus();
+      msg.textContent="恢复成功，正在搬你的鱼缸…";
+      msg.className="account-note ok";
+      // 采用云端（原设备的）存档。
+      await syncCloudSave();
+      renderBubbles();
+      renderAquarium(AquariumData);
+      msg.textContent="恢复成功，鱼缸已经搬过来了";
+    }catch(error){
+      msg.textContent=`恢复失败：${error.message}`;
+      msg.className="account-note bad";
+    }
+  }
+
+  document.getElementById("syncCodeBtn").addEventListener("click",()=>{
+    generateSyncCode().catch(error=>console.warn("[sync] 生成同步码失败：",error.message));
+  });
+  document.getElementById("syncCodeCopy").addEventListener("click",()=>{
+    copySyncCode().catch(error=>console.warn("[sync] 复制同步码失败：",error.message));
+  });
+  document.getElementById("syncRedeemBtn").addEventListener("click",()=>{
+    const panel=document.getElementById("syncRedeemIn");
+    panel.hidden=!panel.hidden;
+    if(!panel.hidden) document.getElementById("syncRedeemText").focus();
+  });
+  document.getElementById("syncRedeemGo").addEventListener("click",()=>{
+    redeemSyncCode().catch(error=>console.warn("[sync] 恢复账号失败：",error.message));
+  });
+
   function renderBubbles(){ document.getElementById("bubbleDisplay").textContent=`🫧 ${PlayerData.bubbles}`; }
   function renderAquarium(data){
     const tankEl=tank;
