@@ -47,11 +47,57 @@ function chk(name, actual, expected) {
 
 // 统一成 LF：工作区文件在 Windows 上是 CRLF，多行正则不归一化必然匹配不到。
 const norm = text => text.replace(/\r\n/g, "\n");
-// 剥注释。`(?<!:)` 用来保护 "https://" 里的双斜杠不被当成行注释起点。
+// 剥注释。⚠️ 不能用正则一把梭：注释正文里出现 `/api/game/*` 这类片段时，其中的
+// `/*` 会被当成块注释起点，把后面大段代码一路吞掉 —— 曾经把 signInWithCustomTicket
+// 整段吃掉，让 15 条断言凭空变红，而报错信息完全指不到注释上。这里逐字符扫描，
+// 并且跳过字符串/模板串（字符串里的 // 与 /* 都不是注释）。
 // 只删文本不删换行，所以行号不变（第 7 节依赖行号）。
-const stripComments = text => text
-  .replace(/\/\*[\s\S]*?\*\//g, "")
-  .replace(/(?<!:)\/\/[^\n]*/g, "");
+function stripComments(text) {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (ch === '"' || ch === "'" || ch === "`") {
+      let j = i + 1;
+      while (j < text.length) {
+        if (text[j] === "\\") { j += 2; continue; }
+        if (text[j] === ch) { j += 1; break; }
+        // ⚠️ 单双引号在 JS 里不能跨行。被测文件是 HTML，正文里会有 don't / it's 这种
+        //    不配对的撇号 —— 不当场退出的话，扫描器会一直停在"字符串里"，
+        //    后面所有注释都剥不掉（表现为断言凭空变红）。
+        if (text[j] === "\n" && ch !== "`") { break; }
+        j += 1;
+      }
+      if (j > i + 1 && text[j - 1] === ch) {
+        out += text.slice(i, j);
+        i = j;
+        continue;
+      }
+      // 没闭合 → 这个引号不是字符串起点，当普通字符继续扫。
+      out += ch;
+      i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      const end = text.indexOf("*/", i + 2);
+      const stop = end === -1 ? text.length : end + 2;
+      out += text.slice(i, stop).replace(/[^\n]/g, "");
+      i = stop;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      const end = text.indexOf("\n", i);
+      const stop = end === -1 ? text.length : end;
+      out += text.slice(i, stop).replace(/[^\n]/g, "");
+      i = stop;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
 
 const checkRaw = norm(fs.readFileSync(path.join(repoRoot, "account-check.html"), "utf8"));
 const playerRaw = norm(fs.readFileSync(path.join(repoRoot, "index.html"), "utf8"));
@@ -119,7 +165,22 @@ chkTrue(
   "HTML 里没有静态 <script src=...cloudbase...>（否则每人都要白下 965KB）",
   !/<script[^>]+src=["'][^"']*cloudbase[^"']*["']/i.test(playerRaw)
 );
-chkTrue("已有 uid 时提前返回，不加载 SDK", /if\s*\(\s*stored\s*\)\s*\{[\s\S]{0,80}return;/.test(playerCode));
+// 契约在接入云存档时变了：短路条件是**令牌**（凭证），不是 uid（标识，会出现在截图里）。
+// 这条同时锁住「提前返回」和「返回前没有加载 SDK」—— 只断言有 return 是空闸。
+const tokenShortcut = (() => {
+  const start = playerCode.indexOf("if(stored.token)");
+  if (start < 0) return "";
+  const open = playerCode.indexOf("{", start);
+  let depth = 0;
+  for (let i = open; i < playerCode.length; i++) {
+    if (playerCode[i] === "{") depth++;
+    else if (playerCode[i] === "}") { depth--; if (depth === 0) return playerCode.slice(open, i + 1); }
+  }
+  return "";
+})();
+chkTrue("已有令牌时提前返回，不加载 SDK",
+  tokenShortcut.length > 0 && /return;/.test(tokenShortcut) && !/loadAccountSdk/.test(tokenShortcut),
+  tokenShortcut.length ? "找到短路分支" : "没找到 if(stored.token) 分支");
 chkTrue("推迟到空闲再建号（requestIdleCallback 或 setTimeout）", /requestIdleCallback/.test(playerCode) && /setTimeout/.test(playerCode));
 chkTrue("失败只写 console，不 alert 打断玩家", !/\balert\s*\(/.test(playerCode));
 chkTrue("建号失败被 catch 住，不会冒泡成未处理异常", /ensureAccount\(\)\s*\.catch\s*\(/.test(playerCode));

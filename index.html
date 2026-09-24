@@ -1095,6 +1095,20 @@
   //    顶层被同步调用一次（早于尾部那些声明），let 的 TDZ 会直接抛 ReferenceError，
   //    把整个应用带崩。见文件尾部「账号」一段。
   let ACCOUNT_UID = "";
+  // 会话令牌（服务端自签的 HMAC，180 天）：所有 /api/game/* 请求的身份凭证。
+  // ⚠️ 与 ACCOUNT_UID 同理，必须在这里声明 —— saveGame() 在启动时（老存档补签名）就被
+  //    同步调用，早于文件尾部账号代码块里的声明，let/const 的 TDZ 会直接白屏。
+  let ACCOUNT_TOKEN = "";
+  // 云同步总开关：账号就绪（拿到令牌）后才打开。任何一步失败都保持 false，
+  // 此时应用退化成「纯本地存档」，行为与接入前完全一致。
+  let CLOUD_SYNC_ENABLED = false;
+  // 本地最后一次成功推送的时间戳（毫秒），用来判断「本地有没有还没推上去的改动」。
+  let lastPushedAt = 0;
+  let cloudPushTimer = 0;
+  const ACCOUNT_TOKEN_KEY = "fishtank_account_token";
+  const CLOUD_PUSHED_AT_KEY = "fishtank_save_pushed_at";
+  // 上次成功推送的时间戳。同步时用它判断「本地有没有还没推上去的改动」。
+  try{ lastPushedAt = Number(localStorage.getItem(CLOUD_PUSHED_AT_KEY))||0; }catch(_){ /* 隐私模式读不到：按 0 处理，首次同步会把本地存档推一次 */ }
   // 后台「音效管理」下发的音频配置：{ categories:{bgm,prompt,sfx}, sounds:[...] }
   // 拉取失败时保持 null，前端沿用内置默认值，保证离线可用。
   let AUDIO_CONFIG = null;
@@ -1450,11 +1464,118 @@
     }
   }
   ensureInventory();
-  function saveGame(){
+  // 只写本地、不触发云推送。采用云端存档时用它落盘，避免「刚拉下来又推回去」。
+  function persistLocalSave(){
     SaveData.PlayerData=PlayerData; SaveData.AquariumData=AquariumData;
     // 每次存档重算签名，保证正常游玩不会误报被篡改。
     SaveData.integrity = { version:1, signature: computeSaveSignature(PlayerData) };
     localStorage.setItem(SAVE_KEY,JSON.stringify(SaveData));
+  }
+  function saveGame(){
+    persistLocalSave();
+    scheduleCloudPush(); // 本地已经存好了，云端异步跟上；推送失败不影响本地
+  }
+
+  // ===== 云存档同步 =====
+  // 设计原则与账号层一致：**云端只是本地存档的备份与跨设备通道，绝不能拖累主流程**。
+  //   · 本地永远先写（saveGame），云端推送是异步的、允许失败；
+  //   · 推送失败只进 console，玩家无感，下次改动会再试一次；
+  //   · 账号没就绪时 CLOUD_SYNC_ENABLED 保持 false，应用等价于「纯本地模式」。
+  function cloudHeaders(){
+    const headers={ "Content-Type":"application/json" };
+    if(ACCOUNT_TOKEN) headers["Authorization"]=`Bearer ${ACCOUNT_TOKEN}`;
+    return headers;
+  }
+
+  // 提交给服务端的存档。integrity 是本机防手改用的，不上传。
+  function buildCloudPayload(){
+    return {
+      saveVersion:SAVE_VERSION,
+      PlayerData:PlayerData,
+      AquariumData:AquariumData,
+      Settings:SaveData.Settings||{ audio:{} }
+    };
+  }
+
+  // 服务端返回的存档要**就地写进** PlayerData / AquariumData —— 它们是 const 引用，
+  // 后面所有渲染与结算都闭包引用了这两个对象；整体替换会让它们继续指向旧对象，
+  // 表现成「同步成功了但界面一点没变」，最难查。
+  function replaceContents(target,source){
+    Object.keys(target).forEach(key=>{ delete target[key]; });
+    Object.assign(target,source||{});
+  }
+
+  function applyCloudSave(save){
+    if(!save||typeof save!=="object") return false;
+    if(save.PlayerData) replaceContents(PlayerData,save.PlayerData);
+    if(save.AquariumData) replaceContents(AquariumData,save.AquariumData);
+    if(save.Settings) SaveData.Settings=save.Settings;
+    ensureInventory();
+    return true;
+  }
+
+  function markPushed(at){
+    lastPushedAt=at;
+    try{ localStorage.setItem(CLOUD_PUSHED_AT_KEY,String(at)); }catch(_){ /* 隐私模式存不下：下次会当成「本地有改动」多推一次，无害 */ }
+  }
+
+  // 推送本地存档。成功返回 true。
+  async function pushCloudSave(){
+    if(!CLOUD_SYNC_ENABLED||!ACCOUNT_TOKEN) return false;
+    try{
+      const response=await fetch(`${API_BASE}/game/save`,{
+        method:"PUT",
+        headers:cloudHeaders(),
+        body:JSON.stringify(buildCloudPayload())
+      });
+      if(!response.ok) throw new Error(`HTTP ${response.status}`);
+      const body=await response.json();
+      const data=(body&&body.data)||{};
+      markPushed(Number(data.updatedAt)||Date.now());
+      return true;
+    }catch(error){
+      console.warn("[cloud] 存档推送失败（本地已保存，下次改动会重试）：",error.message);
+      return false;
+    }
+  }
+
+  // 存档触发点很密（调音量、买一条鱼、摆一下位置都会存），合并成一次推送。
+  function scheduleCloudPush(){
+    if(!CLOUD_SYNC_ENABLED) return;
+    if(cloudPushTimer) clearTimeout(cloudPushTimer);
+    cloudPushTimer=setTimeout(()=>{ cloudPushTimer=0; pushCloudSave(); },1500);
+  }
+
+  // 启动时对齐一次。三种情况：
+  //   ① 云端没有存档（新号 / 首次接入）→ 把本地推上去，老玩家的本地进度不会丢
+  //   ② 云端比本地新（在别的设备玩过）→ 采用云端
+  //   ③ 本地有未推送的改动（离线玩过）→ 推本地上去
+  async function syncCloudSave(){
+    if(!CLOUD_SYNC_ENABLED||!ACCOUNT_TOKEN) return;
+    try{
+      const response=await fetch(`${API_BASE}/game/save`,{ headers:cloudHeaders(), cache:"no-store" });
+      if(!response.ok) throw new Error(`HTTP ${response.status}`);
+      const body=await response.json();
+      const data=(body&&body.data)||{};
+      if(!data.exists){
+        await pushCloudSave();
+        return;
+      }
+      const remoteUpdatedAt=Number(data.updatedAt)||0;
+      if(remoteUpdatedAt>lastPushedAt){
+        if(applyCloudSave(data.save)){
+          persistLocalSave(); // 落盘但不回推：内容已经与云端一致，推了只是白跑一趟
+          renderBubbles();
+          renderAquarium(AquariumData);
+          markPushed(remoteUpdatedAt);
+          console.info("[cloud] 已采用云端存档（比本地新）");
+        }
+      }else{
+        await pushCloudSave();
+      }
+    }catch(error){
+      console.warn("[cloud] 存档同步失败（继续用本地存档）：",error.message);
+    }
   }
   function getInv(item){ return Number((PlayerData.inventory[item.category]||{})[item.id]||0); }
   function setInv(item,n){ ensureInventory(); PlayerData.inventory[item.category][item.id]=Math.max(0,n); }
@@ -2206,7 +2327,73 @@
     document.getElementById("shopModal").setAttribute("aria-hidden","true");
   }
 
-  function saveAquarium(){
+  // 服务端结算：把**目标鱼缸**交给服务端，由它对比上一次鱼缸算差额。
+  // 价格、拥有上限、会员限制全部在服务端裁定，客户端报的金额一概不采信。
+  // 返回 true = 这次已经处理完（成功，或已经给出明确的失败提示）；
+  // 返回 false = 这次用不了（网络挂了 / 云端还没存档 / 未登录），调用方回落本地逻辑。
+  async function saveAquariumOnServer(){
+    try{
+      const response=await fetch(`${API_BASE}/game/shop/settle`,{
+        method:"POST",
+        headers:cloudHeaders(),
+        body:JSON.stringify(TempAquariumData)
+      });
+      const body=await response.json().catch(()=>null);
+      const payload=(body&&body.data)||{};
+
+      if(!response.ok){
+        const failure=body||{};
+        // 409 = 云端还没有存档（本地还没同步成功）；401/503 = 令牌失效或数据层没就绪。
+        // 这些都属于「暂时用不了」，回落本地逻辑比甩一个玩家看不懂的错误更合适。
+        if(response.status===409||response.status===401||response.status===503) return false;
+        // 402 = 泡泡不够；其余（400）是配置或拥有上限问题。
+        const rows=buildSettlement(TempAquariumData).rows;
+        const note=response.status===402
+          ? `泡泡不足，本次需支付 ${failure.paid||0} 🫧，返还 ${failure.refund||0} 🫧，当前拥有 ${PlayerData.bubbles} 🫧。`
+          : (failure.error||"结算失败，请稍后再试。");
+        showPurchaseReceipt(
+          "无法保存",
+          rows.length?rows:[{name:"当前鱼缸",qty:1,price:0}],
+          Number(failure.paid)||0,
+          note,
+          {refund:Number(failure.refund)||0}
+        );
+        return true;
+      }
+
+      if(!applyCloudSave(payload.save)) return false;
+      persistLocalSave();
+      renderBubbles();
+      renderAquarium(AquariumData);
+      closeShop(true);
+      syncAmbientAudio();
+      markPushed(Date.now());
+
+      // 收据用**服务端返回的 rows**，不要用本地算的那份：本地那份是按本机库存算的，
+      // 而库存是服务端权威 —— 两边不一致时一律以服务端为准。
+      const rows=Array.isArray(payload.rows)?payload.rows:[];
+      const paid=Number(payload.paid)||0;
+      const refund=Number(payload.refund)||0;
+      const total=Number(payload.total)||0;
+      showPurchaseReceipt(
+        "鱼缸保存成功",
+        rows.length?rows:[{name:"当前鱼缸",qty:1,price:0}],
+        paid,
+        total!==0 ? `本次支付 ${paid} 🫧，返还 ${refund} 🫧。` : "本次无需购买新商品，鱼缸配置已保存。",
+        {balance:Number(payload.balance)||PlayerData.bubbles,refund}
+      );
+      return true;
+    }catch(error){
+      console.warn("[cloud] 结算接口不可用，回落本地结算：",error.message);
+      return false;
+    }
+  }
+
+  async function saveAquarium(){
+    // 云端可用时走服务端结算 —— 库存与价格的服务端权威就靠这条路径兑现。
+    // 它返回 false 表示「这次用不了」，此时回落下面的本地逻辑，最坏等于接入前的行为。
+    if(CLOUD_SYNC_ENABLED && await saveAquariumOnServer()) return;
+
     const result=buildSettlement(TempAquariumData);
     const detailRows=result.rows;
 
@@ -2278,6 +2465,7 @@
     el.innerHTML=`泡泡：<b>${PlayerData.bubbles}</b> 🫧<br>
       会员：<b>${PlayerData.isMember?"是":"否"}</b><br>
       账号：<b>${ACCOUNT_UID||"未建号"}</b><br>
+      云同步：<b>${CLOUD_SYNC_ENABLED?"已开启":"未开启（纯本地）"}</b><br>
       库存：${counts.length?counts.join("、"):"空"}`;
   }
   function devRefresh(){
@@ -2344,7 +2532,11 @@
     renderAquarium(TempAquariumData);
     renderShop();
   });
-  document.getElementById("shopSaveBtn").addEventListener("click",saveAquarium);
+  // saveAquarium 是 async（先试服务端结算）；事件处理器不接管返回的 Promise，
+  // 这里补一个 catch，免得任何异常变成 unhandledrejection 后静默消失。
+  document.getElementById("shopSaveBtn").addEventListener("click",()=>{
+    saveAquarium().catch(error=>console.warn("[shop] 保存鱼缸失败：",error.message));
+  });
   document.getElementById("receiptCloseBtn").addEventListener("click",closePurchaseReceipt);
   document.getElementById("receiptAdjustBtn").addEventListener("click",()=>{
     closePurchaseReceipt();
@@ -2413,7 +2605,9 @@
     try{
       const response = await fetch(`${API_BASE}/game/focus/start`, {
         method:"POST",
-        headers:{ "Content-Type":"application/json" },
+        // 带上会话令牌：服务端据此把这条会话写进 focus_records。
+        // 没令牌也能专注（登录不是专注的前提），只是这条记录不进服务端统计。
+        headers: cloudHeaders(),
         body: JSON.stringify({ plannedMinutes, isMember })
       });
       if(!response.ok) return;
@@ -2433,7 +2627,8 @@
       const timer = controller ? setTimeout(() => controller.abort(), 3000) : null;
       const response = await fetch(`${API_BASE}/game/focus/complete`, {
         method:"POST",
-        headers:{ "Content-Type":"application/json" },
+        // 同上：带令牌，服务端才会把结算结果写回 focus_records。
+        headers: cloudHeaders(),
         body: JSON.stringify({ sessionId }),
         signal: controller ? controller.signal : undefined
       });
@@ -3315,17 +3510,18 @@ const elemToRemove = nearest.el;
   }
   bootstrapConfig();
 
-  // ===== 账号：给这台设备一个稳定的 uid（将来云存档 / 同步码的锚点）=====
-  // V1.0 还没有任何界面用到它，这里只是"把号先建好"，好处是等云存档落地时
-  // 老玩家的本机存档已经带着 uid，迁移不用回填。
+  // ===== 账号与云存档：给这台设备一个稳定 uid，并让存档能跨设备 =====
+  // 账号 = uid（标识）+ 会话令牌（凭证）。uid 会出现在 localStorage、浏览器网络面板、
+  // 用户截图里，所以它**不是**凭证；所有 /api/game/* 请求靠 Authorization 里的令牌证明身份。
   //
-  // 四条硬约束，核心是「账号层绝不能拖累主流程」：
-  //   ① 绝不阻塞、绝不弹窗 —— 账号挂了，番茄钟必须照常能用（离线优先）。
-  //   ② SDK 未压缩 965KB（gzip 后仍不小），所以只在**确实缺 uid**时才懒加载，
-  //      且推迟到浏览器空闲；已有 uid 时连 SDK 都不会下载。
-  //   ③ 失败不落 uid，下次打开自然重试；错误只进 console，不打扰玩家。
+  // 四条硬约束，核心是「账号与云同步绝不能拖累主流程」：
+  //   ① 绝不阻塞、绝不弹窗 —— 账号或云端挂了，番茄钟必须照常能用（离线优先）。
+  //   ② SDK 未压缩 965KB（gzip 后仍不小），只在**首次建号**时懒加载，且推迟到浏览器空闲；
+  //      已有令牌时连 SDK 都不会下载（存档接口只需要令牌，不需要 CloudBase 登录态）。
+  //   ③ 失败不落凭证，下次打开自然重试；错误只进 console，不打扰玩家。
   //   ④ 环境 ID 由服务端随票据下发，前端不硬编码（否则换环境要改两处，改漏一处
   //      的表现是"静默登到另一个环境"，最难查）。
+  //   ⑤ 令牌没拿到就按建号失败处理 —— 没有令牌进不了任何 /api/game/*，等于白建一个号。
   const ACCOUNT_UID_KEY = "fishtank_account_uid";
   const ACCOUNT_SDK_URL = "https://static.cloudbase.net/cloudbase-js-sdk/3.10.0/cloudbase.full.js";
   let accountSdkPromise = null;
@@ -3349,12 +3545,33 @@ const elemToRemove = nearest.el;
     else window.setTimeout(fn,2500);
   }
 
+  // 读本地凭证。**令牌才是凭证**，uid 只是显示用的标识。
+  function readStoredCredentials(){
+    let token="", uid="";
+    try{
+      token=localStorage.getItem(ACCOUNT_TOKEN_KEY)||"";
+      uid=localStorage.getItem(ACCOUNT_UID_KEY)||"";
+    }catch(e){ /* 隐私模式读不到，当作没有 */ }
+    return { token, uid };
+  }
+
   async function ensureAccount(){
     if(window.FISHTANK_DISABLE_ACCOUNT) return;
-    let stored="";
-    try{ stored=localStorage.getItem(ACCOUNT_UID_KEY)||""; }catch(e){ /* 隐私模式读不到，当作没有 */ }
-    if(stored){ ACCOUNT_UID=stored; return; }
 
+    // ⚠️ 短路条件是**令牌**，不是 uid：uid 会出现在 localStorage、浏览器网络面板、
+    //    用户截图里，它不是凭证。有令牌时连 SDK 都不下载（965KB），也不再发建号请求。
+    const stored=readStoredCredentials();
+    if(stored.token){
+      ACCOUNT_TOKEN=stored.token;
+      ACCOUNT_UID=stored.uid;
+      CLOUD_SYNC_ENABLED=true;
+      updateDevStatus();
+      syncCloudSave();
+      return;
+    }
+
+    // 没有令牌 → 建号。旧版本只存了 uid 的玩家会在这里换一个新号：云存档当时还没上线，
+    // 除了 uid 本身没有别的东西可丢，本地存档照旧会被推上去（见 syncCloudSave 的 ① 分支）。
     const response=await fetch(`${API_BASE}/account/ticket`,{
       method:"POST",
       headers:{"content-type":"application/json"},
@@ -3363,6 +3580,8 @@ const elemToRemove = nearest.el;
     if(!response.ok) throw new Error(`签发失败 HTTP ${response.status}`);
     const issued=((await response.json())||{}).data||{};
     if(!issued.ticket||!issued.env) throw new Error("签发响应缺少 ticket/env");
+    // 没有会话令牌就等于账号白建（所有 /api/game/* 都进不去）→ 当失败处理，下次打开重试。
+    if(!issued.token) throw new Error("签发响应缺少会话令牌");
 
     await loadAccountSdk();
     const app=window.cloudbase.init({env:issued.env});
@@ -3384,9 +3603,16 @@ const elemToRemove = nearest.el;
     const uid=sdkUser.uid||(payload.user&&payload.user.id)||(payload.session&&payload.session.sub)||"";
     if(!uid) throw new Error("登录成功但没读到 uid");
 
-    try{ localStorage.setItem(ACCOUNT_UID_KEY,uid); }catch(e){ /* 存不下就算了，下次重建 */ }
+    try{
+      localStorage.setItem(ACCOUNT_UID_KEY,uid);
+      localStorage.setItem(ACCOUNT_TOKEN_KEY,issued.token);
+    }catch(e){ /* 存不下就算了，下次重建 */ }
     ACCOUNT_UID=uid;
+    ACCOUNT_TOKEN=issued.token;
+    CLOUD_SYNC_ENABLED=true;
     updateDevStatus();
+    // 首次建号：云端必然还没有存档，把本地存档推上去（syncCloudSave 的 ① 分支）。
+    syncCloudSave();
   }
 
   // 推迟到空闲再建号。失败只写 console：玩家不该因为账号层出问题而受影响，

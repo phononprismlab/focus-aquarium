@@ -84,6 +84,10 @@ function makeSettler(fetchImpl) {
   return new Function(`
 let focusSessionId = null;
 const API_BASE = "https://api.test/api";
+// cloudHeaders 来自账号层：带上会话令牌，服务端才认人、才会把会话与结算写进 focus_records。
+// 必须打桩 —— 少了它 settleFocusReward 会直接走进 catch，所有断言都退化成 local 兜底，
+// 表面看像"服务端结算坏了"，实际只是沙箱缺依赖。
+const cloudHeaders = () => ({ "Content-Type": "application/json", "Authorization": "Bearer test-token" });
 const fetch = (url, options) => globalThis.__fetchImpl(url, options);
 ${extractFunction(source, "settleFocusReward")}
 return {
@@ -114,6 +118,25 @@ chk("网络异常 → 本地兜底", await settleWith(async () => { throw new Er
 chk("响应缺字段 → 本地兜底", await settleWith(okBody({})), [25, "local"]);
 chk("奖励是负数 → 本地兜底（不接受扣分）", await settleWith(okBody({ data: { reward: -5 } })), [25, "local"]);
 chk("奖励不是数字 → 本地兜底", await settleWith(okBody({ data: { reward: "abc" } })), [25, "local"]);
+
+// 带令牌是这次接入的关键：没有它服务端不认人，focus_records 永远不落库（统计恒为 0）。
+console.log("\n--- 专注请求必须带上会话令牌 ---");
+chkTrue("结算请求用了 cloudHeaders()",
+  /headers:\s*cloudHeaders\(\)/.test(extractFunction(source, "settleFocusReward")));
+chkTrue("开始专注的请求也用了 cloudHeaders()",
+  /headers:\s*cloudHeaders\(\)/.test(extractFunction(source, "beginServerFocusSession")));
+chk("请求头里确实带上了 Authorization",
+  await (async () => {
+    let seen = null;
+    const s = makeSettler(async (url, options) => {
+      seen = (options && options.headers) || {};
+      return { ok: true, json: async () => ({ data: { reward: 25 } }) };
+    });
+    s.setSession("session-h");
+    await s.settleFocusReward(25);
+    return seen && seen["Authorization"];
+  })(),
+  "Bearer test-token");
 
 console.log("\n--- 防重放：会话只能用一次 ---");
 {
