@@ -56,7 +56,7 @@
 
   <div class="card">
     <h2>2 · 签发并登录</h2>
-    <p class="hint" style="margin-top:0">点一下：后端签一张票据，浏览器用它登录，然后把拿到的 user_id 显示出来。本地存过的 uid 会复用（模拟"老设备再打开"）。</p>
+    <p class="hint" style="margin-top:0">点一下：后端签一张票据 + 一枚会话令牌，浏览器用票据登录，把拿到的 user_id 显示出来。本机存过令牌时用它续期（模拟"老设备再打开"）。</p>
     <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px">
       <button class="primary" id="runBtn">签发并登录</button>
       <button id="newBtn">换个新身份</button>
@@ -119,6 +119,12 @@
   }
   function storeUid(uid) {
     try { localStorage.setItem(UID_KEY, uid); } catch (e) { /* 无痕模式等，忽略 */ }
+  }
+  function readStoredToken() {
+    try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; }
+  }
+  function storeToken(token) {
+    try { localStorage.setItem(TOKEN_KEY, token); } catch (e) { /* 无痕模式等，忽略 */ }
   }
 
   // ---- 1. 服务端状态 ----
@@ -208,6 +214,14 @@
         }
         log("ok", "票据已签发（" + d.ticket.length + " 字符，有效期 " + d.ticketValidSeconds + " 秒）");
         log("muted", "uid = " + esc(d.uid) + (d.generated ? "（服务端新建）" : "（沿用本机）"));
+        if (d.token) {
+          log("ok", "会话令牌已下发（" + d.token.length + " 字符，云存档接口靠它证明身份）");
+          storeToken(d.token);
+        } else {
+          log("warn", "没拿到会话令牌 —— 服务端缺 ADMIN_API_KEY / FISHTANK_SESSION_SECRET，云存档接口会全部 401");
+        }
+        if (d.created === true) log("muted", "服务端已建号（users 表写入成功）");
+        else if (d.created === false) log("muted", "服务端已有这个账号");
         // 环境 ID 优先用签发响应里的（服务端权威），健康检查那份只作为兜底。
         if (d.env) ENV_ID = d.env;
         storeUid(d.uid);
