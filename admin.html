@@ -84,7 +84,9 @@
 		.file-button { display: inline-flex; align-items: center; gap: 7px; border: 1px dashed #a9cbc3; border-radius: 7px; padding: 9px 12px; color: var(--teal); background: #f5fbf8; font-weight: 700; cursor: pointer; }
 		.file-button input { display: none; }
 		.file-list { display: flex; gap: 6px; flex-wrap: wrap; }
-		.file-chip { padding: 4px 8px; border-radius: 5px; background: #edf5f1; color: var(--ink); font-size: 12px; }
+		.file-chip { padding: 4px 8px; border-radius: 5px; background: #edf5f1; color: var(--ink); font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+		.chip-remove { border: 0; background: transparent; color: #7c8f8c; font-size: 15px; line-height: 1; padding: 0 2px; cursor: pointer; }
+		.chip-remove:hover { color: #b4553a; }
 		.form-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--line); padding-top: 20px; margin-top: 25px; }
 		.tier-row { display: grid; grid-template-columns: 1.1fr 1fr 1fr minmax(150px, 1.2fr) 38px; gap: 10px; align-items: end; margin-bottom: 11px; }
 		.tier-row .field { min-width: 0; gap: 4px; }
@@ -285,13 +287,20 @@
 		function showToast(message, duration = 2400) { toast.textContent = message; toast.classList.add("show"); clearTimeout(showToast.timer); showToast.timer = setTimeout(() => toast.classList.remove("show"), duration); }
 		function pageHeader(kicker, title, description, action = "") { return `<div class="topbar"><div><div class="eyebrow">${kicker}</div><h2>${title}</h2><p class="subtitle">${description}</p></div>${action}</div>`; }
 		function render() { document.querySelectorAll(".nav-item").forEach(item => item.classList.toggle("active", item.dataset.module === state.module)); renderModule(); }
+		// 单个模块渲染失败不能表现成「点了页签没反应」—— 那是最难查的一类现象：
+		// 页面没变、控制台之外什么都看不到。这里接住并在页面上直接说清是哪个模块坏了。
 		function renderModule() {
-			if (state.module === "decorations") renderDecorationList();
-			if (state.module === "fish") renderFishList();
-			if (state.module === "focus") renderFocus();
-			if (state.module === "audio") renderAudio();
-			if (state.module === "events") renderEventList();
-			if (state.module === "payment") renderPlaceholder();
+			const renderers = {
+				decorations: renderDecorationList, fish: renderFishList, focus: renderFocus,
+				audio: renderAudio, events: renderEventList, payment: renderPlaceholder
+			};
+			const renderer = renderers[state.module];
+			if (!renderer) return;
+			try { renderer(); }
+			catch (error) {
+				main.innerHTML = pageHeader("MODULE ERROR", "这个页面渲染失败了", "其它模块不受影响，切到别的页签可以继续。", "")
+					+ `<section class="panel"><div class="empty"><strong>${esc(error.message)}</strong>模块：${esc(state.module)}。把这句话发给开发者即可定位。</div></section>`;
+			}
 		}
 		function renderDecorationList() {
 			main.innerHTML = pageHeader("DECORATION CONFIG", "装点鱼缸配置", "管理旧版游戏中的商品、装扮与资源配置。", `<button class="button primary" id="newDecoration">＋ 新建商品</button>`) + `<section class="panel"><div class="panel-head"><div><h3>已配置商品</h3><p>共 ${state.decorations.length} 个旧版商品项目</p></div></div>${state.decorations.length ? `<div class="table-wrap"><table><thead><tr><th>商品</th><th>分类</th><th>价格</th><th>发布状态</th><th>操作</th></tr></thead><tbody>${state.decorations.map((item, index) => `<tr><td><div class="item-name">${esc(item.name)}</div><div class="item-id">${esc(item.id)}</div></td><td>${esc(categoryLabel(item.category))}</td><td>${item.price === 0 ? "免费" : item.price + " 鱼币"}</td><td><span class="badge ${item.dirty ? "draft" : "published"}">${item.dirty ? "有修改，待发布" : "已发布"}</span></td><td><div class="actions"><button class="link-button edit-decoration" data-index="${index}">编辑</button><button class="button publish" data-index="${index}" ${item.dirty ? "" : "disabled"}>发布</button><button class="link-button delete delete-decoration" data-index="${index}">删除</button></div></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty"><strong>还没有商品</strong>点击右上角新建第一个商品</div>`}</section>`;
@@ -300,69 +309,130 @@
 			document.querySelectorAll(".publish").forEach(button => button.onclick = () => publishItem("decorations", Number(button.dataset.index)));
 			document.querySelectorAll(".delete-decoration").forEach(button => button.onclick = async () => { if (!confirm("确定要删除这个配置吗？")) return; const item = state.decorations[Number(button.dataset.index)]; try { await apiRequest(`/admin/decorations/${encodeURIComponent(item.id)}`, { method: "DELETE" }); state.decorations.splice(Number(button.dataset.index), 1); renderDecorationList(); } catch (error) { showToast(`删除失败：${error.message}`); } });
 		}
+		// 文件 chip：带一个 × 删除入口。以前 chip 只是个 span，没有任何删除方式，
+		// 加错一个资源就只能整页刷新重来。
+		function makeFileChip(label, path, onRemove) {
+			const chip = document.createElement("span");
+			chip.className = "file-chip";
+			chip.dataset.path = path;
+			const text = document.createElement("span");
+			text.textContent = label;
+			chip.appendChild(text);
+			if (onRemove) {
+				const button = document.createElement("button");
+				button.type = "button";
+				button.className = "chip-remove";
+				button.title = "移除";
+				button.setAttribute("aria-label", `移除 ${label}`);
+				button.textContent = "×";
+				button.onclick = onRemove;
+				chip.appendChild(button);
+			}
+			return chip;
+		}
+		// 上传资源统一走这里：按 MIME 选接口（音频 → /admin/assets 存 sounds/，图片 → /admin/assets/image 存 images/）。
+		// 云存储失败时返回空串，调用方据此拒绝把容器本地临时路径写进配置（实例重建就 404）。
+		async function uploadAsset(file, label) {
+			const endpoint = String(file.type || "").startsWith("audio/") ? "/admin/assets" : "/admin/assets/image";
+			showToast(`正在上传${label} ${file.name}…`);
+			try {
+				const form = new FormData();
+				form.append("file", file);
+				const headers = {};
+				if (adminKey) headers["x-admin-key"] = adminKey;
+				const response = await fetch(`${API_BASE}${endpoint}`, { method: "POST", body: form, headers });
+				const body = await response.json();
+				if (!response.ok) throw new Error((body && body.error) || "上传失败");
+				if (body.data.fallbackError) {
+					showToast(`${label}未保存：${body.data.fallbackError}${body.data.fallbackCode ? `（${body.data.fallbackCode}）` : ""}`, 9000);
+					return "";
+				}
+				return body.data.path || body.data.url || "";
+			} catch (error) {
+				showToast(`${label}上传失败：${error.message}`);
+				return "";
+			}
+		}
 		function renderDecorationForm(index = null) {
 			const item = index === null ? { id: "", category: "decorations", name: "", description: "", previewImage: "", resourcePath: [], tags: [], price: 0, isMemberOnly: false, maxInventory: 1 } : state.decorations[index];
 			editingIndex = index; editingType = "decorations";
 			// 音效管理里已上传的音频，直接挂到这个商品的 resourcePath 上。
 			// 这是两处配置唯一的关联点：挂同一个文件，商店才会用本页的名称和描述。
 			const resourceOptions = audioResourceOptions();
-			main.innerHTML = pageHeader("DECORATION CONFIG", index === null ? "新建商品" : "编辑商品", "字段保持与旧版 SHOP_ITEMS 兼容，保存后可在列表中发布。", `<button class="button secondary" id="backList">返回列表</button>`) + `<section class="panel form-panel"><div class="form-body"><form id="decorationForm"><div class="form-grid"><div class="field"><label>id <span>*</span></label><input name="id" value="${esc(item.id)}" required></div><div class="field"><label>category <span>*</span></label><select name="category">${SHOP_CATEGORIES.map(category => `<option value="${category.value}" ${item.category === category.value ? "selected" : ""}>${category.label}</option>`).join("")}</select></div><div class="field"><label>name <span>*</span></label><input name="name" value="${esc(item.name)}" required></div><div class="field"><label>price</label><input name="price" type="number" min="0" value="${item.price}"></div><div class="field full"><label>description</label><textarea name="description">${esc(item.description)}</textarea></div><div class="field full"><label>tags</label><input name="tags" value="${esc(tagsToInput(item.tags))}" placeholder="逗号分隔，如 undersea-treasure"><span class="hint">供随机事件按 tag 匹配资源；新增资源只需填 tags，不用改事件系统</span></div><div class="field"><label>previewImage</label><div class="upload-row"><label class="file-button">上传预览图<input id="previewUpload" type="file" accept="image/*"></label><span class="hint">只允许一个文件；建议先压到 400×400、100KB 以内 —— 图只按小格子显示，传原图只会拖慢玩家端首屏</span></div><div class="file-list" id="previewFiles">${item.previewImage ? `<span class="file-chip" data-path="${esc(item.previewImage)}">${esc(item.previewImage)}</span>` : ""}</div></div><div class="field"><label>resourcePath</label><div class="upload-row"><label class="file-button">上传资源<input id="resourceUpload" type="file" multiple></label><select id="resourcePick" style="flex:1;min-width:260px">${resourceOptions}</select></div><span class="hint">保存为资源数组；装饰类第 1 个为后景、第 2 个为前景。音效类商品挂上音效管理里的同一个音频文件后，商店就会用本页的名称与描述</span><div class="file-list" id="resourceFiles">${resourceList(item.resourcePath).map((file, resourceIndex) => `<span class="file-chip" data-path="${esc(file)}">${item.category === "decorations" && resourceIndex < 2 ? (resourceIndex === 0 ? "后景：" : "前景：") : "资源："}${esc(file)}</span>`).join("")}</div></div><div class="field"><label>maxInventory</label><input name="maxInventory" type="number" min="0" value="${item.maxInventory}"></div><label class="check"><input name="isMemberOnly" type="checkbox" ${item.isMemberOnly ? "checked" : ""}> isMemberOnly</label></div><div class="form-foot"><button type="button" class="button secondary" id="cancelForm">取消</button><button class="button primary">保存</button></div></form></div></section>`;
+			main.innerHTML = pageHeader("DECORATION CONFIG", index === null ? "新建商品" : "编辑商品", "字段保持与旧版 SHOP_ITEMS 兼容，保存后可在列表中发布。", `<button class="button secondary" id="backList">返回列表</button>`) + `<section class="panel form-panel"><div class="form-body"><form id="decorationForm"><div class="form-grid"><div class="field"><label>id <span>*</span></label><input name="id" value="${esc(item.id)}" required></div><div class="field"><label>category <span>*</span></label><select name="category">${SHOP_CATEGORIES.map(category => `<option value="${category.value}" ${item.category === category.value ? "selected" : ""}>${category.label}</option>`).join("")}</select></div><div class="field"><label>name <span>*</span></label><input name="name" value="${esc(item.name)}" required></div><div class="field"><label>price</label><input name="price" type="number" min="0" value="${item.price}"></div><div class="field full"><label>description</label><textarea name="description">${esc(item.description)}</textarea></div><div class="field full"><label>tags</label><input name="tags" value="${esc(tagsToInput(item.tags))}" placeholder="逗号分隔，如 undersea-treasure"><span class="hint">供随机事件按 tag 匹配资源；新增资源只需填 tags，不用改事件系统</span></div><div class="field"><label>previewImage</label><div class="upload-row"><label class="file-button">上传预览图<input id="previewUpload" type="file" accept="image/*"></label><span class="hint">只允许一个文件；建议先压到 400×400、100KB 以内 —— 图只按小格子显示，传原图只会拖慢玩家端首屏</span></div><div class="file-list" id="previewFiles"></div></div><div class="field"><label>resourcePath</label><div class="upload-row"><label class="file-button">上传资源<input id="resourceUpload" type="file" multiple></label><select id="resourcePick" style="flex:1;min-width:260px">${resourceOptions}</select></div><span class="hint">资源 = 鱼缸里真正显示的那张图（装饰第 1 张为后景、第 2 张为前景）；预览图 = 商店列表里的小图，两者不是一回事。上传后会存进云存储，每一项都能点 × 删掉。音效类商品挂上音效管理里的同一个音频文件后，商店就会用本页的名称与描述</span><div class="file-list" id="resourceFiles"></div></div><div class="field"><label>maxInventory</label><input name="maxInventory" type="number" min="0" value="${item.maxInventory}"></div><label class="check"><input name="isMemberOnly" type="checkbox" ${item.isMemberOnly ? "checked" : ""}> isMemberOnly</label></div><div class="form-foot"><button type="button" class="button secondary" id="cancelForm">取消</button><button class="button primary">保存</button></div></form></div></section>`;
 			document.getElementById("backList").onclick = () => { editingIndex = null; renderDecorationList(); };
 			document.getElementById("cancelForm").onclick = () => renderDecorationList();
-			document.getElementById("previewUpload").onchange = async event => {
-				const file = event.target.files && event.target.files[0];
-				if (!file) return;
-				event.target.value = "";
-				showToast(`正在上传预览图 ${file.name}…`);
-				try {
-					const form = new FormData();
-					form.append("file", file);
-					const headers = {};
-					if (adminKey) headers["x-admin-key"] = adminKey;
-					const response = await fetch(`${API_BASE}/admin/assets/image`, { method: "POST", body: form, headers });
-					const body = await response.json();
-					if (!response.ok) throw new Error((body && body.error) || "上传失败");
-					// 云存储失败时本地路径同样不能写进配置：实例一重建就没了，发布出去是必然 404。
-					if (body.data.fallbackError) {
-						showToast(`预览图未保存：${body.data.fallbackError}${body.data.fallbackCode ? `（${body.data.fallbackCode}）` : ""}。`, 9000);
-						return;
-					}
-					// 一个商品只有一个预览图，直接替换。
-					const list = document.getElementById("previewFiles");
-					list.innerHTML = "";
-					const chip = document.createElement("span");
-					chip.className = "file-chip";
-					chip.dataset.path = body.data.url || body.data.path;
-					chip.textContent = body.data.url || body.data.path;
-					list.appendChild(chip);
-					showToast(`已上传预览图 ${file.name}，记得保存并发布`);
-				} catch (error) {
-					showToast(`预览图上传失败：${error.message}`);
-				}
-			};
-			// 上传与「从音效管理选择」都往资源列表里追加，避免先选了音效再传文件时把已选资源冲掉。
-			const resourcePrefix = resourceIndex => document.getElementById("decorationForm").elements.category.value === "decorations" && resourceIndex < 2 ? (resourceIndex === 0 ? "后景：" : "前景：") : "资源：";
-			const addResourceChip = (path, label) => {
+			// 资源 / 预览图都由下面这两个数组驱动渲染。
+			// 以前是直接往 DOM 追加 chip：删掉一个之后「后景/前景」的序号就全错了，
+			// 而且根本没有删除入口 —— 加错了只能整页刷新重来。
+			let resourcePaths = resourceList(item.resourcePath).filter(Boolean);
+			let previewPath = String(item.previewImage || "");
+			const formEl = document.getElementById("decorationForm");
+			const resourcePrefix = resourceIndex => formEl.elements.category.value === "decorations" && resourceIndex < 2 ? (resourceIndex === 0 ? "后景：" : "前景：") : "资源：";
+			const renderResourceChips = () => {
 				const list = document.getElementById("resourceFiles");
-				const exists = Array.from(list.querySelectorAll(".file-chip")).some(chip => (chip.dataset.path || chip.textContent.replace(/^(后景|前景|资源)：/, "")) === path);
-				if (exists) { showToast(`该资源已在列表中：${path}`); return; }
-				const chip = document.createElement("span");
-				chip.className = "file-chip";
-				chip.dataset.path = path;
-				chip.textContent = `${label}${path}`;
-				list.appendChild(chip);
+				list.innerHTML = "";
+				resourcePaths.forEach((path, resourceIndex) => list.appendChild(makeFileChip(`${resourcePrefix(resourceIndex)}${path}`, path, () => {
+					resourcePaths = resourcePaths.filter(existing => existing !== path);
+					renderResourceChips();
+				})));
 			};
-			document.getElementById("resourceUpload").onchange = event => {
-				Array.from(event.target.files).forEach((file, resourceIndex) => addResourceChip(file.name, resourcePrefix(resourceIndex)));
+			const renderPreviewChip = () => {
+				const list = document.getElementById("previewFiles");
+				list.innerHTML = "";
+				if (previewPath) list.appendChild(makeFileChip(previewPath, previewPath, () => { previewPath = ""; renderPreviewChip(); }));
+			};
+			const addResourcePath = (path, sourceName) => {
+				if (!path) return;
+				if (resourcePaths.includes(path)) { showToast(`该资源已在列表中：${sourceName || path}`); return; }
+				resourcePaths.push(path);
+				renderResourceChips();
+			};
+			renderResourceChips();
+			renderPreviewChip();
+			// 上传资源：以前这里把 file.name 直接当路径写进配置（那是本地文件名，发布出去必然 404），
+			// 现在真的传到云存储，用返回的持久化引用。
+			document.getElementById("resourceUpload").onchange = async event => {
+				const files = Array.from(event.target.files || []);
 				event.target.value = "";
+				for (const file of files) {
+					const path = await uploadAsset(file, "资源");
+					if (path) addResourcePath(path, file.name);
+				}
 			};
 			document.getElementById("resourcePick").onchange = event => {
 				const path = event.target.value;
 				event.target.value = "";
 				if (!path) return;
-				addResourceChip(path, resourcePrefix(99));
+				addResourcePath(path, path);
 			};
-			document.getElementById("decorationForm").onsubmit = async event => { event.preventDefault(); const data = formData(event.target); data.tags = parseTagsInput(data.tags); if (state.decorations.some((decoration, decorationIndex) => decoration.id === data.id && decorationIndex !== editingIndex)) { showToast("保存失败，id重复"); return; } data.resourcePath = Array.from(document.querySelectorAll("#resourceFiles .file-chip")).map(chip => chip.dataset.path || chip.textContent.replace(/^(后景|前景|资源)：/, "")).filter(Boolean); data.previewImage = document.querySelector("#previewFiles .file-chip")?.dataset.path || document.querySelector("#previewFiles .file-chip")?.textContent || ""; try { const response = await apiRequest(`/admin/decorations${editingIndex === null ? "" : `/${encodeURIComponent(data.id)}`}`, { method: editingIndex === null ? "POST" : "PUT", body: JSON.stringify(data) }); const saved = { ...response.data.data, published: editingIndex === null ? response.data.published : false, dirty: editingIndex !== null || !response.data.published }; if (editingIndex === null) state.decorations.push(saved); else state.decorations[editingIndex] = saved; showToast("商品已保存，等待发布"); renderDecorationList(); } catch (error) { showToast(`保存失败：${error.message}`); } };
+			document.getElementById("previewUpload").onchange = async event => {
+				const file = event.target.files && event.target.files[0];
+				event.target.value = "";
+				if (!file) return;
+				const path = await uploadAsset(file, "预览图");
+				if (!path) return;
+				previewPath = path;   // 一个商品只有一个预览图，直接替换
+				renderPreviewChip();
+				showToast(`已上传预览图 ${file.name}，记得保存并发布`);
+			};
+			document.getElementById("decorationForm").onsubmit = async event => {
+				event.preventDefault();
+				const data = formData(event.target);
+				data.tags = parseTagsInput(data.tags);
+				if (state.decorations.some((decoration, decorationIndex) => decoration.id === data.id && decorationIndex !== editingIndex)) { showToast("保存失败，id 重复"); return; }
+				// 资源与预览图直接取上面的数组，不再从 chip 的 textContent 里反解路径 ——
+				// 那种做法只要前缀文案改一个字，就会静默把「后景：xxx」当成路径存进配置。
+				data.resourcePath = [...resourcePaths];
+				data.previewImage = previewPath;
+				try {
+					const response = await apiRequest(`/admin/decorations${editingIndex === null ? "" : `/${encodeURIComponent(data.id)}`}`, { method: editingIndex === null ? "POST" : "PUT", body: JSON.stringify(data) });
+					const saved = { ...response.data.data, published: editingIndex === null ? response.data.published : false, dirty: editingIndex !== null || !response.data.published };
+					if (editingIndex === null) state.decorations.push(saved); else state.decorations[editingIndex] = saved;
+					showToast("商品已保存，等待发布");
+					renderDecorationList();
+				} catch (error) { showToast(`保存失败：${error.message}`); }
+			};
 		}
 		// ===== 鱼类多资源（F1）=====
 		// 鱼的 resourcePath 保存为 [{slot, path}]：每张图挂在一个插槽上，玩家端按插槽拼装。
@@ -606,7 +676,17 @@
 			}
 			return null;
 		}
+		// 专注配置的单一读取点。
+		// ⚠️ 这里绝对不能写裸 focus：浏览器里 window.focus 是内置函数，裸 focus 会静默指向它，
+		// 于是 focus.rewardTiers 是 undefined、.map 直接抛 TypeError。症状是「点专注配置页签没反应」
+		// （页面压根没换），而报错信息完全看不出真因；更坑的是在发布按钮里也会被误报成「发布失败」。
+		function focusConfig() {
+			if (!state.focus || typeof state.focus !== "object") state.focus = { minFocusDuration: 25, maxFocusDuration: 120, rewardTiers: [] };
+			if (!Array.isArray(state.focus.rewardTiers)) state.focus.rewardTiers = [];
+			return state.focus;
+		}
 		function renderFocus() {
+			const focus = focusConfig();
 			const publishButton = `<button class="button publish" id="publishFocus" ${focusDirty ? "" : "disabled"}>${focusDirty ? "待发布" : (focusPublished ? "已发布" : "待发布")}</button>`;
 			main.innerHTML = pageHeader("FOCUS CONFIG", "专注配置", "设置专注时长与不同阶段的气泡奖励。", `${publishButton}<button class="button primary" id="saveFocus">保存配置</button>`) + `<section class="panel form-panel"><div class="form-body"><div class="form-grid"><div class="field"><label>minFocusDuration</label><input id="minFocusDuration" type="number" min="0" value="${focus.minFocusDuration}"></div><div class="field"><label>maxFocusDuration</label><input id="maxFocusDuration" type="number" min="0" value="${focus.maxFocusDuration}"></div></div><h3 class="section-title">rewardTiers <span class="hint">按 endMinute 从小到大显示</span></h3><div id="tiers">${focus.rewardTiers.map((tier, index) => tierTemplate(tier, index)).join("")}</div><button class="button secondary" id="addTier">＋ 新增梯度</button></div></section>`;
 			const markFocusDirty = () => { focusDirty = true; focusPublished = false; };
@@ -643,7 +723,10 @@
 				seen.add(path);
 				return true;
 			}).map(sound => `<option value="${esc(sound.resourcePath)}">${esc(sound.name || sound.id)}（${esc(audioCategoryLabel(sound.category))}）· ${esc(sound.resourcePath)}</option>`).join("");
-			return options || `<option value="">（音效管理里还没有已上传的音频）</option>`;
+			// 第一项必须是一个明确的「不挂资源」空值：<select> 默认选中第一项，
+			// 以前第一项就是某个音频文件，新建商品时看着像"已经自动挂了一条音频路径"，而且清不掉。
+			const placeholder = `<option value="">（不挂资源 · 需要就选一个）</option>`;
+			return placeholder + (options || `<option value="" disabled>—— 音效管理里还没有已上传的音频 ——</option>`);
 		}
 		// 分类不再固定，随时可能被增删，凡是需要分类清单的地方都走这里。
 		// 配置异常为空时回落到内置分类，避免出现没有分类可选、无法恢复的死局。
@@ -762,7 +845,18 @@
 		}
 		function renderPlaceholder() { const title = state.module === "events" ? "事件设置" : "付费配置"; main.innerHTML = pageHeader(state.module === "events" ? "EVENT SETTINGS" : "PAYMENT CONFIG", title, "该模块将在后续版本中接入。", "") + `<section class="panel"><div class="empty"><strong>功能预留中</strong>这里暂时没有可配置内容。</div></section>`; }
 		function formData(form) { const data = Object.fromEntries(new FormData(form).entries()); data.isMemberOnly = form.elements.isMemberOnly?.checked || false; data.price = Number(data.price || 0); data.maxInventory = Number(data.maxInventory || 0); return data; }
-		async function publishItem(type, index) { const item = state[type][index]; const id = type === "fish" ? item.fishid : item.id; try { await apiRequest(`/admin/${type}/${encodeURIComponent(id)}/publish`, { method: "POST" }); item.dirty = false; item.published = true; showToast("内容已发布"); renderModule(); } catch (error) { showToast(`发布失败：${error.message}`); } }
+		async function publishItem(type, index) {
+			const item = state[type][index];
+			const id = type === "fish" ? item.fishid : item.id;
+			try {
+				await apiRequest(`/admin/${type}/${encodeURIComponent(id)}/publish`, { method: "POST" });
+				item.dirty = false; item.published = true;
+				showToast("内容已发布");
+			} catch (error) { showToast(`发布失败：${error.message}`); return; }
+			// 渲染放在 try 外面：渲染出错不该被报成「发布失败」（发布其实已经成功了），
+			// 那会让人以为接口挂了、往错的方向查。
+			renderModule();
+		}
 		document.getElementById("navList").onclick = event => { const button = event.target.closest(".nav-item"); if (!button) return; state.module = button.dataset.module; editingIndex = null; render(); };
 		function connectWithKey() {
 			adminKey = adminKeyInput.value.trim();
