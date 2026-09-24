@@ -72,7 +72,12 @@
 <script>
 // ⚠️ 这个页面只用于验证账号闭环，正式上线前删除（和 DEV 面板一样是"上线前必做"项）。
 (function () {
+  // ⚠️ FISHTANK_API_BASE 已经包含 "/api" 前缀（与 index.html / admin.html 同一套约定，
+  //    那边写的是 `${API_BASE}/game/focus/start`）。所以这里只能接 "/health"、"/account/ticket"，
+  //    再写一次 "/api/..." 会拼成 /api/api/health —— 后端只会回一句 Cannot GET。
   var API_BASE = (window.FISHTANK_API_BASE || "https://focus-aquarium-api-316509-5-1491495221.sh.run.tcloudbase.com/api").replace(/\/+$/, "");
+  var HEALTH_URL = API_BASE + "/health";
+  var TICKET_URL = API_BASE + "/account/ticket";
   // 环境 ID 从健康检查里拿（服务端知道自己的环境），避免这里再硬编码一份。
   var ENV_ID = "";
   var UID_KEY = "fishtank_account_uid_check";
@@ -86,6 +91,29 @@
   function row(k, v, cls) {
     return '<div class="row"><div class="k">' + esc(k) + '</div><div class="v' + (cls ? " " + cls : "") + '">' + v + "</div></div>";
   }
+  // 后端在重新部署的那几分钟里，网关返回的是 HTML 错误页而不是 JSON。
+  // 直接 res.json() 只会抛 "Unexpected token '<', "<!DOCTYPE"..." —— 完全看不出
+  // 是"服务还没部署好"，会让人以为配置又错了。所以统一先读文本再自己解析。
+  function readBody(res) {
+    return res.text().then(function (text) {
+      var data = null, parseError = "";
+      try { data = JSON.parse(text); } catch (e) { parseError = e.message; }
+      return {
+        status: res.status,
+        contentType: res.headers.get("content-type") || "",
+        data: data,
+        text: text,
+        parseError: parseError
+      };
+    });
+  }
+  function looksLikeHtml(r) {
+    return /^\s*</.test(r.text || "") || /text\/html/i.test(r.contentType);
+  }
+  function bodyPreview(r) {
+    return String(r.text || "").replace(/\s+/g, " ").trim().slice(0, 160) || "（空响应）";
+  }
+
   function readStoredUid() {
     try { return localStorage.getItem(UID_KEY) || ""; } catch (e) { return ""; }
   }
@@ -94,23 +122,49 @@
   }
 
   // ---- 1. 服务端状态 ----
-  fetch(API_BASE + "/api/health").then(function (r) { return r.json(); }).then(function (h) {
-    var a = h.account || {};
-    ENV_ID = a.env || "";
-    var html = "";
-    html += row("API", esc(API_BASE));
-    html += row("账号已配置", a.configured ? '<span class="ok">是</span>' : '<span class="bad">否</span>');
-    if (!a.configured) {
-      html += row("原因", '<span class="bad">' + esc(a.error || "未知") + "</span>");
-      html += row("该怎么办", "在云托管服务的环境变量里配 CLOUDBASE_CUSTOM_LOGIN_KEY，然后重新部署");
-    } else {
-      html += row("私钥环境", esc(a.env || ""));
-      html += row("与环境一致", a.envMatch === true ? '<span class="ok">是</span>' : (a.envMatch === false ? '<span class="bad">否（' + esc(a.mismatch ? a.mismatch.keyEnv + " ≠ " + a.mismatch.targetEnv : "") + '）</span>' : '<span class="muted">未知</span>'));
-      html += row("密钥 ID", esc(a.keyId || ""));
+  fetch(HEALTH_URL).then(readBody).then(function (r) {
+    // 请求地址和页面地址都打出来：如果页面不是从代理端口打开的，这里一眼能看出来。
+    var head = row("页面地址", esc(location.origin + location.pathname)) + row("API", esc(API_BASE));
+
+    if (!r.data) {
+      var html = looksLikeHtml(r);
+      var extra = head;
+      extra += row("HTTP 状态", '<span class="bad">' + r.status + "</span>");
+      if (html) {
+        extra += row("原因", '<span class="warn">服务返回的是 HTML 而不是 JSON —— 通常是云托管正在重新部署</span>');
+        extra += row("怎么办", "等 1–2 分钟再刷新这个页面");
+      } else {
+        extra += row("原因", '<span class="bad">响应不是 JSON：' + esc(r.parseError) + "</span>");
+      }
+      extra += row("响应片段", '<span class="muted">' + esc(bodyPreview(r)) + "</span>");
+      $("healthRows").innerHTML = extra;
+      return;
     }
-    $("healthRows").innerHTML = html;
+
+    var a = r.data.account || {};
+    ENV_ID = a.env || "";
+    var html2 = head;
+    if (!("account" in r.data)) {
+      // 老版本后端还没有这个字段 —— 说明这次部署还没生效，别误判成"没配私钥"。
+      html2 += row("account 字段", '<span class="warn">后端还没有这个字段 —— 说明本次部署尚未生效</span>');
+      html2 += row("怎么办", "等云托管构建完成（约 10–15 分钟）后刷新");
+      $("healthRows").innerHTML = html2;
+      return;
+    }
+    html2 += row("账号已配置", a.configured ? '<span class="ok">是</span>' : '<span class="bad">否</span>');
+    if (!a.configured) {
+      html2 += row("原因", '<span class="bad">' + esc(a.error || "未知") + "</span>");
+      html2 += row("该怎么办", "在云托管服务的环境变量里配 CLOUDBASE_CUSTOM_LOGIN_KEY，然后重新部署");
+    } else {
+      html2 += row("私钥环境", esc(a.env || ""));
+      html2 += row("与环境一致", a.envMatch === true ? '<span class="ok">是</span>' : (a.envMatch === false ? '<span class="bad">否（' + esc(a.mismatch ? a.mismatch.keyEnv + " ≠ " + a.mismatch.targetEnv : "") + '）</span>' : '<span class="muted">未知</span>'));
+      html2 += row("密钥 ID", esc(a.keyId || ""));
+    }
+    $("healthRows").innerHTML = html2;
   }).catch(function (e) {
-    $("healthRows").innerHTML = '<span class="bad">读不到 /api/health：' + esc(e.message) + "</span>";
+    $("healthRows").innerHTML = row("页面地址", esc(location.origin + location.pathname)) +
+      row("API", esc(API_BASE)) +
+      '<span class="bad">请求没发出去：' + esc(e.message) + "（检查代理/后端是否在运行）</span>";
   });
 
   // ---- 2. 签发并登录 ----
@@ -130,19 +184,28 @@
     var body = storedUid ? { uid: storedUid } : {};
     log("muted", storedUid ? "本机已有 uid，复用它（模拟老设备）" : "本机没有 uid，服务端会新建一个");
 
-    fetch(API_BASE + "/api/account/ticket", {
+    fetch(TICKET_URL, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body)
     })
-      .then(function (r) { return r.json().then(function (b) { return { status: r.status, body: b }; }); })
-      .then(function (res) {
-        if (res.status !== 200) {
-          log("bad", "签发失败 HTTP " + res.status + "：" + esc(res.body.error || ""));
-          if (res.body.hint) log("muted", esc(res.body.hint));
+      .then(readBody)
+      .then(function (r) {
+        if (!r.data) {
+          log("bad", "签发接口返回的不是 JSON（HTTP " + r.status + "）" + (looksLikeHtml(r) ? " —— 云托管可能正在重新部署，等 1–2 分钟再试" : ""));
+          log("muted", esc(bodyPreview(r)));
           throw new Error("ticket-failed");
         }
-        var d = res.body.data;
+        if (r.status !== 200) {
+          log("bad", "签发失败 HTTP " + r.status + "：" + esc(r.data.error || ""));
+          if (r.data.hint) log("muted", esc(r.data.hint));
+          throw new Error("ticket-failed");
+        }
+        var d = r.data.data || {};
+        if (!d.ticket) {
+          log("bad", "签发接口没返回票据，响应片段：" + esc(bodyPreview(r)));
+          throw new Error("ticket-failed");
+        }
         log("ok", "票据已签发（" + d.ticket.length + " 字符，有效期 " + d.ticketValidSeconds + " 秒）");
         log("muted", "uid = " + esc(d.uid) + (d.generated ? "（服务端新建）" : "（沿用本机）"));
         storeUid(d.uid);
@@ -157,7 +220,7 @@
 
   function signIn(ticket) {
     if (typeof cloudbase === "undefined") {
-      log("bad", "CloudBase JS SDK 没加载成功（检查网络能否访问 static.cloudbase.net）");
+      log("bad", "CloudBase JS SDK 没加载成功。检查两点：① 网络能否访问 static.cloudbase.net；② 如果页面是被某个带 CSP 的预览服务托管的，外部脚本会被拦掉，请从本机 HTTP 服务（127.0.0.1）打开这个页面。");
       return Promise.reject(new Error("sdk-missing"));
     }
     if (!ENV_ID) {
@@ -167,16 +230,37 @@
     var app = cloudbase.init({ env: ENV_ID });
     var auth = app.auth({ persistence: "local" });
     log("muted", "正在用票据登录环境 " + esc(ENV_ID) + " …");
-    return auth.signInWithCustomTicket(ticket).then(function () {
-      log("ok", "登录成功");
-      return auth.getLoginState();
-    }).then(function (state) {
-      var user = auth.currentUser;
-      var uid = (user && user.uid) || "";
-      log("ok", "user_id = " + esc(uid));
-      if (state) log("muted", "登录态：" + (state.isLoggedIn || state.loginState ? "已登录" : "未登录"));
-      if (user && user.customUserId) log("muted", "customUserId = " + esc(user.customUserId));
-      if (!uid) log("warn", "登录后没读到 uid —— 把上面几行发我");
+    // ⚠️ 两个坑（都踩过，且症状都不指向真实原因）：
+    //   1) signInWithCustomTicket 的参数是**函数**（返回 Promise<ticket>），不是票据字符串。
+    //      传字符串时 SDK 会试图把它当函数调用，抛一句完全看不懂的 "e is not a function"，
+    //      而且**一个网络请求都不会发** —— 看起来就像"服务端配置错了"。
+    //      官方签名：signInWithCustomTicket(getTickFn?: GetCustomSignTicketFn)
+    //   2) 这个 API 用 {data, error} 信封 resolve，失败时**不抛异常**。
+    //      只写 .then() 会把失败当成功，报出"登录成功但 user_id 为空"这种误导结论。
+    return auth.signInWithCustomTicket(function () { return Promise.resolve(ticket); }).then(function (ret) {
+      var err = ret && ret.error;
+      if (err) {
+        log("bad", "登录失败：" + esc(err.message || err.code || "未知错误") + (err.code ? "（code=" + esc(err.code) + "）" : ""));
+        if (err.helpMessage) log("muted", esc(String(err.helpMessage).split("\n")[0]));
+        return null;
+      }
+      // ⚠️ uid 有三个地方长得不一样，不能只认一个：
+      //   auth.currentUser.uid   —— SDK 的 User 对象（有 uid / sub）
+      //   ret.data.user.id       —— 服务端返回的**原始**用户记录，字段叫 id，**没有 uid**
+      //   ret.data.session.sub   —— 会话的 subject，等于 uid
+      // 只读 ret.data.user.uid 会拿到 undefined，表现成"登录成功但 user_id 为空"。
+      var rawUser = (ret && ret.data && ret.data.user) || {};
+      var session = (ret && ret.data && ret.data.session) || {};
+      var sdkUser = auth.currentUser || {};
+      var uid = sdkUser.uid || rawUser.uid || rawUser.id || session.sub || "";
+      if (uid) log("ok", "user_id = " + esc(uid));
+      else log("warn", "登录返回成功但没读到 uid —— 把上面几行发我");
+      if (sdkUser.customUserId) log("muted", "customUserId = " + esc(sdkUser.customUserId));
+      return auth.getLoginState().then(function (state) {
+        var stateUid = (state && state.user && state.user.uid) || "";
+        log("muted", "getLoginState：" + (state === null ? "null（该版本读登录态用 hasLoginState）" : (stateUid ? "已登录 " + esc(stateUid) : "有对象但读不到 uid")));
+        return uid;
+      });
     });
   }
 
