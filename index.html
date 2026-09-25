@@ -5,6 +5,33 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>鱼儿乐水族馆 · V0.2</title>
 <style>
+  /* ===== v3 设计令牌：旧电脑水族馆 × 2D 游戏素材 × 高饱和复古 =====
+     照抄 design/ui-prototype-v10.html（其令牌出自 design-tokens-v3.md 附录 A）。
+     铁律：零外链 —— 颗粒是内联 data-uri SVG，字体走系统等线无衬线，无手写体。 */
+  :root {
+    --screen-blue-50:#e3f1ff; --screen-blue-200:#9ccdff; --screen-blue-400:#3a9bff;
+    --screen-blue-500:#0a84ff; --screen-blue-600:#0a6ae0; --screen-blue-700:#0a4db8;
+    --screen-blue-900:#06295e;
+    --water-top:#cfe8ff; --water-upper:#5fb0ff; --water-mid:#1a86ff;
+    --water-deep:#0a4db8; --water-sand:#f0e7d2;
+    --teal:#16d6b4; --coral-red:#ff5a45; --yellow:#ffce2b; --beige:#f5efe1;
+    --ink:#06243f; --ink-soft:#0c3a63;
+    --text-on-water:#eef6ff; --text-on-water-dim:rgba(238,246,255,0.74);
+    --stroke-line:#07304f;
+    --shell-bg:rgba(9,42,80,0.60); --shell-bg-strong:rgba(9,42,80,0.86);
+    --shell-border:rgba(190,225,255,0.50);
+    --shell-edge:inset 0 1px 0 rgba(200,230,255,0.45);
+    --shell-shadow:0 6px 20px rgba(4,22,48,0.38);
+    --sem-ok:#16d6b4; --sem-warn:#ffce2b; --sem-stop:#ff5a45;
+    --font-ui:"Tahoma","Verdana","Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+    --font-num:"Tahoma","Verdana","Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+    --space-2xs:4px; --space-xs:8px; --space-sm:12px; --space-md:16px;
+    --space-lg:24px; --space-xl:32px;
+    --radius-xs:3px; --radius-sm:5px; --radius-md:8px; --radius-lg:10px;
+    --radius-xl:14px; --radius-pill:999px;
+    --grain:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' seed='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='linear' slope='0.55'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+  }
+
   * { box-sizing: border-box; }
   html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
   body {
@@ -22,6 +49,8 @@
     padding: 0;
   }
 
+  /* 水缸本体沿用 V0.2 的治愈水色（dominik 2026-09-25 定：水缸/鱼/沙/草/背景
+     全部保持旧版，v3 令牌只用于外壳 UI —— 顶栏与商店抽屉）。 */
   .tank {
     position: relative;
     width: 100%;
@@ -45,10 +74,28 @@
       linear-gradient(to bottom, transparent 65%, rgba(83,142,130,.10));
   }
 
+  /* ===== 环境气泡（原型 ui-prototype-v10.html 保留项）=====
+     纯装饰：不进状态、不参与存档，只是让水看起来是活的。
+     z-index 4 → 从水草(3)之上、鱼(5)之下穿过，不抢戏。 */
+  .bubbles { position: absolute; inset: 0; z-index: 4; overflow: hidden; pointer-events: none; }
+  .bubble {
+    position: absolute; bottom: 10%;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.9), rgba(156,205,255,0.35));
+    border: 1px solid rgba(255,255,255,0.5);
+    animation: bubbleRise 6s linear infinite;
+  }
+  @keyframes bubbleRise {
+    0%   { transform: translateY(0) scale(0.8); opacity: 0; }
+    10%  { opacity: 0.9; }
+    100% { transform: translateY(-90vh) scale(1.1); opacity: 0; }
+  }
+
   /* 升级版海报标题：纯白高对比度 + 立体阴影浮雕感 */
   .poster-title {
     position: absolute;
-    top: 5.5%;
+    /* 顶栏是通栏的（约 52px），标题必须落在它下面，否则会被毛玻璃糊掉一半。 */
+    top: max(64px, 5.5%);
     left: 50%;
     transform: translateX(-50%);
     z-index: 100;
@@ -302,29 +349,29 @@
     50%{transform:translate(-50%,-50%) translateY(-13px) scale(1.045)}
   }
   @media (max-width:520px) {
-    .poster-title{top:4.5%;font-size:clamp(21px,7vw,31px);letter-spacing:.12em;padding-left:.12em}
+    .poster-title{top:max(60px,4.5%);font-size:clamp(21px,7vw,31px);letter-spacing:.12em;padding-left:.12em}
     .timer{width:min(230px,62vw);height:min(230px,62vw)}
   }
 
 
 
-/* 1. 统一控制组包裹容器（定位在鱼缸右顶角） */
+/* 1. 统一控制组包裹容器（通栏顶栏内的右侧；z-index 高于顶栏，所以压在栏上而不是被栏盖住） */
 .audio-controls {
   position: absolute;
-  top: 18px;
-  right: 18px;
-  z-index: 1000;
+  top: 6px;
+  right: 16px;
+  z-index: 1001;
   display: flex;
   align-items: center;
   gap: 0;
-  height: 52px;
-  padding: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.58);
+  height: 40px;
+  padding: 4px;
+  border: 1px solid var(--shell-border);
   border-radius: 999px;
-  background: rgba(30, 80, 95, 0.35);
+  background: var(--shell-bg);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shell-edge), var(--shell-shadow);
 }
 
 .audio-controls button {
@@ -340,19 +387,19 @@
 }
 
 .audio-toggle {
-  width: 54px;
-  height: 40px;
-  padding: 0;
-  border-radius: 999px;
-  font-size: 21px;
-}
-
-.audio-settings-toggle {
-  width: 42px;
-  height: 40px;
+  width: 48px;
+  height: 32px;
   padding: 0;
   border-radius: 999px;
   font-size: 19px;
+}
+
+.audio-settings-toggle {
+  width: 38px;
+  height: 32px;
+  padding: 0;
+  border-radius: 999px;
+  font-size: 17px;
   letter-spacing: 2px;
 }
 
@@ -408,45 +455,97 @@
 
 /* 3. 移动端响应式尺寸调整 */
 @media (max-width: 600px) {
-  .audio-controls { top: 12px; right: 12px; height: 48px; padding: 5px; }
-  .audio-toggle { width: 50px; height: 38px; font-size: 20px; }
-  .audio-settings-toggle { width: 40px; height: 38px; font-size: 17px; }
+  .audio-controls { top: 6px; right: 12px; height: 40px; padding: 4px; }
+  .audio-toggle { width: 44px; height: 32px; font-size: 18px; }
+  .audio-settings-toggle { width: 36px; height: 32px; font-size: 16px; }
   .audio-settings { top: calc(100% + 6px); right: 0; width: min(270px, calc(100vw - 24px)); }
 }
 
 
 
 /* ===== v0.2 商店与数据系统 ===== */
-.v02-topbar{position:absolute;left:18px;top:18px;z-index:1000;display:flex;align-items:center;gap:10px;}
+/* 顶栏：按原型 .topbar 的通栏壳（浮水半透深蓝 + 底部一线）。
+   左：泡泡数 + 装点入口；右侧空间留给音频控件（它是独立元素，定位到栏内）。 */
+.v02-topbar{
+  position:fixed;left:0;right:0;top:0;z-index:1000;
+  display:flex;align-items:center;justify-content:flex-start;gap:10px;
+  min-height:52px;padding:8px 16px;padding-right:132px;
+  background:var(--shell-bg);border-bottom:1px solid var(--shell-border);
+  box-shadow:var(--shell-edge);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  font-family:var(--font-ui);color:var(--text-on-water);
+}
 /* 专注聚合状态条：只读展示「今日 / 累计」，不暴露逐条明细。挂在右上角下方，最小侵入。 */
-.v02-focus{position:absolute;right:18px;top:18px;z-index:1000;display:flex;flex-direction:column;align-items:flex-end;gap:3px;padding:8px 13px;border:1px solid rgba(255,255,255,.5);background:rgba(30,80,95,.32);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 3px 12px rgba(0,0,0,.12);border-radius:14px;color:#fff;font-family:inherit;line-height:1.4;pointer-events:none;}
+.v02-focus{position:absolute;right:18px;top:62px;z-index:1000;display:flex;flex-direction:column;align-items:flex-end;gap:3px;padding:8px 13px;border:1px solid var(--shell-border);background:var(--shell-bg);box-shadow:var(--shell-edge),var(--shell-shadow);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-radius:var(--radius-lg);color:var(--text-on-water);font-family:var(--font-ui);line-height:1.4;pointer-events:none;}
 .v02-focus[hidden]{display:none;}
 .v02-focus .focus-today{font-size:12px;letter-spacing:.04em;font-weight:700;}
 .v02-focus .focus-total{font-size:11px;letter-spacing:.04em;opacity:.85;}
-.v02-bubbles,.v02-shop-btn{border:1px solid rgba(255,255,255,.58);background:rgba(30,80,95,.35);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 3px 12px rgba(0,0,0,.12);color:#fff;border-radius:999px;font-family:inherit;}
-.v02-bubbles{padding:9px 14px;font-size:13px;letter-spacing:.05em;}
-.v02-shop-btn{padding:10px 16px;cursor:pointer;font-size:13px;}
-.v02-shop-btn:hover{background:rgba(255,255,255,.16)}
-.v02-shop{position:fixed;inset:0;z-index:2000;display:none;align-items:center;justify-content:center;background:rgba(22,46,50,.28);padding:24px;}
-.v02-shop.show{display:flex;}
-  .v02-shop-card{width:min(900px,calc(100vw - 32px));height:min(760px,calc(100vh - 48px));overflow:hidden;display:flex;flex-direction:column;background:rgba(246,251,251,.96);border:1px solid rgba(255,255,255,.95);border-radius:26px;box-shadow:0 18px 60px rgba(20,50,55,.24);padding:0;}
-  .v02-shop-header{flex:0 0 auto;padding:22px 22px 0;background:rgba(246,251,251,.98);position:relative;z-index:3;}
-  .v02-shop-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;}
-.v02-shop-title{font-size:20px;font-weight:800;color:#24353a;letter-spacing:.08em;}
-.v02-shop-sub{font-size:12px;color:#6a8185;margin-top:4px;}
-.v02-close{border:0;background:#e1eeee;color:#40595e;border-radius:999px;width:36px;height:36px;cursor:pointer;font-size:18px;}
-.v02-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 15px;padding-bottom:2px;}
-.v02-tab{border:1px solid #d4e2e2;background:#fff;color:#587174;border-radius:999px;padding:7px 13px;font:700 12px inherit;cursor:pointer;transition:.15s ease;}
-.v02-tab:hover{background:#f2f7f6}
-.v02-tab.active{background:#5a8588;color:#fff;border-color:#5a8588;box-shadow:0 3px 9px rgba(60,100,102,.18);}
-  .v02-shop-content{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding:0 22px 18px;scrollbar-width:thin;scrollbar-color:rgba(77,138,140,.55) rgba(223,238,238,.7);}
+.v02-bubbles,.v02-shop-btn{
+  border:1px solid var(--shell-border);background:rgba(10,132,255,0.30);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  box-shadow:var(--shell-edge);color:var(--text-on-water);
+  border-radius:var(--radius-pill);font-family:var(--font-ui);
+}
+.v02-bubbles{
+  padding:9px 14px;font-size:13px;letter-spacing:.05em;font-weight:700;
+  font-variant-numeric:tabular-nums;
+}
+.v02-shop-btn{padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;letter-spacing:.04em;}
+.v02-shop-btn:hover{background:rgba(10,132,255,0.50)}
+.v02-shop-btn:active{transform:scale(0.97)}
+/* 装点改成原型 .drawer：右侧滑出抽屉（深蓝浮水壳 + 左边界线 + 内颗粒）。
+   只换壳，不碰结构：id / class / 开合方式（#shopModal 加 .show）全部原样保留。
+   关闭态不能用 display:none —— 那样 transform 过渡不会跑；改成移出屏幕 +
+   visibility:hidden，抽屉收起时屏幕右缘依然是鱼缸，点得到。 */
+.v02-shop{
+  position:fixed;top:0;right:0;bottom:0;left:auto;z-index:2000;
+  width:min(440px,92vw);
+  display:flex;flex-direction:column;
+  overflow:hidden;
+  background:var(--shell-bg-strong);
+  border-left:1px solid var(--shell-border);
+  box-shadow:var(--shell-shadow),var(--shell-edge);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  transform:translateX(100%);
+  visibility:hidden;
+  transition:transform .28s cubic-bezier(.16,1,.3,1),visibility 0s linear .28s;
+}
+.v02-shop.show{
+  transform:translateX(0);visibility:visible;
+  transition:transform .28s cubic-bezier(.16,1,.3,1),visibility 0s linear 0s;
+}
+/* 抽屉内轻颗粒（原型 .drawer::after） */
+.v02-shop::after{content:"";position:absolute;inset:0;pointer-events:none;background-image:var(--grain);background-size:160px 160px;mix-blend-mode:overlay;opacity:.22;}
+  .v02-shop-card{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;background:transparent;padding:0;}
+  .v02-shop-header{flex:0 0 auto;padding:var(--space-md) var(--space-lg);background:transparent;border-bottom:1px solid var(--shell-border);position:relative;z-index:1;}
+  .v02-shop-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:var(--space-sm);}
+.v02-shop-title{font-family:var(--font-ui);font-size:20px;font-weight:600;color:var(--text-on-water);letter-spacing:.06em;}
+.v02-shop-sub{font-size:12px;color:var(--text-on-water-dim);margin-top:4px;line-height:1.5;}
+.v02-close{
+  flex:0 0 auto;width:32px;height:32px;border:1px solid var(--shell-border);border-radius:var(--radius-sm);
+  background:rgba(255,255,255,0.10);color:var(--text-on-water);font-size:18px;line-height:1;
+  cursor:pointer;box-shadow:var(--shell-edge);
+}
+.v02-close:hover{background:rgba(255,255,255,0.22)}
+.v02-tabs{display:flex;gap:6px;flex-wrap:wrap;}
+.v02-tab{
+  font-family:var(--font-ui);font-size:11px;font-weight:700;letter-spacing:.06em;
+  padding:6px 11px;border-radius:var(--radius-xs);
+  background:transparent;color:var(--text-on-water-dim);border:1px solid transparent;cursor:pointer;
+  transition:background .15s ease;
+}
+.v02-tab:hover{background:rgba(255,255,255,0.10)}
+.v02-tab.active{background:var(--screen-blue-500);color:#fff;border-color:var(--shell-border);}
+  .v02-shop-content{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding:var(--space-md) var(--space-lg);position:relative;z-index:1;scrollbar-width:thin;scrollbar-color:rgba(190,225,255,.45) transparent;}
   .v02-shop-content::-webkit-scrollbar{width:8px;}
-  .v02-shop-content::-webkit-scrollbar-track{background:rgba(223,238,238,.7);border-radius:999px;margin:4px 0;}
-  .v02-shop-content::-webkit-scrollbar-thumb{background:rgba(77,138,140,.55);border:2px solid rgba(223,238,238,.7);border-radius:999px;}
-  .v02-shop-content::-webkit-scrollbar-thumb:hover{background:rgba(77,138,140,.78);}
-  .v02-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
-.v02-item{border:1px solid #d9e8e9;border-radius:18px;padding:12px;background:#fff;}
-.v02-preview{height:120px;border-radius:13px;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;overflow:hidden;background:linear-gradient(135deg,#a9dfe8,#d9f2ef);}
+  .v02-shop-content::-webkit-scrollbar-track{background:transparent;border-radius:999px;margin:4px 0;}
+  .v02-shop-content::-webkit-scrollbar-thumb{background:rgba(190,225,255,.35);border:2px solid transparent;background-clip:padding-box;border-radius:999px;}
+  .v02-shop-content::-webkit-scrollbar-thumb:hover{background:rgba(190,225,255,.55);background-clip:padding-box;}
+  /* 列宽跟抽屉宽度走，不跟视口走：抽屉恒为 440px，用视口断点会一直落到单列。 */
+  .v02-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:var(--space-sm);}
+.v02-item{border:1px solid var(--shell-border);border-radius:var(--radius-md);padding:var(--space-sm);background:rgba(10,132,255,0.14);display:flex;flex-direction:column;gap:6px;transition:border-color .15s ease,transform .1s ease,background .15s ease;}
+.v02-item:hover{transform:translateY(-2px);background:rgba(10,132,255,0.22)}
+.v02-preview{height:96px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;overflow:hidden;background:linear-gradient(135deg,#a9dfe8,#d9f2ef);}
 .v02-preview:hover{filter:brightness(1.03);box-shadow:inset 0 0 0 2px rgba(77,138,140,.25)}
 .v02-preview-fish{font-size:48px;filter:drop-shadow(0 5px 4px rgba(0,0,0,.12));}
 /* object-fit 用 contain：完整显示整张图、绝不裁切（正方形图上下被裁的元凶就是 cover）。
@@ -465,7 +564,7 @@
 .v02-preview-sand{width:100%;height:100%;background:linear-gradient(to bottom,#9dd4dc 0 70%,#dfcb92 71%)}
 .v02-preview-sand.dark{background:linear-gradient(to bottom,#9dd4dc 0 70%,#b8a477 71%)}
 .v02-preview-sound{font-size:42px}
-.v02-item-name{margin-top:10px;font-weight:700;color:#2d464b}.v02-item-meta{margin-top:4px;font-size:11px;color:#71878b;min-height:28px}
+.v02-item-name{margin-top:2px;font-weight:700;color:var(--text-on-water)}.v02-item-meta{margin-top:4px;font-size:11px;color:var(--text-on-water-dim);min-height:28px}
 .v02-item-name{
   display:flex;
   align-items:center;
@@ -489,21 +588,23 @@
   display:block;
   margin-top:5px;
   line-height:1.45;
-  color:#68777a;
+  color:var(--text-on-water-dim);
   font-size:12px;
 }
-.v02-item-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px}.v02-price{font-size:12px;color:#537075}.v02-buy{border:0;border-radius:12px;padding:8px 12px;background:#5a8588;color:#fff;cursor:pointer;font-family:inherit}.v02-buy:disabled{background:#c6d5d7;color:#718184;cursor:not-allowed}.v02-owned{font-size:11px;color:#5a8588;white-space:nowrap}
-.v02-dress,.v02-quantity button{border:0;border-radius:10px;padding:7px 11px;background:#5a8588;color:#fff;cursor:pointer;font:700 12px inherit}.v02-dress:disabled{background:#c6d5d7;color:#718184;cursor:not-allowed}.v02-quantity{display:flex;align-items:center;gap:8px}.v02-quantity button{width:28px;height:28px;padding:0;font-size:17px;line-height:1}.v02-quantity span{min-width:16px;text-align:center;font-weight:700;color:#40595e}
-.v02-footer{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:16px;padding-top:14px;border-top:1px solid #dfeaec}.v02-save{border:0;border-radius:13px;padding:10px 18px;background:#4d8a8c;color:#fff;cursor:pointer;font-family:inherit}.v02-cancel{border:0;border-radius:13px;padding:10px 18px;background:#e1eeee;color:#40595e;cursor:pointer;font-family:inherit}.v02-message{margin-right:auto;font-size:12px;color:#667d81;min-height:18px}
-.v02-settlement{margin-right:auto;min-height:18px;font-size:12px;color:#537075;font-weight:700}
+.v02-item-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:4px}.v02-price{font-family:var(--font-num);font-size:12px;color:var(--yellow);font-variant-numeric:tabular-nums}.v02-buy{border:0;border-radius:var(--radius-sm);padding:8px 12px;background:var(--screen-blue-500);color:#fff;cursor:pointer;font-family:inherit}.v02-buy:disabled{background:rgba(190,225,255,.16);color:var(--text-on-water-dim);cursor:not-allowed}.v02-owned{font-size:11px;color:var(--teal);white-space:nowrap}
+.v02-dress,.v02-quantity button{border:0;border-radius:var(--radius-sm);padding:7px 11px;background:var(--screen-blue-500);color:#fff;cursor:pointer;font:700 12px inherit}.v02-dress:disabled{background:rgba(190,225,255,.16);color:var(--text-on-water-dim);cursor:not-allowed}.v02-quantity{display:flex;align-items:center;gap:8px}.v02-quantity button{width:28px;height:28px;padding:0;font-size:17px;line-height:1}.v02-quantity span{min-width:16px;text-align:center;font-weight:700;color:var(--text-on-water)}
+.v02-footer{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex:0 0 auto;padding:var(--space-sm) var(--space-lg);border-top:1px solid var(--shell-border);position:relative;z-index:1}.v02-save{border:0;border-radius:var(--radius-sm);padding:9px 16px;background:var(--screen-blue-500);color:#fff;cursor:pointer;font-family:var(--font-ui);font-weight:600;white-space:nowrap;flex-shrink:0}.v02-cancel{border:1px solid var(--shell-border);border-radius:var(--radius-sm);padding:9px 16px;background:transparent;color:var(--text-on-water-dim);cursor:pointer;font-family:var(--font-ui);white-space:nowrap;flex-shrink:0}.v02-message{margin-right:auto;font-size:12px;color:var(--text-on-water-dim);min-height:18px}
+.v02-settlement{margin-right:auto;min-height:18px;font-size:12px;color:var(--text-on-water-dim);font-family:var(--font-num);font-variant-numeric:tabular-nums}
+.v02-settlement b{color:var(--teal);font-weight:700}
 /* 泡泡不够：当场把差额写出来，别等玩家点了"保存鱼缸"才用一张小票告诉他。 */
-.v02-settlement.short{color:#b4553a}
+.v02-settlement.short{color:var(--coral-red)}
 /* 这一分类没有商品时的空态（后台清空了该类，或配置没拉到）。 */
-.v02-empty{grid-column:1/-1;padding:34px 18px;text-align:center;font-size:13px;line-height:1.8;color:#5f7b80;background:rgba(246,251,251,.72);border-radius:16px;border:1px dashed #b9d3d6}
-.v02-item-tip{font-size:11px;color:#b4553a;margin-top:6px}
-.v02-quantity button:disabled{background:#c6d5d7;color:#718184;cursor:not-allowed}
-@media(max-width:700px){.v02-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.v02-shop{padding:12px}.v02-shop-header{padding:16px 16px 0}.v02-shop-content{padding-left:16px;padding-right:16px}.v02-preview{height:100px}}
-@media(max-width:480px){.v02-grid{grid-template-columns:1fr}.v02-topbar{left:12px;top:12px}.v02-bubbles{display:none}.v02-shop-btn{padding:9px 13px}}
+.v02-empty{grid-column:1/-1;padding:34px 18px;text-align:center;font-size:13px;line-height:1.8;color:var(--text-on-water-dim);background:rgba(10,132,255,0.10);border-radius:var(--radius-md);border:1px dashed var(--shell-border)}
+.v02-item-tip{font-size:11px;color:var(--coral-red);margin-top:6px}
+.v02-quantity button:disabled{background:rgba(190,225,255,.16);color:var(--text-on-water-dim);cursor:not-allowed}
+/* 抽屉宽度恒定（min(440px,92vw)），窄屏靠 92vw 收缩即可，不再按视口砍列数。 */
+@media(max-width:480px){.v02-preview{height:88px}}
+@media(max-width:480px){.v02-bubbles{display:none}.v02-shop-btn{padding:9px 13px}}
 
 /* ===== 商店固定操作栏 ===== */
 #shopModal .v02-shop-body{
@@ -623,19 +724,18 @@
 
 /* ===== 商店底部操作栏固定 ===== */
 #shopModal .v02-shop-card{position:relative}
-#shopModal .v02-grid{padding-bottom:92px}
+/* 底部操作栏是抽屉 flex 列的固定尾（不在滚动区里），不需要额外留出被遮的高度。 */
+#shopModal .v02-grid{padding-bottom:0}
 #shopModal .v02-footer{
   position:relative;
   flex:0 0 auto;
-  z-index:200;
+  z-index:2;
   margin-top:0;
-  padding:13px 22px 14px;
-  background:rgba(255,253,248,.97);
-  box-shadow:0 -8px 18px rgba(40,70,72,.08);
+  padding:var(--space-sm) var(--space-lg);
+  background:rgba(9,42,80,0.92);
+  box-shadow:0 -8px 18px rgba(4,22,48,.28);
   backdrop-filter:blur(7px);
-}
-@media(max-width:700px){
-  #shopModal .v02-footer{padding-left:16px;padding-right:16px;}
+  -webkit-backdrop-filter:blur(7px);
 }
 
 
@@ -674,6 +774,13 @@
   transform-origin:bottom;
   border-radius:90% 10% 90% 10%;
 }
+/* 后台上传的装饰件图片：按上传顺序叠层，后面的盖在前面的上面（前景压后景）。 */
+.aq-plant-layer{
+  position:absolute;
+  inset:0;
+  display:block;
+  background-repeat:no-repeat;
+}
 .aq-plant-green i:nth-child(1){left:17px;width:9px;height:62px;background:#477c5c;transform:rotate(-18deg)}
 .aq-plant-green i:nth-child(2){left:31px;width:10px;height:77px;background:#6a986c;transform:rotate(2deg)}
 .aq-plant-green i:nth-child(3){left:45px;width:9px;height:58px;background:#3d7055;transform:rotate(18deg)}
@@ -698,7 +805,11 @@
   border:1px solid rgba(70,105,108,.35);background:rgba(255,255,255,.92);
   color:#48686b;border-radius:10px;padding:8px 11px;font:700 11px/1 inherit;
   cursor:pointer;box-shadow:0 5px 16px rgba(25,55,60,.16);
+  transition:right .28s cubic-bezier(.16,1,.3,1);
 }
+/* 商店抽屉打开时把 DEV 按钮挤到抽屉左侧，避免挡"保存鱼缸"。
+   DOM 顺序：#shopModal 在 .dev-toggle 之前，是同一层兄弟，~ 选择器可用。 */
+.v02-shop.show ~ .dev-toggle{right:calc(min(440px,92vw) + 18px)}
 .dev-panel{
   position:fixed;right:18px;bottom:58px;z-index:3501;width:280px;
   background:#fffdf8;color:#34484b;border:1px solid rgba(70,105,108,.25);
@@ -865,13 +976,13 @@
 .guide-card.above{bottom:auto;top:22px}
 .guide-dots{display:flex;gap:6px;justify-content:center;margin-bottom:11px}
 .guide-dots i{width:6px;height:6px;border-radius:50%;background:#bdd6d9}
-.guide-dots i.on{background:#4d8a8c}
+.guide-dots i.on{background:var(--screen-blue-500)}
 .guide-title{font-size:15px;font-weight:700;margin-bottom:5px}
 .guide-text{font-size:12.5px;line-height:1.7;color:#4a666b}
 .guide-actions{display:flex;gap:10px;justify-content:center;margin-top:14px}
 .guide-actions button{border:0;border-radius:12px;padding:9px 20px;font-size:14px;cursor:pointer}
 .guide-skip{background:#e4eeef;color:#48646a}
-.guide-next{background:#4d8a8c;color:#fff;box-shadow:0 4px 10px rgba(77,138,140,.3)}
+.guide-next{background:var(--screen-blue-500);color:#fff;box-shadow:0 4px 10px rgba(10,132,255,.3)}
 
 /* ===== 同步码保存引导（建号后只弹一次，R6 风险缓解）===== */
 .sync-guide{position:fixed;inset:0;z-index:5500;display:flex;align-items:center;justify-content:center;background:rgba(12,34,38,.4)}
@@ -881,7 +992,7 @@
 .sync-guide-text{font-size:13px;line-height:1.75;color:#4a666b;margin:0 0 18px;text-align:left}
 .sync-guide-actions{display:flex;gap:10px;justify-content:center}
 .sync-guide-actions button{border:0;border-radius:12px;padding:10px 18px;font-size:14px;cursor:pointer}
-.sync-guide-go{background:#4d8a8c;color:#fff;box-shadow:0 4px 10px rgba(77,138,140,.3)}
+.sync-guide-go{background:var(--screen-blue-500);color:#fff;box-shadow:0 4px 10px rgba(10,132,255,.3)}
 .sync-guide-skip{background:#e4eeef;color:#48646a}
 
 </style>
@@ -909,6 +1020,7 @@
 <div class="app">
 <main class="tank" id="tank">
   <div class="water-glow"></div>
+  <div class="bubbles" id="bubbles" aria-hidden="true"></div>
   <div class="v02-topbar">
     <div class="v02-bubbles" id="bubbleDisplay">🫧 0</div>
     <button type="button" class="v02-shop-btn" id="shopOpenBtn">装点鱼缸</button>
@@ -1384,8 +1496,40 @@
   }
   // 商品 id 对应的视觉样式字段：背景/沙子用 css，鱼/水草用 class。
   const VISUAL_FIELD_BY_CATEGORY = { fish:"class", decorations:"class", backgrounds:"css", sands:"css" };
-  // 渲染不再按 id 写死：优先用后台商品自带的 visual，其次查内置样式表，最后用分类默认值。
-  // 这样后台新增的资源只要带上 visual 就能正常显示，不用改渲染代码。
+  // 商品身上所有可用的图片路径（按 resourcePath 顺序；没有才退回预览图）。
+  // resourcePath 的元素可能是字符串（旧格式）或 {slot,path}（鱼的插槽格式），两种都要吃。
+  // 装饰件会用到多张：后台表单里第 1 张是后景、第 2 张是前景。
+  function itemImagePaths(item){
+    if(!item) return [];
+    // 先过滤再决定用哪一组：资源位里可能留着早期上传的本地文件名（"xxx.jpg"），
+    // 那是无效值 —— 不能因为它"有值"就把真正可用的预览图挡在后面。
+    const raw = itemResourcePaths(item).map(entry => {
+      if(typeof entry === "string") return entry.trim();
+      return entry && entry.path ? String(entry.path).trim() : "";
+    }).filter(path => path && IMAGE_SOURCE_RE.test(path));
+    if(raw.length) return raw;
+    const preview = typeof item.previewImage === "string" ? item.previewImage.trim() : "";
+    return preview && IMAGE_SOURCE_RE.test(preview) ? [preview] : [];
+  }
+  function itemImagePath(item){
+    return itemImagePaths(item)[0] || "";
+  }
+  // 只认「后台刚上传的图」—— 绝对 http(s) 链接 + 图片扩展名。三道过滤各有血的教训：
+  //   1. 必须是图片扩展名：背景音商品也走同一个后台页、把 mp3 挂到 resourcePath，
+  //      不加过滤就会把 mp3 当背景图铺上去，鱼缸一片空白。
+  //   2. 必须是绝对链接：种子数据里还留着 assets/backgrounds/background001.webp 这类
+  //      相对路径，线上实测全 404 —— 拿它当背景会把好好的内置渐变换成一片空白。
+  //      后台上传走云存储，返回的都是带签名的 https 链接，不会误伤。
+  const IMAGE_SOURCE_RE = /^https?:\/\/.+\.(png|jpe?g|gif|webp|avif|svg|bmp)(?:[?#].*)?$/i;
+  // 路径转成 CSS background。背景/底砂要铺满（cover），装饰件要完整不裁切（contain，贴底）。
+  function cssFromImagePath(path, fit){
+    const src = String(path || "").trim();
+    if(!src || !IMAGE_SOURCE_RE.test(src)) return "";
+    const size = fit === "contain" ? "center bottom / contain" : "center / cover";
+    return `url("${src.replace(/["\\]/g, "")}") ${size} no-repeat`;
+  }
+  // 渲染不再按 id 写死：优先用后台商品自带的 visual，其次用后台上传的图片，最后查内置样式表。
+  // 这样后台新增的资源只要带上 visual 或上传图片就能正常显示，不用改渲染代码。
   function visualForItem(category, id){
     const fallback = (DEFAULT_DATA.defaults && DEFAULT_DATA.defaults[category]) || {};
     const table = (DEFAULT_DATA.visuals && DEFAULT_DATA.visuals[category]) || {};
@@ -1393,7 +1537,17 @@
     const item = currentShopItems().find(candidate => candidate.category === category && (candidate.id === id || candidate.fishid === id));
     const override = item && typeof item.visual === "string" ? item.visual.trim() : "";
     const field = VISUAL_FIELD_BY_CATEGORY[category];
+    // 装饰件按 class 渲染，图片走独立的 images 列表（可多层：后景 + 前景）。
+    const fit = field === "css" ? "cover" : "contain";
+    visual.images = itemImagePaths(item).map(path => cssFromImagePath(path, fit)).filter(Boolean);
+    visual.image = visual.images[0] || "";
     if(override && field) visual[field] = override;
+    else if(field === "css" && visual.image){
+      // 背景 / 底砂：后台上传了图片就用图，没图才退回内置渐变。
+      // 以前这里只认 visual —— 后台根本没有 visual 的录入入口，
+      // 于是上传的图写进了 resourcePath，鱼缸却永远还是内置渐变。
+      visual[field] = visual.image;
+    }
     return visual;
   }
   // ===== Tags（F9）=====
@@ -1854,8 +2008,15 @@
       tank.appendChild(aqPlant);
     }
     const plantId=data.decoration;
-    aqPlant.className="aq-plant "+visualForItem("decorations", plantId).class;
-    aqPlant.innerHTML="<i></i><i></i><i></i>";
+    const deco=visualForItem("decorations", plantId);
+    if(deco.images && deco.images.length){
+      // 后台上传了图：按上传顺序叠层（第 1 张后景、第 2 张前景），不再画 CSS 水草。
+      aqPlant.className="aq-plant";
+      aqPlant.innerHTML=deco.images.map(src=>`<span class="aq-plant-layer" style="background:${src}"></span>`).join("");
+    }else{
+      aqPlant.className="aq-plant "+(deco.class||"");
+      aqPlant.innerHTML="<i></i><i></i><i></i>";
+    }
     aqPlant.style.display=plantId?"block":"none";
     if(typeof rebuildFishFromData==="function") rebuildFishFromData(data);
   }
@@ -2474,8 +2635,12 @@
       // loading="lazy" 是必须的：商店是 display:none 的弹窗，但 display:none 里的 <img>
       // 浏览器照样会下载 —— 后台一上传预览图，玩家每次刷新页面都会在后台把它拉一遍。
       // 单张实测 318KB，商品全配满就是好几 MB，首屏被它拖慢。lazy 之后商店没打开就不下载。
-      if(item.previewImage){
-        preview+=`<img class="v02-preview-img" src="${escapeHtml(item.previewImage)}" alt="${escapeHtml(item.name)}" loading="lazy" decoding="async" onerror="this.remove()">`;
+      // 后台只上传了资源图、没单独填预览图时，商店卡片以前是一片空白 —— 用那张资源图顶上。
+      // 鱼不套用：鱼的 resourcePath 是按插槽拼的（body/tail/fin/shadow），
+      // 抽第一张可能只是条尾巴，卡片上显示反而不如 emoji 清楚。
+      const previewSrc=item.previewImage||(item.category==="fish"?"":visualForItem(item.category,item.id).image);
+      if(previewSrc){
+        preview+=`<img class="v02-preview-img" src="${escapeHtml(previewSrc)}" alt="${escapeHtml(item.name)}" loading="lazy" decoding="async" onerror="this.remove()">`;
       }
       if(item.category==="fish"){
         preview+=`<div class="v02-preview-fish">${visualForItem("fish", item.id).emoji}</div>`;
@@ -3510,6 +3675,25 @@ const elemToRemove = nearest.el;
 
   renderTime();
   requestAnimationFrame(animate);
+
+  // 环境气泡：原型里保留下来的装饰。纯 CSS 动画，生成后不再管它，
+  // 也不写进存档 —— 刷新页面重新随机一批即可。
+  (function spawnAmbientBubbles(){
+    const wrap = document.getElementById("bubbles");
+    if(!wrap) return;
+    for(let i=0;i<14;i++){
+      const b = document.createElement("div");
+      b.className = "bubble";
+      b.style.left = (Math.random() * 100) + "%";
+      b.style.animationDuration = (5 + Math.random() * 4) + "s";
+      // 负延迟：让气泡一进页面就分散在上升途中的不同高度，而不是齐刷刷从底部起步。
+      b.style.animationDelay = (-Math.random() * 6) + "s";
+      const size = 5 + Math.random() * 7;
+      b.style.width = size + "px";
+      b.style.height = size + "px";
+      wrap.appendChild(b);
+    }
+  })();
 
   const audioToggle = document.getElementById("audioToggle");
   if(audioToggle){
