@@ -65,6 +65,13 @@ export function normalizeNickname(input) {
 // focus_start / focus_complete / purchase 由服务端在权威时机直接落库，不接受客户端代报。
 export const TRACKING_EVENTS = ["open", "focus_start", "focus_complete", "purchase"];
 
+// 备份文件格式版本。`GET /api/admin/saves/export` 与本机备份脚本都读它 ——
+// 以后改字段结构就升这个号，恢复脚本据此判断能不能吃下手上这份备份。
+export const ARCHIVE_VERSION = 1;
+// 导出用户档案时的白名单列。sync_code_hash 是凭证类数据，**不进备份文件**：
+// 备份会被下载到本机磁盘、可能被转发，多带一列凭证就多一处泄漏面。
+export const ARCHIVE_USER_FIELDS = ["userId", "nickname", "cohort", "isSupporter", "supporterNote", "createdAt", "lastSeenAt"];
+
 // 库存分类键。与前端 ensureInventory 里的五个分类保持一致。
 export const INVENTORY_CATEGORIES = ["fish", "decorations", "backgrounds", "sands", "sounds"];
 // 鱼缸里「只能选中一件」的槽位。每个槽位的值必须已在对应分类的库存里。
@@ -442,6 +449,24 @@ function aggregateFocusStats(rows, nowFn = Date.now) {
 }
 
 // ===== 内存实现（本地开发 / 单测）=====
+// 存档摘要：导出/恢复时用于展示「改动前后」的对比。
+// 只取对人有意义的几个数 —— 差异报告是给人看的，不是给人 debug 的。
+function summarizeSave(data) {
+  const player = isPlainObject(data) && isPlainObject(data.PlayerData) ? data.PlayerData : {};
+  const aquarium = isPlainObject(data) && isPlainObject(data.AquariumData) ? data.AquariumData : {};
+  const inventory = isPlainObject(player.inventory) ? player.inventory : {};
+  const ownedIn = category => Object.values(isPlainObject(inventory[category]) ? inventory[category] : {})
+    .reduce((sum, n) => sum + (Number(n) || 0), 0);
+  return {
+    bubbles: Number(player.bubbles) || 0,
+    fishInTank: Array.isArray(aquarium.fish) ? aquarium.fish.length : 0,
+    ownedFish: ownedIn("fish"),
+    background: String(aquarium.background || ""),
+    sand: String(aquarium.sand || ""),
+    decoration: String(aquarium.decoration || "")
+  };
+}
+
 export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
   const users = new Map();
   const saves = new Map();
@@ -573,6 +598,77 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
           total: rows.length
         };
       });
+    },
+
+    // 全量存档导出（备份用）。一次给出 users + saves 两份清单，由路由层打包成 JSON。
+    // 为什么需要它：个人版没有数据回档，存档在库里被误删 / 实例故障就永久没了 ——
+    // 这份导出是唯一能把存档搬出数据库实例的通道。
+    async exportArchive() {
+      return {
+        users: [...users.values()].map(u => ({
+          userId: u.user_id,
+          nickname: u.nickname || "",
+          cohort: u.cohort || "",
+          isSupporter: Boolean(u.is_supporter),
+          supporterNote: u.supporter_note || "",
+          createdAt: Number(u.created_at) || 0,
+          lastSeenAt: Number(u.last_seen_at) || 0
+        })),
+        saves: [...saves.values()].map(s => ({
+          userId: s.user_id,
+          saveVersion: s.save_version || "",
+          clientTs: Number(s.client_ts) || 0,
+          updatedAt: Number(s.updated_at) || 0,
+          data: JSON.parse(JSON.stringify(s.data))
+        }))
+      };
+    },
+
+    // 从备份恢复存档。**刻意不走 mergeSaveForWrite** —— 备份里就是完整存档，
+    // 恢复的语义是「把库里的状态退回那一刻」；合并会截断泡泡、忽略客户端 inventory，
+    // 等于把要恢复的东西又改一遍。
+    // updated_at 一律写**当前时间**：玩家端 syncCloudSave 用 `remoteUpdatedAt > lastPushedAt`
+    // 决定该不该采用云端，写回旧时间戳的话玩家下次打开会用本地存档覆盖回去，恢复白做。
+    async restoreSaves(entries, { dryRun = true, at = now() } = {}) {
+      const items = [];
+      const rollback = [];
+      for (const entry of entries) {
+        const userId = String((entry && entry.userId) || "");
+        if (!userId) { items.push({ userId: "", action: "skipped", reason: "缺 userId" }); continue; }
+        if (!isPlainObject(entry.data)) { items.push({ userId, action: "skipped", reason: "data 不是对象（备份可能损坏）" }); continue; }
+        const existing = saves.get(userId);
+        const before = existing ? JSON.parse(JSON.stringify(existing.data)) : null;
+        const after = JSON.parse(JSON.stringify(entry.data));
+        if (before && JSON.stringify(before) === JSON.stringify(after)) {
+          items.push({ userId, action: "unchanged", before: summarizeSave(before), after: summarizeSave(after) });
+          continue;
+        }
+        items.push({
+          userId,
+          action: before ? "update" : "create",
+          before: before ? summarizeSave(before) : null,
+          after: summarizeSave(after)
+        });
+        if (!dryRun) {
+          saves.set(userId, {
+            user_id: userId,
+            data: after,
+            save_version: String(entry.saveVersion || ""),
+            client_ts: Number(entry.clientTs) || 0,
+            updated_at: at
+          });
+          // 回滚快照：只记「被覆盖掉的旧存档」。create 没有旧值，无从回滚。
+          if (before) {
+            rollback.push({
+              userId,
+              saveVersion: existing.save_version || "",
+              clientTs: Number(existing.client_ts) || 0,
+              data: before
+            });
+          }
+        }
+      }
+      return { items, rollback };
     },
 
     // 仅供测试观察
@@ -784,6 +880,84 @@ export function createCloudbasePlayerStore(db, { now = () => Date.now() } = {}) 
           total: rows.length
         };
       });
+    },
+
+    // 全量存档导出（备份用）。两趟查询拿全 users + saves，字段裁剪与列名映射都在 JS 侧
+    // 做（同 listUsers 的取舍：只用线上验证过的 select("*") 面貌，不做列名列表 select）。
+    // 用户量级（几百）下这两次全表扫描的开销可忽略；真要上万再谈分页导出。
+    async exportArchive() {
+      const { data: userRows } = await db.from(TABLE_USERS).select("*").throwOnError();
+      const { data: saveRows } = await db.from(TABLE_SAVES).select("*").throwOnError();
+      return {
+        users: (userRows || []).map(u => ({
+          userId: u.user_id,
+          nickname: u.nickname || "",
+          cohort: u.cohort || "",
+          isSupporter: Boolean(u.is_supporter === true || u.is_supporter === 1),
+          supporterNote: u.supporter_note || "",
+          createdAt: Number(u.created_at) || 0,
+          lastSeenAt: Number(u.last_seen_at) || 0
+        })),
+        saves: (saveRows || []).map(s => {
+          // data 是 JSON 文本。解析成功就给对象（备份文件人能读），解析失败保留原文 ——
+          // 备份的职责是忠实，不是纠正。恢复时按类型分别处理。
+          let data = s.data;
+          if (typeof data === "string") { try { data = JSON.parse(data); } catch { /* 保留原文 */ } }
+          return {
+            userId: s.user_id,
+            saveVersion: s.save_version || "",
+            clientTs: Number(s.client_ts) || 0,
+            updatedAt: Number(s.updated_at) || 0,
+            data
+          };
+        })
+      };
+    },
+
+    // 从备份恢复存档。理由同内存版：不走 mergeSaveForWrite、updated_at 写当前时间。
+    // ⚠️ 用 this.putSave 复用已有的 upsert（含「insert 撞主键就改 update」的竞态兜底），
+    //    所以必须走 store.restoreSaves(...) 调用，别把方法解构出来单独用。
+    async restoreSaves(entries, { dryRun = true, at = now() } = {}) {
+      const items = [];
+      const rollback = [];
+      for (const entry of entries) {
+        const userId = String((entry && entry.userId) || "");
+        if (!userId) { items.push({ userId: "", action: "skipped", reason: "缺 userId" }); continue; }
+        if (!isPlainObject(entry.data)) { items.push({ userId, action: "skipped", reason: "data 不是对象（备份可能损坏）" }); continue; }
+        const existing = await selectOne(TABLE_SAVES, "user_id", userId);
+        let before = null;
+        if (existing) {
+          before = existing.data;
+          if (typeof before === "string") { try { before = JSON.parse(before); } catch { before = null; } }
+        }
+        const after = JSON.parse(JSON.stringify(entry.data));
+        if (before && JSON.stringify(before) === JSON.stringify(after)) {
+          items.push({ userId, action: "unchanged", before: summarizeSave(before), after: summarizeSave(after) });
+          continue;
+        }
+        items.push({
+          userId,
+          action: before ? "update" : "create",
+          before: before ? summarizeSave(before) : null,
+          after: summarizeSave(after)
+        });
+        if (!dryRun) {
+          await this.putSave(userId, after, {
+            saveVersion: String(entry.saveVersion || ""),
+            clientTs: Number(entry.clientTs) || 0,
+            at
+          });
+          if (before) {
+            rollback.push({
+              userId,
+              saveVersion: existing.save_version || "",
+              clientTs: Number(existing.client_ts) || 0,
+              data: before
+            });
+          }
+        }
+      }
+      return { items, rollback };
     }
   };
 }

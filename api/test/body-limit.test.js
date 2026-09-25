@@ -14,6 +14,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+// ⚠️ 必须用测试文件自身的位置推 api/ 目录，**不能用 process.cwd()**：
+//    run-unit.mjs 从仓库根启动，cwd 就是仓库根，子进程会把 "server.js" 解析成
+//    <仓库根>/server.js（不存在）→ 立刻退出，测试只报「服务未在预期时间内启动」。
+const apiDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const PORT = 8123;
 const KEY = "body-limit-test-key-0123456789";
@@ -39,7 +45,7 @@ function chk(name, actual, expected) {
   else fail += 1;
 }
 
-const child = spawn(process.execPath, ["server.js"], { env, cwd: path.join(process.cwd()), stdio: ["ignore", "pipe", "pipe"] });
+const child = spawn(process.execPath, ["server.js"], { env, cwd: apiDir, stdio: ["ignore", "pipe", "pipe"] });
 let log = "";
 child.stdout.on("data", d => (log += d));
 child.stderr.on("data", d => (log += d));

@@ -15,7 +15,7 @@ import { resolveAdminApiKey, checkProductionConfig, warnWeakAdminKey } from "./r
 import { accountStatus, issueTicket, normalizeUid, checkRateLimit, resetAccountCache, resetRateLimit, RATE_LIMIT } from "./account.js";
 import { readRequestUid, issueSessionToken, verifySessionToken, sessionSecretStatus } from "./session-token.js";
 import { issueSyncCode, verifySyncCode } from "./sync-code.js";
-import { createPlayerStore, mergeSaveForWrite, planPurchase, planSettlement, normalizeBubbles, normalizeNickname } from "./player-store.js";
+import { createPlayerStore, mergeSaveForWrite, planPurchase, planSettlement, normalizeBubbles, normalizeNickname, ARCHIVE_VERSION } from "./player-store.js";
 
 const app = express();
 const host = process.env.HOST || "0.0.0.0";
@@ -294,6 +294,69 @@ app.get("/api/admin/track/summary", async (req, res) => {
     const store = await getPlayerStore();
     const events = await store.trackSummary();
     res.json({ data: { events } });
+  } catch (error) { sendError(res, error); }
+});
+
+// 全量存档导出：备份用。一次拉回 users + saves，在服务端打包成一个 JSON 下发。
+//
+// 为什么要有它：个人版**没有数据回档**，存档在库里被误删 / 实例故障就永久没了。
+// 这份导出是唯一能把存档搬出数据库实例的通道 —— 配合本机定时脚本
+// （workspace 里的 fa-save-backup.mjs）每天拉一次落到异地磁盘，才算真有备份。
+// ⚠️ 只导白名单字段：sync_code_hash 是凭证类数据，不进备份文件（见 ARCHIVE_USER_FIELDS）。
+app.get("/api/admin/saves/export", async (req, res) => {
+  try {
+    const store = await getPlayerStore();
+    const archive = await store.exportArchive();
+    res.json({
+      data: {
+        archiveVersion: ARCHIVE_VERSION,
+        exportedAt: Date.now(),
+        counts: { users: archive.users.length, saves: archive.saves.length },
+        users: archive.users,
+        saves: archive.saves
+      }
+    });
+  } catch (error) { sendError(res, error); }
+});
+
+// 从备份恢复存档。**默认 dry-run** —— 不带 `mode:"apply"` 就只算差异、一个字都不写。
+//
+// 为什么默认 dry-run：这是唯一能反向覆盖玩家存档的接口。恢复错了（选错备份、选错用户）
+// 会直接抹掉玩家的鱼缸，而且玩家端拿到的是「服务端更新的存档」→ 本地存档也会跟着被覆盖，
+// 没有第二次机会。所以先看清楚要改什么，再决定改。
+//
+// `apply` 时一并返回 rollback（被覆盖掉的旧存档）：调用方必须存下来 —— 恢复错了能立刻
+// 拿它反向恢复。create 没有旧值，不进 rollback。
+app.post("/api/admin/saves/restore", async (req, res) => {
+  try {
+    const entries = req.body && Array.isArray(req.body.saves) ? req.body.saves : null;
+    if (!entries) return res.status(400).json({ error: "缺少 saves 数组（恢复内容来自 /api/admin/saves/export 导出的文件）" });
+    if (!entries.length) return res.status(400).json({ error: "saves 是空的，没有要恢复的内容" });
+    const apply = req.body.mode === "apply";
+    const store = await getPlayerStore();
+    const { items, rollback } = await store.restoreSaves(entries, { dryRun: !apply });
+    const counts = items.reduce((acc, item) => { acc[item.action] = (acc[item.action] || 0) + 1; return acc; }, {});
+    // 备份里有、但 users 表里没有的 uid：存档能恢复，但玩家档案是空的。
+    // 刻意不自动建号 —— cohort / is_supporter 这类字段补错了比缺着更难查。
+    // 上限 200：恢复几百个用户时没必要为了「提示」再跑几百次查询。
+    const missingUsers = [];
+    if (items.length <= 200) {
+      for (const item of items) {
+        if (item.action === "skipped") continue;
+        if (!await store.getUser(item.userId)) missingUsers.push(item.userId);
+      }
+    }
+    res.json({
+      data: {
+        mode: apply ? "apply" : "dry-run",
+        applied: apply,
+        archiveVersion: ARCHIVE_VERSION,
+        counts,
+        items,
+        rollback,
+        missingUsers
+      }
+    });
   } catch (error) { sendError(res, error); }
 });
 

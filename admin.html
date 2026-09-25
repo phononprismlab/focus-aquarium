@@ -1448,7 +1448,7 @@
 			const trackHtml = !state.trackSummary
 				? `<div class="empty"><strong>埋点概览暂不可用</strong>接口失败或 tracking_events 表还没建；不影响本页其它功能。</div>`
 				: `<div class="table-wrap"><table><thead><tr><th>事件</th><th>今日</th><th>最近 7 天</th><th>累计</th></tr></thead><tbody>${state.trackSummary.map(row => `<tr><td>${esc(TRACK_LABELS[row.event] || row.event)}</td><td>${row.today}</td><td>${row.last7d}</td><td>${row.total}</td></tr>`).join("")}</tbody></table></div>`;
-			main.innerHTML = pageHeader("PLAYER MANAGEMENT", "玩家管理", "按注册时间从早到晚排序；可按 cohort 与赞赏状态筛选，赞赏者单独高亮。", `<button class="button primary" id="exportUsersCsv">导出 CSV</button>`)
+			main.innerHTML = pageHeader("PLAYER MANAGEMENT", "玩家管理", "按注册时间从早到晚排序；可按 cohort 与赞赏状态筛选，赞赏者单独高亮。", `<button class="button secondary" id="exportSavesJson">导出全量存档</button><button class="button primary" id="exportUsersCsv">导出 CSV</button>`)
 				+ `<section class="panel"><div class="panel-head"><div><h3>埋点概览</h3><p>打开 / 开始专注 / 完成专注 / 购买成功</p></div></div>${trackHtml}</section>`
 				+ `<section class="panel"><div class="panel-head"><div><h3>筛选</h3></div></div><div class="filter-row">
 					<label>cohort <select id="filterCohort">${cohortOptions}</select></label>
@@ -1458,6 +1458,7 @@
 				</div></section>`
 				+ `<section class="panel"><div class="panel-head"><div><h3>玩家列表</h3><p>按注册时间从早到晚</p></div></div>${tableHtml}</section>`;
 			document.getElementById("exportUsersCsv").onclick = exportUsersCsv;
+			document.getElementById("exportSavesJson").onclick = exportSavesJson;
 			document.getElementById("applyUserFilter").onclick = async () => {
 				userFilter.cohort = document.getElementById("filterCohort").value;
 				userFilter.isSupporter = document.getElementById("filterSupporter").value;
@@ -1490,6 +1491,30 @@
 			a.remove();
 			URL.revokeObjectURL(url);
 			showToast(`已导出 ${state.users.length} 名玩家`);
+		}
+		// 全量存档导出（备份用）。走 /admin/saves/export —— 受 x-admin-key 保护，
+		// 返回的是**全部玩家的存档**，不是上面那份玩家列表，两者别混。
+		// 文件落到浏览器下载目录，之后由本机备份脚本 / 手工转存到异地磁盘。
+		async function exportSavesJson() {
+			try {
+				const body = await apiRequest("/admin/saves/export");
+				const payload = body.data || {};
+				if (!payload.saves || !payload.saves.length) { showToast("还没有存档可导出"); return; }
+				// 文件名带秒级时间：一天里导出多次不会互相覆盖。
+				const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+				const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8;" });
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement("a");
+				a.href = url;
+				a.download = `fishtank-saves-${stamp}.json`;
+				document.body.appendChild(a);
+				a.click();
+				a.remove();
+				URL.revokeObjectURL(url);
+				showToast(`已导出 ${payload.saves.length} 份存档`);
+			} catch (error) {
+				showToast(`存档导出失败：${error.message}`);
+			}
 		}
 		function formData(form) { const data = Object.fromEntries(new FormData(form).entries()); data.isMemberOnly = form.elements.isMemberOnly?.checked || false; data.price = Number(data.price || 0); data.maxInventory = Number(data.maxInventory || 0); return data; }
 		async function publishItem(type, index) {

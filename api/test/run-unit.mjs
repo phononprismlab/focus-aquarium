@@ -42,7 +42,9 @@ const files = ["reward.test.js", "focus-session.test.js", "audio-categories.test
   "shop-sort.test.js",
   "focus-status-position.test.js",
   "player-tank-ui.test.js",
-  "admin-pages-ux.test.js"];
+  "admin-pages-ux.test.js",
+  "save-export.test.js",
+  "save-restore.test.js"];
 
 let failed = 0;
 for (const file of files) {
