@@ -15,7 +15,7 @@ import { resolveAdminApiKey, checkProductionConfig, warnWeakAdminKey } from "./r
 import { accountStatus, issueTicket, normalizeUid, checkRateLimit, resetAccountCache, resetRateLimit, RATE_LIMIT } from "./account.js";
 import { readRequestUid, issueSessionToken, verifySessionToken, sessionSecretStatus } from "./session-token.js";
 import { issueSyncCode, verifySyncCode } from "./sync-code.js";
-import { createPlayerStore, mergeSaveForWrite, planPurchase, planSettlement, normalizeBubbles } from "./player-store.js";
+import { createPlayerStore, mergeSaveForWrite, planPurchase, planSettlement, normalizeBubbles, normalizeNickname } from "./player-store.js";
 
 const app = express();
 const host = process.env.HOST || "0.0.0.0";
@@ -744,6 +744,41 @@ app.get("/api/game/me", async (req, res) => {
         ...stats
       }
     });
+  } catch (error) { sendError(res, error); }
+});
+
+// ===== 用户档案：昵称 =====
+// users.nickname 从建表起就空着，一直没有写入路径（后台列表因此全是「未命名」）。
+// 这里开一个最小写入口：玩家侧能改的档案字段**只有昵称**，白名单和长度规则
+// 都在 player-store（UPDATABLE_USER_FIELDS / normalizeNickname），路由层只做
+// 身份、限频和回包。不做唯一性校验 —— 昵称不是登录凭证，重名无所谓。
+const NICKNAME_WINDOW_MS = 60 * 1000;
+const NICKNAME_MAX_PER_WINDOW = 6;
+const nicknameHits = new Map();
+function nicknameRateLimited(uid, at = Date.now()) {
+  const hits = (nicknameHits.get(uid) || []).filter(t => at - t < NICKNAME_WINDOW_MS);
+  if (hits.length >= NICKNAME_MAX_PER_WINDOW) { nicknameHits.set(uid, hits); return true; }
+  hits.push(at);
+  nicknameHits.set(uid, hits);
+  // 兜底：进程活得久、uid 多时别让这张表无限长。
+  if (nicknameHits.size > 5000) nicknameHits.clear();
+  return false;
+}
+
+app.put("/api/game/me", async (req, res) => {
+  const identity = await requireIdentity(req, res);
+  if (!identity) return;
+  if (nicknameRateLimited(identity.uid)) {
+    return res.status(429).json({ error: "改得太频繁了，过一会儿再试" });
+  }
+  const parsed = normalizeNickname((req.body || {}).nickname);
+  if (!parsed.ok) return res.status(400).json({ error: parsed.reason });
+  try {
+    // 建号兜底：票据签发时本该建好，但同步码接管等路径可能只拿到 uid 没有行。
+    await identity.store.ensureUser(identity.uid);
+    const user = await identity.store.updateUser(identity.uid, { nickname: parsed.value });
+    if (!user) return res.status(503).json({ error: "档案暂时不可用，请稍后再试" });
+    res.json({ data: { userId: identity.uid, nickname: user.nickname || "" } });
   } catch (error) { sendError(res, error); }
 });
 

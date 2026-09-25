@@ -96,7 +96,7 @@ const ensureSrc = extractFunction(playerCode, "ensureAccount");
 chkTrue("ensureAccount 接了引导弹窗（建号/有令牌两分支都会调）", /maybeShowSyncGuide\(\);/.test(ensureSrc));
 const goSrc = extractFunction(playerCode, "syncGuideGo");
 chkTrue("go 按钮会生成同步码", /generateSyncCode\(\)/.test(goSrc));
-chkTrue("go 按钮会打开设置面板", /classList\.add\("show"\)/.test(goSrc));
+chkTrue("go 按钮会打开「我的」抽屉", /openDrawer\("mineDrawer"\)/.test(goSrc));
 chkTrue("go 按钮会写「已看过」标记", /localStorage\.setItem\(SYNC_GUIDE_KEY/.test(goSrc));
 chkTrue("skip 也会写「已看过」标记", /localStorage\.setItem\(SYNC_GUIDE_KEY/.test(extractFunction(playerCode, "syncGuideSkip")));
 chkTrue("弹窗文案说清「换设备时现生成、不用提前存」", /现生成|10 分钟/.test(playerRaw));
@@ -113,13 +113,15 @@ console.log("\n--- 2. 运行时：flag 闸门 + go/skip 行为 ---");
     'let ACCOUNT_TOKEN = "tok";',
     "let genCount = 0;",
     "const localStorage = { _d:{}, getItem(k){ return k in this._d ? this._d[k] : null; }, setItem(k,v){ this._d[k]=String(v); } };",
-    "const __els = { syncGuide: { hidden: true }, audioSettings: { classList: (()=>{ const s=new Set(); return { add:c=>s.add(c), remove:c=>s.delete(c), contains:c=>s.has(c) }; })(), setAttribute(){} }, audioSettingsToggle: { setAttribute(){} } };",
+    "const __els = { syncGuide: { hidden: true }, mineDrawer: { classList: (()=>{ const s=new Set(); return { add:c=>s.add(c), remove:c=>s.delete(c), contains:c=>s.has(c) }; })(), setAttribute(){} } };",
     "const document = { getElementById: id => __els[id] || null };",
     "function generateSyncCode(){ genCount++; return Promise.resolve(); }",
+    "function openDrawer(id){ const el = __els[id]; if(el){ el.classList.add('show'); el.setAttribute('aria-hidden','false'); } }",
+    "function renderMineStats(){}",
     extractFunction(playerCode, "maybeShowSyncGuide"),
     extractFunction(playerCode, "syncGuideGo"),
     extractFunction(playerCode, "syncGuideSkip"),
-    "return { maybeShowSyncGuide, syncGuideGo, syncGuideSkip, syncGuide: __els.syncGuide, panel: __els.audioSettings, getFlag: () => localStorage.getItem(SYNC_GUIDE_KEY), genCount: () => genCount };"
+    "return { maybeShowSyncGuide, syncGuideGo, syncGuideSkip, syncGuide: __els.syncGuide, drawer: __els.mineDrawer, getFlag: () => localStorage.getItem(SYNC_GUIDE_KEY), genCount: () => genCount };"
   ].join("\n");
   const box = new Function(code)();
   box.maybeShowSyncGuide();
@@ -135,13 +137,15 @@ console.log("\n--- 2. 运行时：flag 闸门 + go/skip 行为 ---");
     'let ACCOUNT_TOKEN = "tok";',
     "let genCount = 0;",
     'const localStorage = { _d:{"fishtank_sync_guide_v1":"1"}, getItem(k){ return k in this._d ? this._d[k] : null; }, setItem(k,v){ this._d[k]=String(v); } };',
-    "const __els = { syncGuide: { hidden: true }, audioSettings: { classList: (()=>{ const s=new Set(); return { add:c=>s.add(c), remove:c=>s.delete(c), contains:c=>s.has(c) }; })(), setAttribute(){} }, audioSettingsToggle: { setAttribute(){} } };",
+    "const __els = { syncGuide: { hidden: true }, mineDrawer: { classList: (()=>{ const s=new Set(); return { add:c=>s.add(c), remove:c=>s.delete(c), contains:c=>s.has(c) }; })(), setAttribute(){} } };",
     "const document = { getElementById: id => __els[id] || null };",
     "function generateSyncCode(){ genCount++; return Promise.resolve(); }",
+    "function openDrawer(id){ const el = __els[id]; if(el){ el.classList.add('show'); el.setAttribute('aria-hidden','false'); } }",
+    "function renderMineStats(){}",
     extractFunction(playerCode, "maybeShowSyncGuide"),
     extractFunction(playerCode, "syncGuideGo"),
     extractFunction(playerCode, "syncGuideSkip"),
-    "return { maybeShowSyncGuide, syncGuideGo, syncGuideSkip, syncGuide: __els.syncGuide, panel: __els.audioSettings, getFlag: () => localStorage.getItem(SYNC_GUIDE_KEY), genCount: () => genCount };"
+    "return { maybeShowSyncGuide, syncGuideGo, syncGuideSkip, syncGuide: __els.syncGuide, drawer: __els.mineDrawer, getFlag: () => localStorage.getItem(SYNC_GUIDE_KEY), genCount: () => genCount };"
   ].join("\n");
   const box2 = new Function(code)();
   box2.maybeShowSyncGuide();
@@ -156,20 +160,22 @@ console.log("\n--- 2. 运行时：flag 闸门 + go/skip 行为 ---");
     'let ACCOUNT_TOKEN = "tok";',
     "let genCount = 0;",
     "const localStorage = { _d:{}, getItem(k){ return k in this._d ? this._d[k] : null; }, setItem(k,v){ this._d[k]=String(v); } };",
-    "const __els = { syncGuide: { hidden: true }, audioSettings: { classList: (()=>{ const s=new Set(); return { add:c=>s.add(c), remove:c=>s.delete(c), contains:c=>s.has(c) }; })(), setAttribute(){} }, audioSettingsToggle: { setAttribute(){} } };",
+    "const __els = { syncGuide: { hidden: true }, mineDrawer: { classList: (()=>{ const s=new Set(); return { add:c=>s.add(c), remove:c=>s.delete(c), contains:c=>s.has(c) }; })(), setAttribute(){} } };",
     "const document = { getElementById: id => __els[id] || null };",
     "function generateSyncCode(){ genCount++; return Promise.resolve(); }",
+    "function openDrawer(id){ const el = __els[id]; if(el){ el.classList.add('show'); el.setAttribute('aria-hidden','false'); } }",
+    "function renderMineStats(){}",
     extractFunction(playerCode, "maybeShowSyncGuide"),
     extractFunction(playerCode, "syncGuideGo"),
     extractFunction(playerCode, "syncGuideSkip"),
-    "return { maybeShowSyncGuide, syncGuideGo, syncGuideSkip, syncGuide: __els.syncGuide, panel: __els.audioSettings, getFlag: () => localStorage.getItem(SYNC_GUIDE_KEY), genCount: () => genCount };"
+    "return { maybeShowSyncGuide, syncGuideGo, syncGuideSkip, syncGuide: __els.syncGuide, drawer: __els.mineDrawer, getFlag: () => localStorage.getItem(SYNC_GUIDE_KEY), genCount: () => genCount };"
   ].join("\n");
   const box = new Function(code)();
   box.syncGuide.hidden = false; // 先弹出来
   box.syncGuideGo();
   chk("go 后弹窗隐藏", box.syncGuide.hidden, true);
   chk("go 后写入已看过标记", box.getFlag(), "1");
-  chkTrue("go 后打开设置面板（classList 含 show）", box.panel.classList.contains("show"));
+  chkTrue("go 后打开「我的」抽屉（classList 含 show）", box.drawer.classList.contains("show"));
   chk("go 后触发了一次同步码生成", box.genCount(), 1);
 }
 
@@ -181,13 +187,15 @@ console.log("\n--- 2. 运行时：flag 闸门 + go/skip 行为 ---");
     'let ACCOUNT_TOKEN = "tok";',
     "let genCount = 0;",
     "const localStorage = { _d:{}, getItem(k){ return k in this._d ? this._d[k] : null; }, setItem(k,v){ this._d[k]=String(v); } };",
-    "const __els = { syncGuide: { hidden: true }, audioSettings: { classList: (()=>{ const s=new Set(); return { add:c=>s.add(c), remove:c=>s.delete(c), contains:c=>s.has(c) }; })(), setAttribute(){} }, audioSettingsToggle: { setAttribute(){} } };",
+    "const __els = { syncGuide: { hidden: true }, mineDrawer: { classList: (()=>{ const s=new Set(); return { add:c=>s.add(c), remove:c=>s.delete(c), contains:c=>s.has(c) }; })(), setAttribute(){} } };",
     "const document = { getElementById: id => __els[id] || null };",
     "function generateSyncCode(){ genCount++; return Promise.resolve(); }",
+    "function openDrawer(id){ const el = __els[id]; if(el){ el.classList.add('show'); el.setAttribute('aria-hidden','false'); } }",
+    "function renderMineStats(){}",
     extractFunction(playerCode, "maybeShowSyncGuide"),
     extractFunction(playerCode, "syncGuideGo"),
     extractFunction(playerCode, "syncGuideSkip"),
-    "return { maybeShowSyncGuide, syncGuideGo, syncGuideSkip, syncGuide: __els.syncGuide, panel: __els.audioSettings, getFlag: () => localStorage.getItem(SYNC_GUIDE_KEY), genCount: () => genCount };"
+    "return { maybeShowSyncGuide, syncGuideGo, syncGuideSkip, syncGuide: __els.syncGuide, drawer: __els.mineDrawer, getFlag: () => localStorage.getItem(SYNC_GUIDE_KEY), genCount: () => genCount };"
   ].join("\n");
   const box = new Function(code)();
   box.syncGuide.hidden = false;
@@ -207,7 +215,7 @@ console.log("\n--- 3. 反向验证：去掉 flag 闸门会向已看过的用户�
     'let ACCOUNT_TOKEN = "tok";',
     "let genCount = 0;",
     'const localStorage = { _d:{"fishtank_sync_guide_v1":"1"}, getItem(k){ return k in this._d ? this._d[k] : null; }, setItem(k,v){ this._d[k]=String(v); } };',
-    "const __els = { syncGuide: { hidden: true }, audioSettings: { classList: (()=>{ const s=new Set(); return { add:c=>s.add(c), remove:c=>s.delete(c), contains:c=>s.has(c) }; })(), setAttribute(){} }, audioSettingsToggle: { setAttribute(){} } };",
+    "const __els = { syncGuide: { hidden: true }, mineDrawer: { classList: (()=>{ const s=new Set(); return { add:c=>s.add(c), remove:c=>s.delete(c), contains:c=>s.has(c) }; })(), setAttribute(){} } };",
     "const document = { getElementById: id => __els[id] || null };",
     "function generateSyncCode(){ genCount++; return Promise.resolve(); }"
   ].join("\n");

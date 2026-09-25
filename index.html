@@ -468,8 +468,8 @@
    左：泡泡数 + 装点入口；右侧空间留给音频控件（它是独立元素，定位到栏内）。 */
 .v02-topbar{
   position:fixed;left:0;right:0;top:0;z-index:1000;
-  display:flex;align-items:center;justify-content:flex-start;gap:10px;
-  min-height:52px;padding:8px 16px;padding-right:132px;
+  display:flex;align-items:center;justify-content:space-between;gap:var(--space-md);
+  min-height:52px;padding:10px 16px;
   background:var(--shell-bg);border-bottom:1px solid var(--shell-border);
   box-shadow:var(--shell-edge);
   backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
@@ -480,24 +480,34 @@
 .v02-focus[hidden]{display:none;}
 .v02-focus .focus-today{font-size:12px;letter-spacing:.04em;font-weight:700;}
 .v02-focus .focus-total{font-size:11px;letter-spacing:.04em;opacity:.85;}
-.v02-bubbles,.v02-shop-btn{
-  border:1px solid var(--shell-border);background:rgba(10,132,255,0.30);
-  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-  box-shadow:var(--shell-edge);color:var(--text-on-water);
-  border-radius:var(--radius-pill);font-family:var(--font-ui);
-}
+/* 左：只有泡泡数（原型 .topbar .bubble-count，无外壳，数字等宽不跳动）。 */
 .v02-bubbles{
-  padding:9px 14px;font-size:13px;letter-spacing:.05em;font-weight:700;
-  font-variant-numeric:tabular-nums;
+  display:inline-flex;align-items:center;gap:4px;
+  font-family:var(--font-num);font-weight:700;font-size:14px;
+  font-variant-numeric:tabular-nums;letter-spacing:.04em;
+  color:var(--text-on-water);
 }
-.v02-shop-btn{padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;letter-spacing:.04em;}
-.v02-shop-btn:hover{background:rgba(10,132,255,0.50)}
-.v02-shop-btn:active{transform:scale(0.97)}
+/* 右：三个直接可见入口，点哪个开哪个右侧抽屉（原型 .top-entries）。 */
+.v02-topbar-entries{display:flex;align-items:center;gap:8px;}
+.v02-top-entry{
+  font-family:var(--font-ui);font-size:13px;font-weight:600;letter-spacing:.04em;
+  color:var(--text-on-water);
+  background:rgba(10,132,255,0.30);
+  border:1px solid var(--shell-border);
+  border-radius:var(--radius-sm);
+  padding:6px 14px;
+  box-shadow:var(--shell-edge);
+  cursor:pointer;
+  transition:background .2s ease,transform .1s ease;
+}
+.v02-top-entry:hover{background:rgba(10,132,255,0.50)}
+.v02-top-entry:active{transform:scale(0.97)}
+.v02-top-entry.active{background:var(--screen-blue-500);border-color:var(--shell-border);}
 /* 装点改成原型 .drawer：右侧滑出抽屉（深蓝浮水壳 + 左边界线 + 内颗粒）。
    只换壳，不碰结构：id / class / 开合方式（#shopModal 加 .show）全部原样保留。
    关闭态不能用 display:none —— 那样 transform 过渡不会跑；改成移出屏幕 +
    visibility:hidden，抽屉收起时屏幕右缘依然是鱼缸，点得到。 */
-.v02-shop{
+.v02-shop,.v02-drawer{
   position:fixed;top:0;right:0;bottom:0;left:auto;z-index:2000;
   width:min(440px,92vw);
   display:flex;flex-direction:column;
@@ -510,12 +520,12 @@
   visibility:hidden;
   transition:transform .28s cubic-bezier(.16,1,.3,1),visibility 0s linear .28s;
 }
-.v02-shop.show{
+.v02-shop.show,.v02-drawer.show{
   transform:translateX(0);visibility:visible;
   transition:transform .28s cubic-bezier(.16,1,.3,1),visibility 0s linear 0s;
 }
 /* 抽屉内轻颗粒（原型 .drawer::after） */
-.v02-shop::after{content:"";position:absolute;inset:0;pointer-events:none;background-image:var(--grain);background-size:160px 160px;mix-blend-mode:overlay;opacity:.22;}
+.v02-shop::after,.v02-drawer::after{content:"";position:absolute;inset:0;pointer-events:none;background-image:var(--grain);background-size:160px 160px;mix-blend-mode:overlay;opacity:.22;}
   .v02-shop-card{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;background:transparent;padding:0;}
   .v02-shop-header{flex:0 0 auto;padding:var(--space-md) var(--space-lg);background:transparent;border-bottom:1px solid var(--shell-border);position:relative;z-index:1;}
   .v02-shop-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:var(--space-sm);}
@@ -541,8 +551,9 @@
   .v02-shop-content::-webkit-scrollbar-track{background:transparent;border-radius:999px;margin:4px 0;}
   .v02-shop-content::-webkit-scrollbar-thumb{background:rgba(190,225,255,.35);border:2px solid transparent;background-clip:padding-box;border-radius:999px;}
   .v02-shop-content::-webkit-scrollbar-thumb:hover{background:rgba(190,225,255,.55);background-clip:padding-box;}
-  /* 列宽跟抽屉宽度走，不跟视口走：抽屉恒为 440px，用视口断点会一直落到单列。 */
-  .v02-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:var(--space-sm);}
+  /* 一行两个：440px 的抽屉里放三列卡片太挤（预览图被压成小方块），
+     两列每列约 190px，预览图和名字都看得清。 */
+  .v02-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-sm);}
 .v02-item{border:1px solid var(--shell-border);border-radius:var(--radius-md);padding:var(--space-sm);background:rgba(10,132,255,0.14);display:flex;flex-direction:column;gap:6px;transition:border-color .15s ease,transform .1s ease,background .15s ease;}
 .v02-item:hover{transform:translateY(-2px);background:rgba(10,132,255,0.22)}
 .v02-preview{height:96px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;overflow:hidden;background:linear-gradient(135deg,#a9dfe8,#d9f2ef);}
@@ -598,6 +609,71 @@
 .v02-settlement b{color:var(--teal);font-weight:700}
 /* 泡泡不够：当场把差额写出来，别等玩家点了"保存鱼缸"才用一张小票告诉他。 */
 .v02-settlement.short{color:var(--coral-red)}
+
+/* ===== 「我的」抽屉：资料卡（昵称可写）+ 账号同步 ===== */
+.v02-mine-input-row{display:flex;gap:8px;align-items:center;}
+.v02-mine-input-row .v02-mine-input{flex:1 1 auto;min-width:0;}
+.v02-mine-input-row .v02-mine-save{margin-top:0;flex:0 0 auto;height:32px;padding:0 14px;}
+
+/* ===== 「设置」抽屉：音频控件收进来后不再是悬浮胶囊，改成抽屉里的整行控件 ===== */
+.v02-drawer .audio-controls{
+  position:static;top:auto;right:auto;z-index:auto;
+  display:flex;flex-direction:column;align-items:stretch;gap:var(--space-sm);
+  width:100%;height:auto;padding:0;border:0;border-radius:0;
+  background:transparent;box-shadow:none;
+  backdrop-filter:none;-webkit-backdrop-filter:none;
+}
+.v02-drawer .audio-settings-toggle{display:none;}
+.v02-drawer .audio-toggle{
+  width:100%;height:36px;font-size:15px;
+  border:1px solid var(--shell-border);border-radius:var(--radius-sm);
+  background:rgba(10,132,255,0.30);box-shadow:var(--shell-edge);
+}
+.v02-drawer .audio-settings{
+  position:static;top:auto;right:auto;z-index:auto;
+  width:100%;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;
+  backdrop-filter:none;-webkit-backdrop-filter:none;
+  opacity:1;transform:none;pointer-events:auto;color:var(--text-on-water);
+}
+.v02-drawer .audio-settings-title{font-size:12px;letter-spacing:.1em;opacity:.8;}
+
+/* 账号同步区块搬到深蓝抽屉里要重新校色：原配色是按白色半透面板调的
+   （11px + opacity:.75 的字在浅灰底上凑合能看），搬到深蓝壳上几乎全糊。
+   抽屉里一律用 v3 text-on-water，字号统一抬到 12/13px。 */
+.v02-drawer .account-block{border-top-color:var(--shell-border);}
+.v02-drawer .account-line{color:var(--text-on-water);opacity:1;font-size:13px;letter-spacing:.1em;}
+.v02-drawer .account-tip{color:var(--text-on-water);opacity:.92;font-size:12px;}
+.v02-drawer .account-note{color:var(--text-on-water);opacity:.92;}
+.v02-drawer .account-note.ok{color:var(--teal);opacity:1;}
+.v02-drawer .account-note.bad{color:var(--coral-red);opacity:1;}
+.v02-drawer .account-row button{background:rgba(10,132,255,0.22);border-color:var(--shell-border);color:var(--text-on-water);}
+.v02-drawer .account-row button:hover{background:rgba(10,132,255,0.34);}
+.v02-drawer .account-field{background:rgba(10,132,255,0.10);border-color:var(--shell-border);color:var(--text-on-water);}
+
+/* 「我的」资料卡：昵称 + 注册时间 + 鱼数 + 累计专注。
+   在云端没登录时整张卡隐藏（与顶栏专注统计一致），没昵称时显示输入框。 */
+.v02-mine-card{padding:var(--space-sm) var(--space-md);margin-bottom:var(--space-md);border:1px solid var(--shell-border);border-radius:var(--radius-md);background:rgba(10,132,255,0.14);}
+.v02-mine-card[hidden]{display:none;}
+.v02-mine-field{margin-top:var(--space-xs);}
+.v02-mine-field:first-child{margin-top:0;}
+.v02-mine-label{font-family:var(--font-ui);font-size:11px;letter-spacing:.1em;color:var(--text-on-water-dim);margin-bottom:4px;}
+.v02-mine-input{
+  width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--shell-border);border-radius:var(--radius-sm);
+  background:rgba(10,132,255,0.10);color:var(--text-on-water);
+  font-family:var(--font-ui);font-size:13px;
+}
+.v02-mine-input::placeholder{color:var(--text-on-water-dim);}
+.v02-mine-input:disabled{opacity:.55;cursor:not-allowed;}
+.v02-mine-save{
+  margin-top:8px;border:0;border-radius:var(--radius-sm);padding:7px 14px;
+  background:var(--screen-blue-500);color:#fff;cursor:pointer;
+  font-family:var(--font-ui);font-size:12px;font-weight:600;
+  transition:background .15s ease;
+}
+.v02-mine-save:hover{background:var(--screen-blue-600);}
+.v02-mine-save:disabled{opacity:.5;cursor:not-allowed;}
+.v02-mine-stat{font-family:var(--font-num);font-size:12px;color:var(--text-on-water);font-variant-numeric:tabular-nums;line-height:1.9;}
+.v02-mine-stat strong{font-weight:700;color:var(--yellow);}
 /* 这一分类没有商品时的空态（后台清空了该类，或配置没拉到）。 */
 .v02-empty{grid-column:1/-1;padding:34px 18px;text-align:center;font-size:13px;line-height:1.8;color:var(--text-on-water-dim);background:rgba(10,132,255,0.10);border-radius:var(--radius-md);border:1px dashed var(--shell-border)}
 .v02-item-tip{font-size:11px;color:var(--coral-red);margin-top:6px}
@@ -809,7 +885,7 @@
 }
 /* 商店抽屉打开时把 DEV 按钮挤到抽屉左侧，避免挡"保存鱼缸"。
    DOM 顺序：#shopModal 在 .dev-toggle 之前，是同一层兄弟，~ 选择器可用。 */
-.v02-shop.show ~ .dev-toggle{right:calc(min(440px,92vw) + 18px)}
+.v02-drawer.show ~ .dev-toggle{right:calc(min(440px,92vw) + 18px)}
 .dev-panel{
   position:fixed;right:18px;bottom:58px;z-index:3501;width:280px;
   background:#fffdf8;color:#34484b;border:1px solid rgba(70,105,108,.25);
@@ -1023,7 +1099,11 @@
   <div class="bubbles" id="bubbles" aria-hidden="true"></div>
   <div class="v02-topbar">
     <div class="v02-bubbles" id="bubbleDisplay">🫧 0</div>
-    <button type="button" class="v02-shop-btn" id="shopOpenBtn">装点鱼缸</button>
+    <nav class="v02-topbar-entries">
+      <button type="button" class="v02-top-entry" id="shopOpenBtn" data-drawer="shopModal">装点</button>
+      <button type="button" class="v02-top-entry" id="mineOpenBtn" data-drawer="mineDrawer">我的</button>
+      <button type="button" class="v02-top-entry" id="settingsOpenBtn" data-drawer="settingsDrawer">设置</button>
+    </nav>
   </div>
   <div class="v02-focus" id="focusStatus" hidden aria-live="polite">
     <div class="focus-today" id="focusToday">今日专注 0 次 · 0 分钟</div>
@@ -1031,37 +1111,7 @@
   </div>
 
 
-  <!-- 统一控制组包裹容器（移入鱼缸内部，并包含面板） -->
-  <div class="audio-controls" id="audioControls">
-    <button type="button" class="audio-toggle" id="audioToggle" aria-label="静音" aria-pressed="false">🔊</button>
-    <button type="button" class="audio-settings-toggle" id="audioSettingsToggle" aria-label="音频设置" aria-expanded="false">•••</button>
-    
-    <!-- 调音面板挂载在按钮框下方 -->
-    <div class="audio-settings" id="audioSettings" aria-hidden="true">
-      <div class="audio-settings-title">设置</div>
-      <!-- 滑块按后台配置的音效分类动态生成，分类可增删，这里不再写死 -->
-      <div id="audioSliders"></div>
-      <div class="account-block" id="accountBlock">
-        <div class="account-line">账号同步</div>
-        <div class="account-row">
-          <button type="button" id="syncCodeBtn">生成同步码</button>
-          <button type="button" id="syncRedeemBtn">输入同步码</button>
-        </div>
-        <div class="account-tip" id="syncCodeTip">换设备时，用同步码把鱼缸搬过去</div>
-        <div id="syncCodeOut" hidden>
-          <textarea class="account-field" id="syncCodeText" rows="3" readonly aria-label="同步码"></textarea>
-          <div class="account-row gap-top"><button type="button" id="syncCodeCopy">复制这串码</button></div>
-          <div class="account-note" id="syncCodeTimer"></div>
-        </div>
-        <div id="syncRedeemIn" hidden>
-          <textarea class="account-field" id="syncRedeemText" rows="3" placeholder="粘贴另一台设备上的同步码" aria-label="输入同步码"></textarea>
-          <div class="account-tip">恢复后，这台设备现在的进度会被原设备的鱼缸替换。</div>
-          <div class="account-row gap-top"><button type="button" id="syncRedeemGo">恢复我的鱼缸</button></div>
-          <div class="account-note" id="syncRedeemMsg"></div>
-        </div>
-      </div>
-    </div>
-  </div>
+  <!-- 音频控件已收进「设置」抽屉（见 #settingsDrawer），顶栏只留泡泡数 + 三个入口 -->
 
     <!-- 纯白清晰海报标题 -->
     <h1 class="poster-title" id="appTitle">鱼儿乐水族馆</h1>
@@ -1095,7 +1145,7 @@
 </div>
 
 
-<div class="v02-shop" id="shopModal" aria-hidden="true">
+<div class="v02-shop v02-drawer" id="shopModal" aria-hidden="true">
   <div class="v02-shop-card">
     <div class="v02-shop-header">
     <div class="v02-shop-head">
@@ -1121,6 +1171,74 @@
     </div>
   </div>
 </div>
+
+<aside class="v02-drawer" id="mineDrawer" aria-hidden="true">
+  <div class="v02-shop-card">
+    <div class="v02-shop-header">
+      <div class="v02-shop-head">
+        <div><div class="v02-shop-title">我的</div><div class="v02-shop-sub">换设备时用同步码把鱼缸搬过去</div></div>
+        <button type="button" class="v02-close" data-close-drawer="mineDrawer" aria-label="关闭">×</button>
+      </div>
+    </div>
+    <div class="v02-shop-content">
+      <div class="v02-mine-card" id="mineProfile" hidden>
+        <div class="v02-mine-field">
+          <div class="v02-mine-label">昵称</div>
+          <div class="v02-mine-input-row">
+            <input type="text" class="v02-mine-input" id="mineNicknameInput" maxlength="12" placeholder="给自己起个名字" autocomplete="off" spellcheck="false" aria-label="昵称">
+            <button type="button" class="v02-mine-save" id="mineNicknameSave" disabled>保存</button>
+          </div>
+          <div class="account-note" id="mineNicknameMsg"></div>
+        </div>
+        <div class="v02-mine-stat">累计专注 <strong id="mineFocusMinutes">0</strong> 分钟 · <strong id="mineFocusCount">0</strong> 次</div>
+        <div class="v02-mine-stat">今日专注 <strong id="mineTodayMinutes">0</strong> 分钟</div>
+        <div class="v02-mine-stat">养了 <strong id="mineFishCount">0</strong> 条鱼</div>
+        <div class="v02-mine-stat" id="mineCreatedAt"></div>
+      </div>
+      <div class="account-block" id="accountBlock">
+        <div class="account-line">账号同步</div>
+        <div class="account-row">
+          <button type="button" id="syncCodeBtn">生成同步码</button>
+          <button type="button" id="syncRedeemBtn">输入同步码</button>
+        </div>
+        <div class="account-tip" id="syncCodeTip">换设备时，用同步码把鱼缸搬过去</div>
+        <div id="syncCodeOut" hidden>
+          <textarea class="account-field" id="syncCodeText" rows="3" readonly aria-label="同步码"></textarea>
+          <div class="account-row gap-top"><button type="button" id="syncCodeCopy">复制这串码</button></div>
+          <div class="account-note" id="syncCodeTimer"></div>
+        </div>
+        <div id="syncRedeemIn" hidden>
+          <textarea class="account-field" id="syncRedeemText" rows="3" placeholder="粘贴另一台设备上的同步码" aria-label="输入同步码"></textarea>
+          <div class="account-tip">恢复后，这台设备现在的进度会被原设备的鱼缸替换。</div>
+          <div class="account-row gap-top"><button type="button" id="syncRedeemGo">恢复我的鱼缸</button></div>
+          <div class="account-note" id="syncRedeemMsg"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<aside class="v02-drawer" id="settingsDrawer" aria-hidden="true">
+  <div class="v02-shop-card">
+    <div class="v02-shop-header">
+      <div class="v02-shop-head">
+        <div><div class="v02-shop-title">设置</div><div class="v02-shop-sub">声音大小与静音</div></div>
+        <button type="button" class="v02-close" data-close-drawer="settingsDrawer" aria-label="关闭">×</button>
+      </div>
+    </div>
+    <div class="v02-shop-content">
+      <div class="audio-controls" id="audioControls">
+    <button type="button" class="audio-toggle" id="audioToggle" aria-label="静音" aria-pressed="false">🔊</button>
+    <button type="button" class="audio-settings-toggle" id="audioSettingsToggle" aria-label="音频设置" aria-expanded="false">•••</button>
+    <div class="audio-settings" id="audioSettings" aria-hidden="true">
+      <div class="audio-settings-title">音频</div>
+      <!-- 滑块按后台配置的音效分类动态生成，分类可增删，这里不再写死 -->
+      <div id="audioSliders"></div>
+    </div>
+  </div>
+    </div>
+  </div>
+</aside>
 
 <button type="button" class="dev-toggle" id="devToggle">DEV</button>
 <div class="dev-panel" id="devPanel" aria-hidden="true">
@@ -1961,11 +2079,10 @@
     const el = document.getElementById("syncGuide");
     if(el) el.hidden = true;
     try { localStorage.setItem(SYNC_GUIDE_KEY, "1"); } catch(_) { /* 存不下就当已看，下次不弹 */ }
-    // 打开设置面板并把同步码生成出来，用户直接就能复制。
-    const panel = document.getElementById("audioSettings");
-    if(panel){ panel.classList.add("show"); panel.setAttribute("aria-hidden", "false"); }
-    const toggle = document.getElementById("audioSettingsToggle");
-    if(toggle) toggle.setAttribute("aria-expanded", "true");
+    // 打开「我的」抽屉并把同步码生成出来，用户直接就能复制。
+    // 同步码现在在「我的」里（顶栏第三个入口），不再挂在音频设置面板下面。
+    if(typeof openDrawer === "function") openDrawer("mineDrawer");
+    if(typeof renderMineProfile === "function") renderMineProfile();
     generateSyncCode().catch(error => console.warn("[sync] 引导弹窗生成同步码失败：", error.message));
   }
   function syncGuideSkip(){
@@ -2384,7 +2501,7 @@
   }
   // 有别的弹窗开着时先不弹事件提示，排队等它关掉 —— 避免两层遮罩叠在一起。
   function eventOverlayBusy(){
-    return ["shopModal", "purchaseReceipt", "completionFlash", "focusShopBlocker", "modal", "eventModal"].some(id => {
+    return ["shopModal", "mineDrawer", "settingsDrawer", "purchaseReceipt", "completionFlash", "focusShopBlocker", "modal", "eventModal"].some(id => {
       const el = document.getElementById(id);
       return Boolean(el && el.classList.contains("show"));
     });
@@ -2693,6 +2810,97 @@
     applyTemp();
   }
 
+  // ===== 顶栏三个入口 → 右侧抽屉（原型：左泡泡数、右「装点 / 我的 / 设置」）=====
+  // 同一时间只开一个抽屉：开新的先关掉旧的，顶栏高亮跟着走。
+  // 商店走 openShop（它要拉配置、做快照），所以这里只管外壳，不接管它的业务。
+  const DRAWER_IDS = ["shopModal", "mineDrawer", "settingsDrawer"];
+  function markTopEntry(id){
+    document.querySelectorAll(".v02-top-entry").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.drawer === id);
+    });
+  }
+  function closeDrawer(id){
+    const el = document.getElementById(id);
+    if(el){ el.classList.remove("show"); el.setAttribute("aria-hidden", "true"); }
+    if(id === "shopModal" && shopOpen) closeShop(false);
+  }
+  function closeAllDrawers(except){
+    DRAWER_IDS.forEach(id => { if(id !== except) closeDrawer(id); });
+  }
+  function openDrawer(id){
+    closeAllDrawers(id);
+    markTopEntry(id);
+    const el = document.getElementById(id);
+    if(el){ el.classList.add("show"); el.setAttribute("aria-hidden", "false"); }
+  }
+  // 「我的」资料卡。昵称是玩家唯一能写的档案字段（PUT /api/game/me）；
+  // 其余（注册时间 / 累计专注 / 鱼数）只读。数据来自 GET /api/game/me ——
+  // refreshFocusStats 本来就在拉这个接口，顺手把 nickname / createdAt 存下来，
+  // 不为昵称多发一次请求。没登录（没令牌）时整张卡隐藏。
+  let myProfile = { nickname: "", createdAt: 0 };
+  function formatProfileDay(ts){
+    const n = Number(ts) || 0;
+    if(!n) return "";
+    const d = new Date(n);
+    const pad = value => String(value).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+  function renderMineProfile(){
+    const card = document.getElementById("mineProfile");
+    if(!card) return;
+    const hasCloud = Boolean(CLOUD_SYNC_ENABLED && ACCOUNT_TOKEN);
+    card.hidden = !hasCloud;
+    if(!hasCloud) return;
+    const input = document.getElementById("mineNicknameInput");
+    // 正在输入时不要用服务端值覆盖光标下的内容。
+    if(input && document.activeElement !== input) input.value = myProfile.nickname || "";
+    const save = document.getElementById("mineNicknameSave");
+    // 按输入框当前内容判断，而不是无脑禁用：这样后台刷新统计时不会把
+    // 用户已经敲进去、但还没保存的改动连按钮一起吞掉。
+    if(save) save.disabled = !input || input.value.trim() === (myProfile.nickname || "");
+    const setText = (id, value) => { const el = document.getElementById(id); if(el) el.textContent = String(value); };
+    setText("mineFocusMinutes", focusStats.focusMinutesTotal);
+    setText("mineFocusCount", focusStats.focusCount);
+    setText("mineTodayMinutes", focusStats.focusMinutesToday);
+    setText("mineFishCount", (AquariumData.fish || []).length);
+    const created = document.getElementById("mineCreatedAt");
+    if(created){
+      const day = formatProfileDay(myProfile.createdAt);
+      created.textContent = day ? `来到水族馆 ${day}` : "";
+    }
+  }
+  // 保存昵称。客户端只管体验（按钮禁用、字数提示），长度与字符规则一律以服务端为准。
+  async function saveMineNickname(){
+    const input = document.getElementById("mineNicknameInput");
+    if(!input) return;
+    const msg = document.getElementById("mineNicknameMsg");
+    const save = document.getElementById("mineNicknameSave");
+    const value = input.value.trim();
+    if(save) save.disabled = true;
+    if(msg){ msg.textContent = "保存中…"; msg.className = "account-note"; }
+    try{
+      const response = await fetch(`${API_BASE}/game/me`, {
+        method: "PUT",
+        headers: cloudHeaders(),
+        body: JSON.stringify({ nickname: value })
+      });
+      const body = await response.json().catch(() => null);
+      if(!response.ok){
+        if(msg){ msg.textContent = (body && body.error) || "没保存成功，稍后再试"; msg.className = "account-note bad"; }
+        return;
+      }
+      const d = (body && body.data) || {};
+      myProfile.nickname = d.nickname || "";
+      input.value = myProfile.nickname;
+      if(msg){
+        msg.textContent = myProfile.nickname ? "昵称已保存" : "昵称已清空";
+        msg.className = "account-note ok";
+      }
+    }catch(_){
+      if(msg){ msg.textContent = "网络不太好，稍后再试"; msg.className = "account-note bad"; }
+    }
+  }
+
   async function openShop(){
     if(running){
       const blocker=document.getElementById("focusShopBlocker");
@@ -2715,6 +2923,7 @@
     shopOpen=false;
     document.getElementById("shopModal").classList.remove("show");
     document.getElementById("shopModal").setAttribute("aria-hidden","true");
+    markTopEntry("");
   }
 
   // 服务端结算：把**目标鱼缸**交给服务端，由它对比上一次鱼缸算差额。
@@ -2909,7 +3118,38 @@
       renderShop();
     });
   });
-  document.getElementById("shopOpenBtn").addEventListener("click",openShop);
+  // 顶栏「装点」：先收掉别的抽屉再走 openShop（专注中它会拦下并弹提示，不打开抽屉）。
+  document.getElementById("shopOpenBtn").addEventListener("click",()=>{
+    closeAllDrawers("shopModal");
+    markTopEntry("shopModal");
+    openShop();
+  });
+  document.getElementById("mineOpenBtn").addEventListener("click",()=>{
+    openDrawer("mineDrawer");
+    renderMineProfile();
+    // 打开时顺手刷新一次聚合（昵称/注册时间也在这条接口上），失败静默。
+    refreshFocusStats().catch(()=>{});
+  });
+  document.getElementById("settingsOpenBtn").addEventListener("click",()=>openDrawer("settingsDrawer"));
+  // 昵称输入：只有真的改了才让「保存」可点；Enter 等同点保存。
+  {
+    const input = document.getElementById("mineNicknameInput");
+    const saveBtn = document.getElementById("mineNicknameSave");
+    if(input && saveBtn){
+      const syncSaveState = () => { saveBtn.disabled = input.value.trim() === (myProfile.nickname || ""); };
+      input.addEventListener("input", syncSaveState);
+      input.addEventListener("keydown", event => {
+        if(event.key === "Enter" && !saveBtn.disabled){ event.preventDefault(); saveMineNickname(); }
+      });
+      saveBtn.addEventListener("click", saveMineNickname);
+    }
+  }
+  document.querySelectorAll("[data-close-drawer]").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      closeDrawer(btn.dataset.closeDrawer);
+      markTopEntry("");
+    });
+  });
   document.getElementById("focusShopBlockerConfirm").addEventListener("click",()=>{
     const blocker=document.getElementById("focusShopBlocker");
     blocker.classList.remove("show");
@@ -3977,6 +4217,7 @@ const elemToRemove = nearest.el;
     if(todayEl) todayEl.textContent = `今日专注 ${focusStats.focusCountToday} 次 · ${focusStats.focusMinutesToday} 分钟`;
     if(totalEl) totalEl.textContent = `累计 ${focusStats.focusCount} 次 · ${focusStats.focusMinutesTotal} 分钟`;
     el.hidden = false;
+    renderMineProfile();
   }
 
   // 拉取并刷新专注聚合统计。失败（无令牌 / 网络错 / 非 2xx）安静跳过，不影响主流程。
@@ -3994,6 +4235,10 @@ const elemToRemove = nearest.el;
         focusCountToday: Number(d.focusCountToday) || 0,
         focusMinutesToday: Number(d.focusMinutesToday) || 0
       };
+      // 同一份回包里带着档案字段，顺手存下 —— 「我的」资料卡就不用再发一次请求。
+      // 只在服务端真给了值时才覆盖，避免某次异常回包把已显示的昵称抹掉。
+      if(typeof d.nickname === "string") myProfile.nickname = d.nickname;
+      if(Number(d.createdAt)) myProfile.createdAt = Number(d.createdAt);
       renderFocusStats();
     }catch(_){ /* 聚合展示失败不影响主流程 */ }
   }

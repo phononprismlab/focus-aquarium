@@ -47,6 +47,20 @@ export const TABLE_USERS = "users";
 export const TABLE_SAVES = "saves";
 export const TABLE_FOCUS_RECORDS = "focus_records";
 export const TABLE_TRACKING_EVENTS = "tracking_events";
+// 用户档案里允许被客户端改的列。白名单写死在数据层：路由层哪怕传了别的键也写不进去，
+// 免得将来有人顺手把 is_supporter / cohort 一起塞进 patch。
+export const UPDATABLE_USER_FIELDS = new Set(["nickname"]);
+// 昵称规则：1–12 个字符（按 Unicode 码点算，emoji 记 1 个），去掉首尾空白，
+// 不允许换行/制表等控制字符。空字符串是合法值 = 清空昵称，前端会显示占位。
+export const NICKNAME_MAX_LENGTH = 12;
+export function normalizeNickname(input) {
+  if (typeof input !== "string") return { ok: false, reason: "nickname 必须是字符串" };
+  const value = input.trim();
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(value)) return { ok: false, reason: "昵称不能包含换行或控制字符" };
+  if ([...value].length > NICKNAME_MAX_LENGTH) return { ok: false, reason: `昵称最多 ${NICKNAME_MAX_LENGTH} 个字` };
+  return { ok: true, value };
+}
 // 埋点白名单（定稿第三步）：open=打开页面（客户端上报）；
 // focus_start / focus_complete / purchase 由服务端在权威时机直接落库，不接受客户端代报。
 export const TRACKING_EVENTS = ["open", "focus_start", "focus_complete", "purchase"];
@@ -463,6 +477,18 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
       return user ? { ...user } : null;
     },
 
+    // 局部更新用户档案（目前只有 nickname）。白名单字段，调用方传什么都不能改别的列。
+    // 用户不存在时返回 null，由路由层决定是报错还是先建号。
+    async updateUser(uid, patch = {}) {
+      const user = users.get(uid);
+      if (!user) return null;
+      for (const key of Object.keys(patch)) {
+        if (!UPDATABLE_USER_FIELDS.has(key)) continue;
+        user[key] = patch[key];
+      }
+      return { ...user };
+    },
+
     // 后台用户列表：按注册时间升序返回，并附带聚合数据（专注时长/次数、鱼数）。
     // 聚合在数据层一次性算好，避免后台页面触发「每用户一次查询」的 N+1。
     async listUsers({ cohort, isSupporter } = {}) {
@@ -601,6 +627,20 @@ export function createCloudbasePlayerStore(db, { now = () => Date.now() } = {}) 
     },
 
     async getUser(uid) {
+      return selectOne(TABLE_USERS, "user_id", uid);
+    },
+
+    // 局部更新用户档案（目前只有 nickname）。白名单在数据层兜底，
+    // 空 patch 直接读回原行，避免发一条 update {} 的空语句。
+    // 用 selectOne 回读而不是把 update 的返回当行 —— 这个 SDK 的 update 不回填行。
+    async updateUser(uid, patch = {}) {
+      const row = {};
+      for (const key of Object.keys(patch)) {
+        if (!UPDATABLE_USER_FIELDS.has(key)) continue;
+        row[key] = patch[key];
+      }
+      if (!Object.keys(row).length) return selectOne(TABLE_USERS, "user_id", uid);
+      await db.from(TABLE_USERS).update(row).eq("user_id", uid).throwOnError();
       return selectOne(TABLE_USERS, "user_id", uid);
     },
 

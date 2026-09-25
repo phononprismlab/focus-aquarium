@@ -28,6 +28,8 @@ const files = ["reward.test.js", "focus-session.test.js", "audio-categories.test
   "focus-stats-ui.test.js",
   "admin-users.test.js",
   "tracking.test.js",
+  "player-profile.test.js",
+  "player-profile-ui.test.js",
   "background-visual.test.js"];
 
 let failed = 0;
