@@ -38,8 +38,16 @@ function rule(selector) {
 const compact = source.replace(/:\s+/g, ":").replace(/;\s+/g, ";").replace(/\s*\{\s*/g, "{").replace(/\s*\}\s*/g, "}");
 
 function zOf(selector) {
-  const match = rule(selector).match(/z-index:\s*(-?\d+)/);
+  // ⚠️ 必须在**剥掉 @media** 的源码上量：2026-09-25 新增的手机横屏断点里也写了
+  // `.v02-topbar{...}`，它排在文件更前面，直接全文 match 会先命中那条（没有 z-index）→ 读出 null。
+  const match = ruleOfNoMedia(selector).match(/z-index:\s*(-?\d+)/);
   return match ? Number(match[1]) : null;
+}
+// 剥掉 @media 块后的源码 + 按选择器取规则体。
+const noMediaSource = source.replace(/@media[^{]*\{(?:[^{}]|\{[^{}]*\})*\}/g, "");
+function ruleOfNoMedia(selector) {
+  const match = noMediaSource.match(new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}"));
+  return match ? match[1].replace(/:\s+/g, ":").replace(/;\s+/g, ";").trim() : "";
 }
 function extractFunction(src, name) {
   const start = src.indexOf(`function ${name}(`);
@@ -97,12 +105,14 @@ console.log("\n--- 2. 毛玻璃罩：盖住缸，让开字 ---");
   const bubbles = zOf(".bubbles");
   const aqPlant = zOf(".aq-plant");
   const frost = zOf(".tank-frost");
-  const title = zOf(".poster-title");
+  // 2026-09-25：标题从缸里的大海报字搬进顶栏左上角，所以这里改成量顶栏的层级 ——
+  // 标题现在挂在顶栏里，顶栏在罩子上面 = 标题不会被糊。
+  const title = zOf(".v02-topbar");
   const timer = zOf(".timer");
   chk("各层 z-index 都读到了", [fish, plant, sand, bubbles, aqPlant, frost, title, timer].every(v => Number.isFinite(v)), true);
   chkTrue(`缸里的东西全在罩子下面（鱼${fish} 草${plant} 沙${sand} 气泡${bubbles} 上传水草${aqPlant} < 罩子${frost}）`,
     [fish, plant, sand, bubbles, aqPlant].every(v => v < frost));
-  chkTrue(`海报标题在罩子上面（标题${title} > 罩子${frost}）—— 字不该被糊`, title > frost);
+  chkTrue(`顶栏（标题所在层）在罩子上面（顶栏${title} > 罩子${frost}）—— 字不该被糊`, title > frost);
   chkTrue(`计时器在罩子上面（计时器${timer} > 罩子${frost}）—— 不然连按钮都糊了`, timer > frost);
 }
 

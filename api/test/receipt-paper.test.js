@@ -103,19 +103,14 @@ console.log("\n--- 5. 票面更长 + 小屏可滚 ---");
   chkTrue("阴影层用 margin:auto 居中（可滚的关键）", /\.v02-paper-shadow\{[^}]*margin:auto/.test(source));
 }
 
-console.log("\n--- 6. 贴纸 ---");
+console.log("\n--- 6. 贴纸（2026-09-25 全部下线） ---");
 {
-  chk("两处各 4 张贴纸", (source.match(/class="v02-paper-sticker /g) || []).length, 8);
-  chkTrue("贴纸不吃点击（不能挡住按钮）", /\.v02-paper-sticker\{[^}]*pointer-events:none/.test(source));
-  chkTrue("贴纸是白底圆片（裸 emoji 落在花花背景上就是脏点）",
-    /\.v02-paper-sticker\{[^}]*border-radius:50%/.test(source) && /\.v02-paper-sticker\{[^}]*background:#fffdf7/.test(source));
-  // 横向伸出量必须 ≤ 纸的内边距，否则会压到正文。
-  const pad = Number((rule(".v02-paper").match(/padding:34px (\d+)px/) || [])[1]);
-  const offsets = [...source.matchAll(/\.v02-paper-sticker\.s[1-4]\{(?:left|right):-(\d+)px/g)].map(m => Number(m[1]));
-  chk("4 个偏移都取到了", offsets.length, 4);
-  chkTrue(`伸出量 ${Math.max(...offsets)}px < 纸内边距 ${pad}px（压不到正文）`, Math.max(...offsets) < pad);
-  // 贴纸伸出量还必须留得下，否则会把弹窗的 overflow:auto 撑出横向滚动条。
-  chkTrue("纸宽为贴纸留了 76px（18×2 + 弹窗 40px 内边距）", /width:min\(348px,calc\(100vw - 76px\)\)/.test(source));
+  // dominik：贴纸先都去掉，等以后画了图再贴。这里反向锁住 —— 别哪天又冒出来。
+  chk("两张票上都不再有贴纸元素", (source.match(/class="v02-paper-sticker /g) || []).length, 0);
+  chkTrue("贴纸的 CSS 也一起删了（不留死代码）", !/\.v02-paper-sticker/.test(source));
+  // 贴纸曾经把纸宽压到 calc(100vw - 76px) 给它让位；下线后纸宽应该回到正常的 40px 边距。
+  chkTrue("纸宽回到 40px 边距（不再为贴纸让位）", /width:min\(348px,calc\(100vw - 40px\)\)/.test(source));
+  chkTrue("没有残留的 76px 让位写法", !/calc\(100vw - 76px\)/.test(source));
 }
 
 console.log("\n--- 7. 票面时间 ---");

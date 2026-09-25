@@ -131,12 +131,23 @@ console.log("\n--- 2. 反向：不该铺的一律不铺 ---");
     s.visualForItem("backgrounds", "bg001").css, "red");
 }
 
-console.log("\n--- 3. 底砂同规则 ---");
+console.log("\n--- 3. 底砂同规则（但 fit 单独一档）---");
 {
+  // 🔴 2026-09-25 修：沙子是「透明底 + 高度约 20%」的条带图，用 cover 会让近方形图按较大边
+  //    缩放，透明区正好铺满可见区域 → 沙子完全不显示（线上实测）。改成按高度撑满 + 横向平铺。
   const s = build([{ id: "sand001", category: "sands", previewImage: "https://cdn/sand.png" }]);
-  chk("底砂也吃上传的图",
+  chk("底砂吃上传的图，但按高度撑满（不是 cover）",
     s.visualForItem("sands", "sand001").css,
-    'url("https://cdn/sand.png") center / cover no-repeat');
+    'url("https://cdn/sand.png") center bottom / auto 100% repeat-x');
+  chk("沙子 fit 由 category 单独判定",
+    s.cssFromImagePath("https://cdn/sand.png", "sand"),
+    'url("https://cdn/sand.png") center bottom / auto 100% repeat-x');
+  chk("背景仍走 cover（不受沙子改动影响）",
+    s.cssFromImagePath("https://cdn/bg.png", "cover"),
+    'url("https://cdn/bg.png") center / cover no-repeat');
+  chk("装饰仍走 contain（不受沙子改动影响）",
+    s.cssFromImagePath("https://cdn/deco.png", "contain"),
+    'url("https://cdn/deco.png") center bottom / contain no-repeat');
 }
 {
   const s = build([{ id: "sand001", category: "sands" }]);

@@ -95,12 +95,15 @@ for (const [text, bits] of VECTORS) {
   chk(`「${text}」(${bits.length} 模块)`, modulesToBits(text), bits);
 }
 
-console.log("\n--- 2. 小票上那句致谢 ---");
+console.log("\n--- 2. 小票上的品牌短码 ---");
 {
-  chk("条码内容 = 英文致谢", api.RECEIPT_BARCODE_TEXT, "Thank you for visiting Yuerle Aquarium");
+  // 2026-09-25：内容从 38 字符的整句改成品牌短码。字符少了 → 模块更宽 →
+  // 手机相机更容易扫出来（上一版实测 0.6~0.7px/模块，处在临界值）。
+  chk("条码内容 = 品牌短码", api.RECEIPT_BARCODE_TEXT, "YUERLE-AQUARIUM");
   chkTrue("纯 ASCII（码集 B 只收 32–126）", /^[\x20-\x7e]+$/.test(api.RECEIPT_BARCODE_TEXT));
+  chkTrue("不含数字（纯数字会被编码器切成码集 C，向量就对不上了）", !/\d/.test(api.RECEIPT_BARCODE_TEXT));
   const bits = modulesToBits(api.RECEIPT_BARCODE_TEXT);
-  chk("模块数 = 11×(起始+数据+校验) + 13(终止) = 453", bits.length, 453);
+  chk("模块数 = 11×(起始+15 数据+校验) + 13(终止) = 200", bits.length, 200);
   chk("起始符 = 码集 B（104 → 11010010000）", bits.slice(0, 11), "11010010000");
   chk("终止符 = 2331112", bits.slice(-13), "1100011101011");
 }
@@ -152,7 +155,7 @@ console.log("\n--- 4. 画进 DOM 的方式 ---");
 {
   const host = { innerHTML: "" };
   api.renderBarcode(host, api.RECEIPT_BARCODE_TEXT);
-  chkTrue("致谢条码的 viewBox（453+20=473）", host.innerHTML.includes('viewBox="0 0 473 52"'));
+  chkTrue("品牌短码的 viewBox（200+20=220）", host.innerHTML.includes('viewBox="0 0 220 52"'));
   // 全是非 ASCII 时不留一个"只剩起止符"的空条码。
   const empty = { innerHTML: "x" };
   api.renderBarcode(empty, "中文");
@@ -162,11 +165,11 @@ console.log("\n--- 4. 画进 DOM 的方式 ---");
   chk("纯空白也不画", blank.innerHTML, "");
 }
 {
-  // 条数：453 个模块里连续 1 的段数。人工数过 = 124（与浏览器里 DOM 实测一致）。
+  // 条数：200 个模块里连续 1 的段数 = 17 个符号 × 3 条 + 终止符 4 条 = 55。
   const host = { innerHTML: "" };
   api.renderBarcode(host, api.RECEIPT_BARCODE_TEXT);
   const rects = host.innerHTML.match(/<rect /g) || [];
-  chk("致谢条码的条数（与浏览器实测一致）", rects.length, 124);
+  chk("品牌短码的条数", rects.length, 55);
 }
 
 console.log("\n--- 5. 时间戳 ---");

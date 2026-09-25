@@ -160,7 +160,7 @@ chk("专注中：两个按钮都禁用", runSync({ running: true }), [true, true
 chk("时长锁死（min=max）：都禁用", runSync({ min: 30, max: 30 }), [true, true]);
 chkTrue("初始化就同步一次", /syncTimeStepButtons\(\);\n/.test(source));
 chkTrue("点开始专注时同步（否则专注中还能改时长）", /durationSeconds = minutes \* 60;\n(?:.*\n)*?    updateDevStatus\(\);\n    syncTimeStepButtons\(\);/.test(source));
-chkTrue("专注结束时同步（否则再也改不回来）", /updateDevStatus\(\);\n    syncTimeStepButtons\(\);\n\n    appTitle\.style\.visibility/.test(source));
+chkTrue("专注结束时同步（否则再也改不回来）", /updateDevStatus\(\);\n    syncTimeStepButtons\(\);\n\n    appTitle\.classList\.remove\("bubble-dissolve"\);/.test(source));
 
 // 触屏手感：不加这些手机上会有 300ms 延迟和长按选中。
 console.log("\n--- 按钮的触屏细节 ---");
@@ -371,8 +371,8 @@ chkTrue("两种情况文案分开判断", /allItems\.length===0\s*\?/.test(sourc
 
 console.log("\n--- A3 买满态：以前点 + 毫无反应像卡住 ---");
 chkTrue("算出是否到上限", /const fishAtMax=item\.category==="fish" && previewCount>=item\.maxInventory;/.test(source));
-chkTrue("到上限时 + 置灰", /data-plus="\$\{item\.id\}" \$\{fishAtMax\?'disabled':''\}/.test(source));
-chkTrue("数量为 0 时 − 置灰", /data-minus="\$\{item\.id\}" \$\{previewCount<=0\?'disabled':''\}/.test(source));
+chkTrue("到上限时 + 置灰", /data-plus="\$\{item\.id\}"[^>]*\$\{fishAtMax\?'disabled':''\}/.test(source));
+chkTrue("数量为 0 时 − 置灰", /data-minus="\$\{item\.id\}"[^>]*\$\{previewCount<=0\?'disabled':''\}/.test(source));
 chkTrue("到上限时说明上限条数", /已经养满啦，这个品种最多 \$\{item\.maxInventory\} 条。/.test(source));
 chkTrue("置灰按钮有视觉样式", /\.v02-quantity button:disabled\{/.test(source));
 

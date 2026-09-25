@@ -116,7 +116,7 @@ console.log("--- 1. 专注配置页签必须能渲染出来 ---");
   try { api.renderFocus(); } catch (e) { error = `${e.constructor.name}: ${e.message}`; }
   chk("renderFocus() 不抛错", error, null);
   const html = fakeDocument.getElementById("main").innerHTML;
-  chkTrue("确实写进了页面（不是「点了没反应」）", /FOCUS CONFIG/.test(html) && /rewardTiers/.test(html));
+  chkTrue("确实写进了页面（不是「点了没反应」）", /FOCUS CONFIG/.test(html) && /最短专注时长/.test(html));
   chkTrue("页面里没有 undefined（裸 focus 的典型症状）", !/undefined/.test(html));
   chkTrue("三个内置梯度都渲染出来了", (html.match(/class="tier-row"/g) || []).length === 3);
 }
@@ -238,7 +238,8 @@ chkTrue("资源 chip 删除后重新编号（后景/前景不会错位）",
 console.log("\n--- 6. 上传资源要真的传到云存储，不能只写本地文件名 ---");
 chkTrue("不再把 file.name 当路径写进配置", !/addResourceChip\(file\.name/.test(scriptSource));
 chkTrue("有统一的 uploadAsset（按 MIME 选接口）",
-  /async function uploadAsset\(file, label\)[\s\S]{0,400}startsWith\("audio\/"\) \? "\/admin\/assets" : "\/admin\/assets\/image"/.test(scriptSource));
+  // 第三个参数是 2026-09-25 错误分级改造加的「错误贴到哪个控件」，不影响这条断言的意图。
+  /async function uploadAsset\(file, label(?:, [a-zA-Z]+)?\)[\s\S]{0,400}startsWith\("audio\/"\) \? "\/admin\/assets" : "\/admin\/assets\/image"/.test(scriptSource));
 {
   fetchImpl = async () => ({ ok: true, status: 200, json: async () => ({ data: { path: "images/uploaded-1.png", url: "" } }) });
   const api = bootAdmin();
@@ -246,7 +247,8 @@ chkTrue("有统一的 uploadAsset（按 MIME 选接口）",
   const upload = fakeDocument.getElementById("resourceUpload");
   chkTrue("resourceUpload 绑了 onchange", typeof upload.onchange === "function");
   await upload.onchange({ target: { files: [{ name: "罗莎.jpg", type: "image/jpeg" }], value: "" } });
-  chk("图片走 /admin/assets/image", requests.map(r => r.url.split("/api")[1]), ["/admin/assets/image"]);
+  // 过滤 /health：2026-09-25 连接状态卡在启动时会探一次健康检查（公开接口），与上传无关。
+  chk("图片走 /admin/assets/image", requests.map(r => r.url.split("/api")[1]).filter(p => p !== "/health"), ["/admin/assets/image"]);
   const list = fakeDocument.getElementById("resourceFiles");
   chk("chip 用的是上传返回的路径，不是本地文件名", list.children.map(c => c.dataset.path), ["images/uploaded-1.png"]);
   chkTrue("本地文件名没进 data-path", !list.children.some(c => c.dataset.path === "罗莎.jpg"));
@@ -258,7 +260,10 @@ chkTrue("有统一的 uploadAsset（按 MIME 选接口）",
   api.renderDecorationForm();
   await fakeDocument.getElementById("resourceUpload").onchange({ target: { files: [{ name: "a.png", type: "image/png" }], value: "" } });
   chk("回落本地的路径不写进资源列表", fakeDocument.getElementById("resourceFiles").children.length, 0);
-  chkTrue("并明确告诉用户没保存", /未保存/.test(lastToast()));
+  // 2026-09-25 错误分级改造：云存储失败属于「必须处理」的错误，不再只靠 toast 一闪而过，
+  // 而是顶到页面 banner + 贴在上传控件旁边。
+  chkTrue("并明确告诉用户没保存", /未保存/.test(fakeDocument.getElementById("errorBannerText").textContent));
+  chkTrue("错误顶到了页面 banner（不再只靠 toast 一闪而过）", fakeDocument.getElementById("errorBanner").hidden === false);
 }
 {
   // 音频文件要走音频接口（存 sounds/）
@@ -266,7 +271,7 @@ chkTrue("有统一的 uploadAsset（按 MIME 选接口）",
   const api = bootAdmin();
   api.renderDecorationForm();
   await fakeDocument.getElementById("resourceUpload").onchange({ target: { files: [{ name: "a.mp3", type: "audio/mpeg" }], value: "" } });
-  chk("音频走 /admin/assets", requests.map(r => r.url.split("/api")[1]), ["/admin/assets"]);
+  chk("音频走 /admin/assets", requests.map(r => r.url.split("/api")[1]).filter(p => p !== "/health"), ["/admin/assets"]);
 }
 
 // ===== 7. 保存时直接用数组，不从 chip 文案反解 =====

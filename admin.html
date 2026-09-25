@@ -104,6 +104,22 @@
 		.audio-row .check { padding-top: 0; }
 		.toast { position: fixed; right: 25px; bottom: 25px; z-index: 5; padding: 12px 17px; border-radius: 8px; color: white; background: var(--ink); box-shadow: var(--shadow); opacity: 0; transform: translateY(10px); pointer-events: none; transition: .25s; }
 		.toast.show { opacity: 1; transform: translateY(0); }
+		.toast.success { background: #246b57; }
+		.toast.error { background: #9c4638; }
+		.toast.warning { background: #8a641e; }
+		.filter-row { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; padding: 0 22px 18px; }
+		.filter-row label { min-width: 150px; }
+		.filter-row label input, .filter-row label select { margin-top: 5px; }
+		.filter-row .count { margin-left: auto; color: var(--muted); font-size: 12px; padding-bottom: 10px; }
+		.list-summary { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+		.summary-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 20px; background: var(--soft); color: var(--muted); font-size: 12px; }
+		.summary-chip strong { color: var(--ink); }
+		.resource-state { display: inline-flex; align-items: center; gap: 5px; color: #bf7c27; font-size: 12px; }
+		.resource-state.ok { color: #23836e; }
+		.publish-note { margin: 0 22px 18px; padding: 10px 12px; border-left: 3px solid var(--yellow); background: #fff9eb; color: #765b22; font-size: 12px; }
+		.key-status { margin-top: 8px; color: #9dc0bb; font-size: 11px; line-height: 1.45; }
+		.key-status.connected { color: #b6f2c8; }
+		.key-status.error { color: #ffc4c4; }
 		.key-section { margin-top: auto; padding: 16px 14px 4px; border-top: 1px solid rgba(255,255,255,.12); }
 		.key-input { width: 100%; border: 1px solid rgba(255,255,255,.2); border-radius: 7px; background: rgba(0,0,0,.15); color: #fff; padding: 8px 10px; font-size: 13px; outline: none; }
 		.key-input::placeholder { color: #80aaa5; }
@@ -111,6 +127,65 @@
 		.key-btn { width: 100%; margin-top: 8px; border: 0; border-radius: 7px; padding: 8px; font-weight: 700; background: var(--teal); color: white; }
 		.key-btn:hover { background: var(--teal-dark); }
 		.key-btn.connected { background: #2d7a55; }
+		/* ===== 连接状态卡：密钥不是常态操作，连上后就折叠起来 ===== */
+		.conn-head { display: flex; align-items: center; gap: 9px; }
+		.conn-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--yellow); flex: 0 0 9px; }
+		.conn-dot.connected { background: #39d98a; box-shadow: 0 0 0 3px rgba(57,217,138,.16); }
+		.conn-dot.error { background: #ff6b6b; }
+		.conn-title { font-size: 13px; font-weight: 700; color: #fff; line-height: 1.25; }
+		.conn-sub { font-size: 11px; color: #9dc0bb; line-height: 1.35; }
+		.conn-toggle { margin-left: auto; border: 1px solid rgba(255,255,255,.22); background: transparent; color: #c4ddda; border-radius: 6px; padding: 3px 8px; font-size: 11px; white-space: nowrap; }
+		.conn-toggle:hover { color: #fff; border-color: rgba(255,255,255,.55); }
+		.conn-body { margin-top: 10px; }
+		.conn-body[hidden] { display: none; }
+		.conn-meta { margin-top: 10px; display: grid; gap: 3px; font-size: 11px; color: #9dc0bb; }
+		.conn-meta b { color: #d7ece9; font-weight: 700; word-break: break-all; }
+		/* ===== 错误分级：toast 只报成功；能定位的就近说；影响全局的顶到页面上 ===== */
+		.error-banner { position: sticky; top: 0; z-index: 30; display: flex; align-items: flex-start; gap: 10px; padding: 12px 18px; background: #8f3a2c; color: #fff; box-shadow: var(--shadow); }
+		.error-banner b { font-weight: 700; line-height: 1.55; }
+		.error-banner .banner-close { margin-left: auto; flex: 0 0 auto; border: 0; background: transparent; color: #fff; font-size: 20px; line-height: 1; padding: 0 2px; }
+		.error-banner[hidden] { display: none; }
+		.field-error { color: #b4553a; font-size: 12px; font-weight: 700; }
+		.field-error[hidden] { display: none; }
+		.form-error { margin: 0 0 16px; padding: 10px 13px; border-left: 3px solid var(--coral); background: #fdf1ed; color: #8f3a2c; font-size: 13px; border-radius: 6px; }
+		.form-error[hidden] { display: none; }
+		.upload-error { display: block; color: #b4553a; font-size: 12px; font-weight: 700; margin-top: 6px; }
+		.upload-error[hidden] { display: none; }
+		.invalid { border-color: #c6533d !important; box-shadow: 0 0 0 3px rgba(198,83,61,.12); }
+		/* ===== 技术字段收进「高级设置」，默认折叠 ===== */
+		.adv { border: 1px dashed #c4dcd5; border-radius: 10px; padding: 11px 15px 15px; background: #fbfdfc; grid-column: 1 / -1; }
+		.adv > summary { cursor: pointer; font-weight: 700; font-size: 13px; color: var(--muted); }
+		.adv > summary:hover { color: var(--teal); }
+		.adv .form-grid { margin-top: 15px; }
+		/* ===== 列表行摘要：不用点进去就知道哪里没配好 ===== */
+		.row-notes { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; align-items: flex-start; }
+		.note-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 2px 8px; border-radius: 20px; background: #fff4dd; color: #bf7c27; }
+		.note-chip.bad { background: #fdeeea; color: #b4553a; }
+		.note-chip.info { background: var(--soft); color: var(--muted); }
+		/* ===== 保存/发布的状态感 ===== */
+		.saved-banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 22px 18px; padding: 12px 15px; border-left: 3px solid var(--teal); background: #eef8f3; border-radius: 8px; font-size: 13px; }
+		.saved-banner .grow { flex: 1 1 auto; min-width: 0; }
+		.saved-banner .button { padding: 6px 12px; font-size: 13px; }
+		.saved-banner[hidden] { display: none; }
+		/* ===== 发布确认弹窗：发布前先看差异 ===== */
+		.modal { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: rgba(16,40,44,.45); padding: 20px; }
+		.modal[hidden] { display: none; }
+		.modal-card { width: min(600px, 100%); max-height: 86vh; overflow: auto; background: var(--paper); border-radius: 14px; box-shadow: var(--shadow); }
+		.modal-head { padding: 20px 22px 0; }
+		.modal-head h3 { margin: 0 0 5px; font-size: 17px; }
+		.modal-head p { margin: 0; color: var(--muted); font-size: 12px; }
+		.modal-body { padding: 16px 22px; }
+		.diff-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+		.diff-table th, .diff-table td { padding: 7px 9px; border-bottom: 1px solid var(--line); white-space: normal; vertical-align: top; text-align: left; }
+		.diff-table th { background: #fbfcfb; }
+		.diff-table td.old { color: #a2553f; background: #fdf6f3; word-break: break-all; }
+		.diff-table td.new { color: #1d6b58; background: #f2faf6; word-break: break-all; }
+		.diff-empty { padding: 16px 0; color: var(--muted); font-size: 13px; }
+		.modal-foot { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 0 22px 20px; }
+		.modal-foot .hint { margin-right: auto; }
+		/* ===== 事件触发的可读预览 ===== */
+		.rule-preview { margin: 0 22px 18px; padding: 12px 15px; border-left: 3px solid var(--teal); background: #eef8f3; border-radius: 8px; font-size: 13px; line-height: 1.75; }
+		.rule-preview b { color: var(--teal-dark); }
 		@media (max-width: 760px) {
 			.app { display: block; }
 			.sidebar { width: 100%; height: auto; position: static; padding: 14px; }
@@ -135,6 +210,10 @@
 	</style>
 </head>
 <body>
+	<div class="error-banner" id="errorBanner" hidden role="alert">
+		<b id="errorBannerText"></b>
+		<button class="banner-close" id="errorBannerClose" aria-label="关闭错误提示">×</button>
+	</div>
 	<div class="app">
 		<aside class="sidebar">
 			<div class="brand">
@@ -152,12 +231,23 @@
 			<button class="nav-item" data-module="payment"><span class="nav-icon">▣</span>付费配置 <span class="reserved">预留</span></button>
 		</nav>
 		<div class="key-section">
-			<div class="nav-label">管理密钥</div>
-			<input type="password" id="adminKeyInput" class="key-input" placeholder="输入管理密钥">
-			<button class="key-btn" id="adminKeyBtn">连接</button>
+			<div class="conn-head">
+				<span class="conn-dot" id="connDot"></span>
+				<div class="grow-title"><div class="conn-title" id="connTitle">未连接</div><div class="conn-sub" id="connSub">输入密钥后连接 API</div></div>
+				<button class="conn-toggle" id="connToggle" type="button">更改密钥</button>
+			</div>
+			<div class="conn-body" id="connBody">
+				<input type="password" id="adminKeyInput" class="key-input" placeholder="输入管理密钥">
+				<button class="key-btn" id="adminKeyBtn">连接</button>
+			</div>
+			<div class="conn-meta" id="connMeta" hidden></div>
+			<div class="key-status" id="keyStatus" role="status">未连接 · 输入密钥后连接 API</div>
 		</div>
 	</aside>
 		<main class="main" id="main"></main>
+	</div>
+	<div class="modal" id="publishDialog" hidden role="dialog" aria-modal="true" aria-labelledby="publishDialogTitle">
+		<div class="modal-card" id="publishDialogCard"></div>
 	</div>
 	<div class="toast" id="toast"></div>
 
@@ -202,22 +292,125 @@
 		let editingType = null;
 		let focusPublished = true;
 		let focusDirty = false;
+		// 线上版本的快照：发布差异弹窗要拿「草稿 vs 线上」比，没有它就只能弹一句干巴巴的确认。
+		let focusPublishedData = null;
 		let audioPublished = true;
 		let audioDirty = false;
+		let audioPublishedData = null;
+		// 未保存离开拦截的开关：专注/音效页没有「返回列表」按钮，靠这个挡住误切页签。
+		let focusGuardOn = false;
+		let audioGuardOn = false;
 		// 玩家管理页：当前筛选条件与列表数据（listUsers 由后台算好聚合，前端只渲染）。
 		let userFilter = { cohort: "", isSupporter: "" };
+		const listFilters = {
+			decorations: { query: "", status: "", category: "" },
+			fish: { query: "", status: "", category: "" },
+			events: { query: "", status: "", category: "" }
+		};
 		let usersLoaded = false;
 		const API_BASE = window.FISHTANK_API_BASE || "https://focus-aquarium-api-316509-5-1491495221.sh.run.tcloudbase.com/api";
 
 		const main = document.getElementById("main");
 		const toast = document.getElementById("toast");
+		const keyStatus = document.getElementById("keyStatus");
 		const categoryLabel = value => SHOP_CATEGORIES.find(category => category.value === value)?.label || value;
 		const resourceList = value => Array.isArray(value) ? value : (value ? [value] : []);
 		const esc = value => String(value ?? "").replace(/[&<>\"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[char]));
 		let adminKey = sessionStorage.getItem("fishtank_admin_key") || "";
 		const adminKeyInput = document.getElementById("adminKeyInput");
 		const adminKeyBtn = document.getElementById("adminKeyBtn");
-		if (adminKey) { adminKeyInput.value = adminKey; adminKeyBtn.textContent = "已连接"; adminKeyBtn.classList.add("connected"); }
+		const connDot = document.getElementById("connDot");
+		const connTitle = document.getElementById("connTitle");
+		const connSub = document.getElementById("connSub");
+		const connBody = document.getElementById("connBody");
+		const connMeta = document.getElementById("connMeta");
+		const connToggle = document.getElementById("connToggle");
+		let lastSyncedAt = 0;
+		// ===== 连接状态卡 =====
+		// 密钥不是常态操作：连上一次就该折叠起来，把侧边栏还给导航。
+		// 「当前环境」不靠人记 —— 从 /api/health 的 account.env 读（health 是公开接口，不需要密钥）。
+		function setConnectionState(kind, message) {
+			keyStatus.textContent = message;
+			keyStatus.className = `key-status ${kind || ""}`;
+			adminKeyBtn.classList.toggle("connected", kind === "connected");
+			adminKeyBtn.textContent = kind === "connected" ? "重新连接" : "连接";
+			if (connDot) connDot.className = `conn-dot ${kind || ""}`;
+			if (connTitle) connTitle.textContent = kind === "connected" ? "已连接" : kind === "error" ? "连接失败" : "未连接";
+			if (connSub) connSub.textContent = message;
+		}
+		function renderConnMeta(env, apiHost) {
+			if (!connMeta) return;
+			const synced = lastSyncedAt ? `刚刚（${new Date(lastSyncedAt).toLocaleTimeString()}）` : "尚未同步";
+			const envLabel = /test|dev/i.test(String(env || "")) ? "测试" : /prod/i.test(String(env || "")) ? "生产" : "未知";
+			connMeta.innerHTML = `<span>环境：<b>${esc(envLabel)}${env ? ` · ${esc(env)}` : ""}</b></span><span>最近同步：<b>${esc(synced)}</b></span><span>API：<b>${esc(apiHost)}</b></span>`;
+			connMeta.hidden = false;
+		}
+		async function refreshConnEnv() {
+			try {
+				const response = await fetch(`${API_BASE}/health`);
+				const body = await response.json();
+				renderConnMeta(body?.data?.account?.env || body?.account?.env || "", API_BASE.replace(/^https?:\/\//, ""));
+			} catch (error) { /* health 拉不到就不显示环境行，不影响连接本身 */ }
+		}
+		connToggle.onclick = () => { const willShow = connBody.hidden; connBody.hidden = !willShow; connToggle.textContent = willShow ? "收起" : "更改密钥"; if (willShow) adminKeyInput.focus(); };
+		function collapseConnBody() { connBody.hidden = true; connToggle.textContent = "更改密钥"; }
+		document.getElementById("errorBannerClose").onclick = clearErrorBanner;
+		// ===== 错误分级 =====
+		// toast 只负责「短暂的成功」。其它的按影响面就近说清：
+		//   影响发布的 → 页面顶部 banner（滚到哪都看得见，得手动关）
+		//   能定位到字段的 → 字段下面一行红字
+		//   上传失败 → 紧挨着文件控件
+		const errorBanner = document.getElementById("errorBanner");
+		const errorBannerText = document.getElementById("errorBannerText");
+		function showErrorBanner(message) { errorBannerText.textContent = message; errorBanner.hidden = false; if (typeof window.scrollTo === "function") window.scrollTo({ top: 0, behavior: "smooth" }); }
+		function clearErrorBanner() { errorBanner.hidden = true; }
+		// 字段级错误：在字段下面插一行红字，并把输入框标红。
+		function setFieldError(form, name, message) {
+			const input = form.elements[name];
+			const holder = input && input.closest ? input.closest(".field") : null;
+			if (input) input.classList.add("invalid");
+			if (!holder) { showFormError(form, message); return; }
+			let tip = holder.querySelector(".field-error");
+			if (!tip) { tip = document.createElement("span"); tip.className = "field-error"; holder.appendChild(tip); }
+			tip.textContent = message;
+			tip.hidden = false;
+		}
+		// 表单级错误（一次要报好几条时用）：统一显示在表单顶部，不靠 toast 一闪而过。
+		function showFormError(form, message) {
+			const box = document.getElementById("formError");
+			if (!box) { showErrorBanner(message); return; }
+			box.textContent = message;
+			box.hidden = false;
+		}
+		function clearFormErrors(form) {
+			const box = document.getElementById("formError");
+			if (box) { box.hidden = true; box.textContent = ""; }
+			form.querySelectorAll(".field-error").forEach(tip => { tip.hidden = true; tip.textContent = ""; });
+			form.querySelectorAll(".invalid").forEach(input => input.classList.remove("invalid"));
+			form.querySelectorAll(".upload-error").forEach(tip => { tip.hidden = true; tip.textContent = ""; });
+		}
+		// 上传失败贴着文件控件说 —— 玩家/管理员的视线就在那，滚到顶部去看 toast 是反人类的。
+		// controlId 既可以是元素 id，也可以直接传元素（音效页的上传控件没有 id）。
+		function showUploadError(controlId, message) {
+			const control = typeof controlId === "string" ? document.getElementById(controlId) : controlId;
+			const holder = control && control.closest ? control.closest(".field") : null;
+			if (!holder) { showFormError(control && control.form, message); return; }
+			let tip = holder.querySelector(".upload-error");
+			if (!tip) { tip = document.createElement("span"); tip.className = "upload-error"; holder.appendChild(tip); }
+			tip.textContent = message;
+			tip.hidden = false;
+		}
+		// ===== 未保存离开拦截 =====
+		// leaveGuard 返回 true 表示当前表单有未保存的修改。切页签 / 返回列表 / 刷新都会被拦下来问一句。
+		let leaveGuard = null;
+		function setLeaveGuard(isDirty) { leaveGuard = isDirty; }
+		function confirmLeave() { return !leaveGuard || !leaveGuard() || confirm("有未保存的修改，离开会丢失。确定要离开吗？"); }
+		if (typeof window.addEventListener === "function") {
+			window.addEventListener("beforeunload", event => {
+				if (leaveGuard && leaveGuard()) { event.preventDefault(); event.returnValue = ""; }
+			});
+		}
+		if (adminKey) { adminKeyInput.value = adminKey; setConnectionState("connected", "已连接 · 正在读取配置"); }
 		async function apiRequest(path, options = {}) {
 			const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
 			if (adminKey) headers["x-admin-key"] = adminKey;
@@ -228,14 +421,26 @@
 				// fetch 只在网络层失败时抛出。最常见三种：服务没起来、地址不对、跨域被拦截。
 				throw new Error(`无法连接 ${API_BASE}（网络错误或跨域被拦截）`);
 			}
-			if (response.status === 401) { adminKeyBtn.classList.remove("connected"); adminKeyBtn.textContent = "连接"; throw new Error("管理密钥无效或缺失"); }
+			if (response.status === 401) { setConnectionState("error", "连接失败 · 管理密钥无效或缺失"); throw new Error("管理密钥无效或缺失"); }
 			const body = response.status === 204 ? null : await response.json();
 			if (!response.ok) throw new Error(body?.error || "API 请求失败");
 			return body;
 		}
+		// 后台原始记录 → 界面用的可编辑对象：顶层散开配置字段（表单直接读写），
+		// 同时保留 data / publishedData / updatedAt —— 没有这三个就做不了「草稿 vs 线上」的差异对比。
+		function toEditableRecord(record) {
+			return {
+				...(record?.data || {}),
+				data: record?.data || {},
+				publishedData: record?.publishedData || null,
+				published: Boolean(record?.published),
+				dirty: !record?.published,
+				updatedAt: Number(record?.updatedAt) || 0
+			};
+		}
 		function applyRecords(records, type) {
 			// 记录里缺 data 字段时不该让后台崩掉，用空对象兜住，界面上表现为一条待补完的记录。
-			return records.map(record => ({ ...(record?.data || {}), published: record.published, dirty: !record.published }));
+			return (records || []).map(toEditableRecord);
 		}
 		async function loadAdminData() {
 			// 逐项接住失败：原来任何一项挂掉都会让整个后台打不开，也说不清是哪一项。
@@ -282,6 +487,7 @@
 				state.focus = { ...focusRecord.data };
 				focusPublished = focusRecord.published;
 				focusDirty = !focusPublished;
+				focusPublishedData = focusRecord.publishedData || null;
 			}
 			if (failed.length) {
 				// 同一原因时合并成一句话，否则提示里会重复三遍一模一样的说明。
@@ -290,7 +496,156 @@
 					: failed.map(item => `${item.label}加载失败（${item.reason}）`).join("；"));
 			}
 		}
-		function showToast(message, duration = 2400) { toast.textContent = message; toast.classList.add("show"); clearTimeout(showToast.timer); showToast.timer = setTimeout(() => toast.classList.remove("show"), duration); }
+		function showToast(message, duration = 2400, kind = "") { toast.textContent = message; toast.className = `toast show ${kind}`; clearTimeout(showToast.timer); showToast.timer = setTimeout(() => toast.classList.remove("show"), duration); }
+		function recordMatches(item, filter) {
+			const haystack = [item.name, item.id, item.fishid, item.category, item.handler].filter(Boolean).join(" ").toLowerCase();
+			const query = String(filter.query || "").toLowerCase();
+			const queryOk = !query || haystack.includes(query);
+			const statusOk = !filter.status || (filter.status === "draft" ? item.dirty : !item.dirty);
+			const categoryOk = !filter.category || item.category === filter.category;
+			return queryOk && statusOk && categoryOk;
+		}
+		function formatUpdatedAt(ts) {
+			const value = Number(ts) || 0;
+			if (!value) return "—";
+			const date = new Date(value);
+			const sameDay = new Date().toDateString() === date.toDateString();
+			return sameDay ? `今天 ${date.toTimeString().slice(0, 5)}` : date.toLocaleDateString();
+		}
+		function resourceStatus(item, kind = "decoration") {
+			const resources = resourceList(item.resourcePath).filter(Boolean);
+			if (!resources.length) return `<span class="resource-state">${kind === "fish" ? "使用 CSS 鱼" : "未配置资源"}</span>`;
+			return `<span class="resource-state ok">资源 ${resources.length} 项</span>`;
+		}
+		// 行内摘要：不用点进编辑页就能看出这条配置哪里没弄完。
+		function decorationNotes(item) {
+			const notes = [];
+			const resources = resourceList(item.resourcePath).filter(Boolean);
+			if (!resources.length) notes.push({ cls: "bad", text: "鱼缸资源未上传" });
+			else if (item.category === "decorations" && resources.length < 2) notes.push({ cls: "info", text: "只有 1 张资源图（第 2 张是前景，可留空）" });
+			if (!String(item.previewImage || "").trim()) notes.push({ cls: "info", text: "预览图缺失（商店卡片会没有图）" });
+			if (!String(item.description || "").trim()) notes.push({ cls: "info", text: "描述未填写" });
+			if (item.dirty) notes.push({ cls: "", text: "有草稿未发布" });
+			return notes;
+		}
+		function fishNotes(item) {
+			const notes = [];
+			if (!fishResourceRows(item.resourcePath).length) notes.push({ cls: "info", text: "未上传鱼图（玩家端用 CSS 鱼）" });
+			if (!String(item.animationCode || "").trim()) notes.push({ cls: "info", text: "未写动画代码（用内置游动）" });
+			if (item.dirty) notes.push({ cls: "", text: "有草稿未发布" });
+			return notes;
+		}
+		function notesHtml(notes) {
+			if (!notes.length) return "";
+			return `<div class="row-notes">${notes.map(note => `<span class="note-chip ${note.cls}">${esc(note.text)}</span>`).join("")}</div>`;
+		}
+		function publishSummary(item) {
+			const rows = diffRows(item);
+			if (rows === null) return "将发布：全新配置（线上还没有这份）";
+			if (!rows.length) return "草稿与线上版本一致";
+			return `将发布：${rows.slice(0, 5).map(row => row.label).join("、")}${rows.length > 5 ? " 等" : ""}`;
+		}
+		// ===== 发布前差异对比 =====
+		// 发布是「对玩家生效」的动作，不能只靠一个按钮。这里把「草稿 vs 当前线上」逐字段列出来，
+		// 管理员看一眼就知道要发什么；全新配置（线上没有）则明确说「线上还没有这份」。
+		function shortValue(value) {
+			if (value === null || value === undefined || value === "") return "（空）";
+			if (Array.isArray(value)) return value.length ? value.map(entry => shortValue(entry)).join("、") : "（空列表）";
+			if (typeof value === "object") {
+				if (value && value.slot && value.path) return `${value.slot}: ${String(value.path).split("/").pop()}`;
+				return Object.keys(value).length ? Object.entries(value).map(([key, entry]) => `${key}=${shortValue(entry)}`).join(" ") : "（空）";
+			}
+			if (typeof value === "boolean") return value ? "是" : "否";
+			const text = String(value);
+			return text.length > 60 ? `${text.slice(0, 60)}…` : text;
+		}
+		function diffRows(item) {
+			const previous = item.publishedData || null;
+			const current = item.data || item;
+			// publishedData 为空 = 线上还没发布过这份配置（新建的），没有「旧版本」可比。
+			if (!previous || !Object.keys(previous).length) return null;
+			const keys = Array.from(new Set([...Object.keys(previous), ...Object.keys(current)]))
+				.filter(key => key !== "id" && key !== "fishid");
+			return keys.map(key => ({ key, label: fieldLabel(key), before: previous[key], after: current[key] }))
+				.filter(row => JSON.stringify(row.before) !== JSON.stringify(row.after));
+		}
+		// 返回 true = 管理员确认发布。测试环境没有 confirm（typeof confirm !== "function"），直接放行。
+		function openPublishDialog(item, label, { allowPublish = true } = {}) {
+			if (typeof confirm !== "function") return Promise.resolve(true);
+			const rows = diffRows(item);
+			const table = rows === null
+				? `<div class="diff-empty">这是全新配置，线上还没有这份 —— 发布后玩家端立即开始使用。</div>`
+				: rows.length
+					? `<table class="diff-table"><thead><tr><th>字段</th><th>当前线上</th><th>即将发布</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.label)}</td><td class="old">${esc(shortValue(row.before))}</td><td class="new">${esc(shortValue(row.after))}</td></tr>`).join("")}</tbody></table>`
+					: `<div class="diff-empty">草稿与线上版本内容一致，发布不会改变玩家看到的东西。</div>`;
+			const card = document.getElementById("publishDialogCard");
+			card.innerHTML = `<div class="modal-head"><h3 id="publishDialogTitle">发布「${esc(label)}」</h3><p>${esc(publishSummary(item))} · 发布后玩家端立即使用新配置</p></div><div class="modal-body">${table}</div><div class="modal-foot"><span class="hint">确认前请核对上面的差异</span><button class="button secondary" id="publishCancel">再想想</button>${allowPublish ? `<button class="button primary" id="publishConfirmBtn">确认发布</button>` : ""}</div>`;
+			const dialog = document.getElementById("publishDialog");
+			dialog.hidden = false;
+			return new Promise(resolve => {
+				const close = result => { dialog.hidden = true; card.innerHTML = ""; resolve(result); };
+				document.getElementById("publishCancel").onclick = () => close(false);
+				const confirmButton = document.getElementById("publishConfirmBtn");
+				if (confirmButton) confirmButton.onclick = () => close(true);
+			});
+		}
+		function showDiffDialog(item, label) { return openPublishDialog(item, label, { allowPublish: false }); }
+		// ===== 「刚保存」状态卡 =====
+		// 保存和发布是两个动作，但不能让管理员自己去列表里找刚才那条。
+		// 这里在列表顶部把状态说清楚：已保存为草稿 / 当前线上版本是什么时候发布的，并给出「查看差异」「发布」。
+		let lastSaved = null; // { type, id }
+		const recordKeyOf = (entry, idKey) => (entry && (idKey === "fish" ? entry.fishid : entry.id)) || null;
+		function savedBannerHtml(type, idKey) {
+			if (!lastSaved || lastSaved.type !== type) return "";
+			const item = state[type].find(entry => recordKeyOf(entry, idKey) === lastSaved.id);
+			if (!item || !item.dirty) return "";
+			return `<div class="saved-banner" id="savedBanner"><span class="grow"><b>已保存为草稿。</b>当前线上版本：${item.publishedData ? "发布中的旧版本" : "还没有发布过（全新配置）"}</span><button class="button secondary" id="savedViewDiff">查看差异</button><button class="button publish" id="savedPublish">发布</button></div>`;
+		}
+		function bindSavedBanner(type, idKey, rerender) {
+			const banner = document.getElementById("savedBanner");
+			// lastSaved 也要一起判：没有「刚保存」的条目时页面上本来就不该有这张卡。
+			if (!banner || !lastSaved) return;
+			const item = state[type].find(entry => recordKeyOf(entry, idKey) === lastSaved.id);
+			if (!item) return;
+			document.getElementById("savedViewDiff").onclick = () => showDiffDialog(item, item.name || item.fishid || item.id);
+			document.getElementById("savedPublish").onclick = () => {
+				const index = state[type].indexOf(item);
+				if (index >= 0) publishItem(type, index).then(rerender);
+			};
+		}
+		function listFilterHtml(type, placeholder, { withCategory = false } = {}) {
+			const filter = listFilters[type];
+			const categorySelect = withCategory ? `<label>分类<select id="${type}Category"><option value="">全部分类</option>${SHOP_CATEGORIES.map(category => `<option value="${category.value}" ${filter.category === category.value ? "selected" : ""}>${category.label}</option>`).join("")}</select></label>` : "";
+			return `<div class="filter-row"><label>搜索<input id="${type}Search" value="${esc(filter.query)}" placeholder="${placeholder}"></label><label>状态<select id="${type}Status"><option value="" ${filter.status === "" ? "selected" : ""}>全部状态</option><option value="draft" ${filter.status === "draft" ? "selected" : ""}>待发布</option><option value="published" ${filter.status === "published" ? "selected" : ""}>已发布</option></select></label>${categorySelect}<button class="button secondary" id="${type}FilterApply">应用筛选</button><span class="count" id="${type}Count"></span></div>`;
+		}
+		// 筛选即时生效（输入即过滤），「应用筛选」按钮保留给键盘/触屏习惯，两个入口读同一组值。
+		function bindListFilter(type, renderFn) {
+			const apply = () => {
+				listFilters[type].query = document.getElementById(`${type}Search`).value.trim();
+				listFilters[type].status = document.getElementById(`${type}Status`).value;
+				const categorySelect = document.getElementById(`${type}Category`);
+				if (categorySelect) listFilters[type].category = categorySelect.value;
+				renderFn();
+			};
+			document.getElementById(`${type}FilterApply`).onclick = apply;
+			const search = document.getElementById(`${type}Search`);
+			if (search) search.addEventListener("input", apply);
+			const status = document.getElementById(`${type}Status`);
+			if (status) status.addEventListener("change", apply);
+			const category = document.getElementById(`${type}Category`);
+			if (category) category.addEventListener("change", apply);
+		}
+		// ===== 字段中文名 =====
+		// 后台使用者不应该被迫理解数据结构。这里只放「确实需要暴露给后台」的字段；
+		// 纯内部实现字段（handler 名、slot 名等）在表单里用业务语言描述，不在这里出现。
+		const FIELD_LABELS = { id: "编号", fishid: "鱼种编号", name: "名称", category: "分类", price: "价格（泡泡）", description: "描述", tags: "事件标签", previewImage: "商店预览图", resourcePath: "鱼缸资源", maxInventory: "最大拥有数量", isMemberOnly: "会员限定", movementCode: "游动类型", animationCode: "动画代码", feedReaction: "对投喂产生反应", scaleMin: "最小缩放", scaleMax: "最大缩放", eventType: "触发方式", handler: "处理方式", message: "玩家看到的文案", probability: "触发概率", checkIntervalSeconds: "在线检测间隔（秒）", cooldownMinutes: "冷却时间（分钟）", maxPerDay: "每日最多触发次数", relatedTag: "关联资源标签", minFocusDuration: "最短专注时长（分钟）", maxFocusDuration: "最长专注时长（分钟）", endMinute: "奖励阶段结束时间（分钟）", normalBubblePerMinute: "普通用户每分钟泡泡", memberBubblePerMinute: "会员每分钟泡泡", rewardTiers: "奖励梯度", categories: "音效分类", sounds: "音效列表", volume: "音量", loop: "循环播放", enabled: "启用" };
+		const fieldLabel = key => FIELD_LABELS[key] || key;
+		function localizeTechnicalLabels() {
+			document.querySelectorAll("label").forEach(label => {
+				const key = label.textContent.trim().split("（")[0].split(" ")[0];
+				if (FIELD_LABELS[key]) label.childNodes[0].textContent = FIELD_LABELS[key];
+			});
+		}
 		function pageHeader(kicker, title, description, action = "") { return `<div class="topbar"><div><div class="eyebrow">${kicker}</div><h2>${title}</h2><p class="subtitle">${description}</p></div>${action}</div>`; }
 		function render() { document.querySelectorAll(".nav-item").forEach(item => item.classList.toggle("active", item.dataset.module === state.module)); renderModule(); if (state.module === "users") refreshUsers(); }
 		// 单个模块渲染失败不能表现成「点了页签没反应」—— 那是最难查的一类现象：
@@ -307,11 +662,20 @@
 				main.innerHTML = pageHeader("MODULE ERROR", "这个页面渲染失败了", "其它模块不受影响，切到别的页签可以继续。", "")
 					+ `<section class="panel"><div class="empty"><strong>${esc(error.message)}</strong>模块：${esc(state.module)}。把这句话发给开发者即可定位。</div></section>`;
 			}
+			localizeTechnicalLabels();
 		}
 		function renderDecorationList() {
-			main.innerHTML = pageHeader("DECORATION CONFIG", "装点鱼缸配置", "管理旧版游戏中的商品、装扮与资源配置。", `<button class="button primary" id="newDecoration">＋ 新建商品</button>`) + `<section class="panel"><div class="panel-head"><div><h3>已配置商品</h3><p>共 ${state.decorations.length} 个旧版商品项目</p></div></div>${state.decorations.length ? `<div class="table-wrap"><table><thead><tr><th>商品</th><th>分类</th><th>价格</th><th>发布状态</th><th>操作</th></tr></thead><tbody>${state.decorations.map((item, index) => `<tr><td><div class="item-name">${esc(item.name)}</div><div class="item-id">${esc(item.id)}</div></td><td>${esc(categoryLabel(item.category))}</td><td>${item.price === 0 ? "免费" : item.price + " 鱼币"}</td><td><span class="badge ${item.dirty ? "draft" : "published"}">${item.dirty ? "有修改，待发布" : "已发布"}</span></td><td><div class="actions"><button class="link-button edit-decoration" data-index="${index}">编辑</button><button class="button publish" data-index="${index}" ${item.dirty ? "" : "disabled"}>发布</button><button class="link-button delete delete-decoration" data-index="${index}">删除</button></div></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty"><strong>还没有商品</strong>点击右上角新建第一个商品</div>`}</section>`;
+			const filter = listFilters.decorations;
+			const items = state.decorations.filter(item => recordMatches(item, filter));
+			const draftCount = state.decorations.filter(item => item.dirty).length;
+			const rows = items.map((item) => { const index = state.decorations.indexOf(item); return `<tr><td><div class="item-name">${esc(item.name)}</div><div class="item-id">${esc(item.id)}</div>${notesHtml(decorationNotes(item))}</td><td>${esc(categoryLabel(item.category))}</td><td>${item.price === 0 ? "免费" : item.price + " 泡泡"}</td><td>${resourceStatus(item)}<br><span class="badge ${item.dirty ? "draft" : "published"}">${item.dirty ? "有修改，待发布" : "已发布"}</span></td><td>${formatUpdatedAt(item.updatedAt)}</td><td><div class="actions"><button class="link-button edit-decoration" data-index="${index}">编辑</button>${item.dirty ? `<button class="link-button view-diff" data-index="${index}">查看差异</button>` : ""}<button class="button publish" data-index="${index}" ${item.dirty ? "" : "disabled"}>发布</button><button class="link-button delete delete-decoration" data-index="${index}">删除</button></div></td></tr>`; }).join("");
+			main.innerHTML = pageHeader("DECORATION CONFIG", "装点鱼缸配置", "管理商品、装扮与资源。保存后会形成草稿，确认发布后才会同步给玩家。", `<button class="button primary" id="newDecoration">＋ 新建商品</button>`) + `<section class="panel"><div class="panel-head"><div><h3>商品列表</h3><div class="list-summary"><span class="summary-chip"><strong>${state.decorations.length}</strong> 个商品</span><span class="summary-chip"><strong>${draftCount}</strong> 个待发布</span><span class="summary-chip"><strong>${state.decorations.filter(item => !resourceList(item.resourcePath).filter(Boolean).length).length}</strong> 个缺少资源</span><span class="summary-chip"><strong>${state.decorations.filter(item => !String(item.previewImage || "").trim()).length}</strong> 个缺预览图</span></div></div></div>${savedBannerHtml("decorations", "id")}${listFilterHtml("decorations", "搜索名称或商品编号", { withCategory: true })}${items.length ? `<div class="table-wrap"><table><thead><tr><th>商品</th><th>分类</th><th>价格</th><th>资源 / 发布状态</th><th>最近修改</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty"><strong>${state.decorations.length ? "没有匹配的商品" : "还没有商品"}</strong>${state.decorations.length ? "试试清空筛选条件" : "点击右上角新建第一个商品"}</div>`}</section>`;
 			document.getElementById("newDecoration").onclick = () => renderDecorationForm();
+			bindListFilter("decorations", renderDecorationList);
+			bindSavedBanner("decorations", "id", renderDecorationList);
+			document.getElementById("decorationsCount").textContent = `显示 ${items.length} / ${state.decorations.length} 件`;
 			document.querySelectorAll(".edit-decoration").forEach(button => button.onclick = () => renderDecorationForm(Number(button.dataset.index)));
+			document.querySelectorAll(".view-diff").forEach(button => button.onclick = () => { const item = state.decorations[Number(button.dataset.index)]; showDiffDialog(item, item.name || item.id); });
 			document.querySelectorAll(".publish").forEach(button => button.onclick = () => publishItem("decorations", Number(button.dataset.index)));
 			document.querySelectorAll(".delete-decoration").forEach(button => button.onclick = async () => { if (!confirm("确定要删除这个配置吗？")) return; const item = state.decorations[Number(button.dataset.index)]; try { await apiRequest(`/admin/decorations/${encodeURIComponent(item.id)}`, { method: "DELETE" }); state.decorations.splice(Number(button.dataset.index), 1); renderDecorationList(); } catch (error) { showToast(`删除失败：${error.message}`); } });
 		}
@@ -338,9 +702,10 @@
 		}
 		// 上传资源统一走这里：按 MIME 选接口（音频 → /admin/assets 存 sounds/，图片 → /admin/assets/image 存 images/）。
 		// 云存储失败时返回空串，调用方据此拒绝把容器本地临时路径写进配置（实例重建就 404）。
-		async function uploadAsset(file, label) {
+		async function uploadAsset(file, label, errorControl) {
+			errorControl = errorControl || "";   // 传了控件 id 就把错误贴在控件旁边，不传则只走顶部 banner
 			const endpoint = String(file.type || "").startsWith("audio/") ? "/admin/assets" : "/admin/assets/image";
-			showToast(`正在上传${label} ${file.name}…`);
+			showToast(`正在上传${label} ${file.name}…`, 2200);
 			try {
 				const form = new FormData();
 				form.append("file", file);
@@ -350,12 +715,17 @@
 				const body = await response.json();
 				if (!response.ok) throw new Error((body && body.error) || "上传失败");
 				if (body.data.fallbackError) {
-					showToast(`${label}未保存：${body.data.fallbackError}${body.data.fallbackCode ? `（${body.data.fallbackCode}）` : ""}`, 9000);
+					// 云存储失败 = 这张图发布出去必然 404，属于「必须处理」的错误：
+					// 控件旁边说一遍（视线就在那），顶部 banner 再顶一条（怕没看见）。
+					const message = `${label}未保存：${body.data.fallbackError}${body.data.fallbackCode ? `（${body.data.fallbackCode}）` : ""}`;
+					if (errorControl) showUploadError(errorControl, message);
+					showErrorBanner(`${message} —— 请先解决云存储问题，再重新上传。`);
 					return "";
 				}
 				return body.data.path || body.data.url || "";
 			} catch (error) {
-				showToast(`${label}上传失败：${error.message}`);
+				const message = `${label}上传失败：${error.message}`;
+				if (errorControl) showUploadError(errorControl, message); else showToast(message);
 				return "";
 			}
 		}
@@ -365,9 +735,14 @@
 			// 音效管理里已上传的音频，直接挂到这个商品的 resourcePath 上。
 			// 这是两处配置唯一的关联点：挂同一个文件，商店才会用本页的名称和描述。
 			const resourceOptions = audioResourceOptions();
-			main.innerHTML = pageHeader("DECORATION CONFIG", index === null ? "新建商品" : "编辑商品", "字段保持与旧版 SHOP_ITEMS 兼容，保存后可在列表中发布。", `<button class="button secondary" id="backList">返回列表</button>`) + `<section class="panel form-panel"><div class="form-body"><form id="decorationForm"><div class="form-grid"><div class="field"><label>id <span>*</span></label><input name="id" value="${esc(item.id)}" required></div><div class="field"><label>category <span>*</span></label><select name="category">${SHOP_CATEGORIES.map(category => `<option value="${category.value}" ${item.category === category.value ? "selected" : ""}>${category.label}</option>`).join("")}</select></div><div class="field"><label>name <span>*</span></label><input name="name" value="${esc(item.name)}" required></div><div class="field"><label>price</label><input name="price" type="number" min="0" value="${item.price}"></div><div class="field full"><label>description</label><textarea name="description">${esc(item.description)}</textarea></div><div class="field full"><label>tags</label><input name="tags" value="${esc(tagsToInput(item.tags))}" placeholder="逗号分隔，如 undersea-treasure"><span class="hint">供随机事件按 tag 匹配资源；新增资源只需填 tags，不用改事件系统</span></div><div class="field"><label>previewImage</label><div class="upload-row"><label class="file-button">上传预览图<input id="previewUpload" type="file" accept="image/*"></label><span class="hint">只允许一个文件；建议先压到 400×400、100KB 以内 —— 图只按小格子显示，传原图只会拖慢玩家端首屏</span></div><div class="file-list" id="previewFiles"></div></div><div class="field"><label>resourcePath</label><div class="upload-row"><label class="file-button">上传资源<input id="resourceUpload" type="file" multiple></label><select id="resourcePick" style="flex:1;min-width:260px">${resourceOptions}</select></div><span class="hint">资源 = 鱼缸里真正显示的那张图（装饰第 1 张为后景、第 2 张为前景）；预览图 = 商店列表里的小图，两者不是一回事。上传后会存进云存储，每一项都能点 × 删掉。音效类商品挂上音效管理里的同一个音频文件后，商店就会用本页的名称与描述</span><div class="file-list" id="resourceFiles"></div></div><div class="field"><label>maxInventory</label><input name="maxInventory" type="number" min="0" value="${item.maxInventory}"></div><label class="check"><input name="isMemberOnly" type="checkbox" ${item.isMemberOnly ? "checked" : ""}> isMemberOnly</label></div><div class="form-foot"><button type="button" class="button secondary" id="cancelForm">取消</button><button class="button primary">保存</button></div></form></div></section>`;
-			document.getElementById("backList").onclick = () => { editingIndex = null; renderDecorationList(); };
-			document.getElementById("cancelForm").onclick = () => renderDecorationList();
+			main.innerHTML = pageHeader("DECORATION CONFIG", index === null ? "新建商品" : "编辑商品", "配置商品的展示信息、资源与拥有上限。保存后返回列表，发布操作可单独进行。", `<button class="button secondary" id="backList">返回列表</button>`) + `<section class="panel form-panel"><div class="form-body"><form id="decorationForm"><div class="form-error" id="formError" hidden></div><div class="form-grid"><div class="field"><label>商品名称 <span>*</span></label><input name="name" value="${esc(item.name)}" required></div><div class="field"><label>商品分类 <span>*</span></label><select name="category">${SHOP_CATEGORIES.map(category => `<option value="${category.value}" ${item.category === category.value ? "selected" : ""}>${category.label}</option>`).join("")}</select></div><div class="field"><label>价格（泡泡）</label><input name="price" type="number" min="0" value="${item.price}"></div><div class="field"><label>最大拥有数量</label><input name="maxInventory" type="number" min="0" value="${item.maxInventory}"><span class="hint">鱼这一类是「最多养几条」，其它一般是 1（只能摆一个）</span></div><div class="field full"><label>商品描述</label><textarea name="description">${esc(item.description)}</textarea></div><label class="check"><input name="isMemberOnly" type="checkbox" ${item.isMemberOnly ? "checked" : ""}> 会员限定</label><div class="field full"><label>商店预览图</label><div class="upload-row"><label class="file-button">上传预览图<input id="previewUpload" type="file" accept="image/*"></label><span class="hint">建议先压到 400×400、100KB 以内</span></div><div class="file-list" id="previewFiles"></div></div><div class="field full"><label>鱼缸资源</label><div class="upload-row"><label class="file-button">上传资源<input id="resourceUpload" type="file" multiple></label><select id="resourcePick" style="flex:1;min-width:260px">${resourceOptions}</select></div><span class="hint">这是玩家鱼缸里实际显示的资源；装饰的第 1、2 张图分别作为后景和前景。背景图请压到 1600×900（16:9）、JPG 或 WebP、单张 ≤400KB —— 超过这个量级会明显拖慢首屏加载。沙子请用透明底 PNG，且只让沙子占图片底部约 20%、上方留透明：玩家端会把图片高度撑满整缸（沙子因此落在缸底），左右超出的部分自动裁掉，横向平铺</span><div class="file-list" id="resourceFiles"></div></div><details class="adv"><summary>高级设置（编号 / 事件标签）</summary><div class="form-grid"><div class="field"><label>编号 <span>*</span></label><input name="id" value="${esc(item.id)}"><span class="hint">系统识别用，创建后不建议修改；建议字母、数字、下划线或连字符</span></div><div class="field"><label>事件标签</label><input name="tags" value="${esc(tagsToInput(item.tags))}" placeholder="逗号分隔，如 undersea-treasure"><span class="hint">供随机事件按标签匹配资源；没有特殊玩法时留空即可</span></div></div></details></div><div class="form-foot"><button type="button" class="button secondary" id="cancelForm">取消</button><button class="button primary" type="submit">保存为草稿</button></div></form></div></section>`;
+			const goBackToList = () => { if (!confirmLeave()) return; editingIndex = null; setLeaveGuard(null); renderDecorationList(); };
+			document.getElementById("backList").onclick = goBackToList;
+			document.getElementById("cancelForm").onclick = goBackToList;
+			// 未保存拦截：表单里任何输入都算「改过」。保存成功后由提交流程主动解除。
+			let formDirty = false;
+			setLeaveGuard(() => formDirty);
+			document.getElementById("decorationForm").addEventListener("input", () => { formDirty = true; });
 			// 资源 / 预览图都由下面这两个数组驱动渲染。
 			// 以前是直接往 DOM 追加 chip：删掉一个之后「后景/前景」的序号就全错了，
 			// 而且根本没有删除入口 —— 加错了只能整页刷新重来。
@@ -402,7 +777,7 @@
 				const files = Array.from(event.target.files || []);
 				event.target.value = "";
 				for (const file of files) {
-					const path = await uploadAsset(file, "资源");
+					const path = await uploadAsset(file, "资源", "resourceUpload");
 					if (path) addResourcePath(path, file.name);
 				}
 			};
@@ -416,7 +791,7 @@
 				const file = event.target.files && event.target.files[0];
 				event.target.value = "";
 				if (!file) return;
-				const path = await uploadAsset(file, "预览图");
+				const path = await uploadAsset(file, "预览图", "previewUpload");
 				if (!path) return;
 				previewPath = path;   // 一个商品只有一个预览图，直接替换
 				renderPreviewChip();
@@ -424,20 +799,28 @@
 			};
 			document.getElementById("decorationForm").onsubmit = async event => {
 				event.preventDefault();
-				const data = formData(event.target);
+				const form = event.target;
+				clearFormErrors(form);
+				const data = formData(form);
 				data.tags = parseTagsInput(data.tags);
-				if (state.decorations.some((decoration, decorationIndex) => decoration.id === data.id && decorationIndex !== editingIndex)) { showToast("保存失败，id 重复"); return; }
+				// 字段级校验：错误写在字段下面，而不是 toast 一闪而过。
+				let invalid = false;
+				if (!String(data.name || "").trim()) { setFieldError(form, "name", "商品名称必须填写"); invalid = true; }
+				if (!String(data.id || "").trim()) { setFieldError(form, "id", "商品编号必须填写（在「高级设置」里）"); invalid = true; }
+				if (invalid) { showFormError(form, "请先修正标红的字段再保存"); return; }
+				if (state.decorations.some((decoration, decorationIndex) => decoration.id === data.id && decorationIndex !== editingIndex)) { setFieldError(form, "id", "这个编号已经被其它商品用了"); showFormError(form, "保存失败：商品编号重复"); return; }
 				// 资源与预览图直接取上面的数组，不再从 chip 的 textContent 里反解路径 ——
 				// 那种做法只要前缀文案改一个字，就会静默把「后景：xxx」当成路径存进配置。
 				data.resourcePath = [...resourcePaths];
 				data.previewImage = previewPath;
 				try {
 					const response = await apiRequest(`/admin/decorations${editingIndex === null ? "" : `/${encodeURIComponent(data.id)}`}`, { method: editingIndex === null ? "POST" : "PUT", body: JSON.stringify(data) });
-					const saved = { ...response.data.data, published: editingIndex === null ? response.data.published : false, dirty: editingIndex !== null || !response.data.published };
+					const saved = toEditableRecord(response.data);
 					if (editingIndex === null) state.decorations.push(saved); else state.decorations[editingIndex] = saved;
-					showToast("商品已保存，等待发布");
+					formDirty = false; setLeaveGuard(null); lastSaved = { type: "decorations", id: data.id };
+					showToast("商品已保存为草稿");
 					renderDecorationList();
-				} catch (error) { showToast(`保存失败：${error.message}`); }
+				} catch (error) { showFormError(form, `保存失败：${error.message}`); }
 			};
 		}
 		// ===== 鱼类多资源（F1）=====
@@ -451,8 +834,13 @@
 				: (typeof resourcePath === "string" && resourcePath.trim() ? [{ slot: "body", path: resourcePath.trim() }] : []);
 			return rows.filter(row => row.slot && row.path);
 		}
+		// 玩家端只认「后台上传回来的绝对图片地址」（与 index.html 的 IMAGE_SOURCE_RE 同一条规则）。
+		// 种子鱼里的 "assets/fish/xxx.png" 这类旧相对路径在线上是 404，玩家端会回退内置 CSS 鱼 ——
+		// 这里标出来，免得管理员以为它在生效（2026-09-25：蓝尾鱼「看不见」就是这么来的）。
+		const FISH_RESOURCE_USABLE_RE = /^https?:\/\/.+\.(png|jpe?g|gif|webp|avif|svg|bmp)(?:[?#].*)?$/i;
 		function fishResourceChip(slot, path) {
-			return `<span class="file-chip fish-resource-row" data-path="${esc(path)}" data-slot="${esc(slot)}" style="display:inline-flex;align-items:center;gap:6px"><select class="fish-slot">${fishSlotOptions(slot)}</select><span class="fish-path">${esc(path)}</span><button type="button" class="link-button remove-fish-resource" title="移除">×</button></span>`;
+			const legacy = FISH_RESOURCE_USABLE_RE.test(path) ? "" : `<span class="hint">旧路径 · 玩家端不生效（回退内置 CSS 鱼）</span>`;
+			return `<span class="file-chip fish-resource-row" data-path="${esc(path)}" data-slot="${esc(slot)}" style="display:inline-flex;align-items:center;gap:6px"><select class="fish-slot">${fishSlotOptions(slot)}</select><span class="fish-path">${esc(path)}</span>${legacy}<button type="button" class="link-button remove-fish-resource" title="移除" aria-label="移除这张鱼图">×</button></span>`;
 		}
 		function fishResourceSummary(resourcePath) {
 			const rows = fishResourceRows(resourcePath);
@@ -480,16 +868,28 @@
 			catch (error) { return { ok: false, error: `运行错误：${error.message}` }; }
 		}
 		function renderFishList() {
-			main.innerHTML = pageHeader("FISH ASSEMBLY", "水产装配", "配置鱼种资源、运动表现与投喂反馈。", `<button class="button primary" id="newFish">＋ 新建鱼种</button>`) + `<section class="panel"><div class="panel-head"><div><h3>已配置鱼种</h3><p>fishid 必须唯一</p></div></div><div class="table-wrap"><table><thead><tr><th>鱼种</th><th>资源</th><th>运动代码</th><th>缩放范围</th><th>发布状态</th><th>操作</th></tr></thead><tbody>${state.fish.map((item, index) => `<tr><td><div class="item-name">${esc(item.name)}</div><div class="item-id">${esc(item.fishid)}</div></td><td>${fishResourceSummary(item.resourcePath)}</td><td>${esc(item.movementCode)}</td><td>${item.scaleMin} - ${item.scaleMax}</td><td><span class="badge ${item.dirty ? "draft" : "published"}">${item.dirty ? "有修改，待发布" : "已发布"}</span></td><td><div class="actions"><button class="link-button edit-fish" data-index="${index}">编辑</button><button class="button publish" data-index="${index}" ${item.dirty ? "" : "disabled"}>发布</button><button class="link-button delete delete-fish" data-index="${index}">删除</button></div></td></tr>`).join("")}</tbody></table></div></section>`;
+			const filter = listFilters.fish;
+			const items = state.fish.filter(item => recordMatches(item, filter));
+			const rows = items.map(item => { const index = state.fish.indexOf(item); return `<tr><td><div class="item-name">${esc(item.name)}</div><div class="item-id">${esc(item.fishid)}</div>${notesHtml(fishNotes(item))}</td><td>${resourceStatus(item, "fish")}</td><td>${esc(item.movementCode || "内置游动")}</td><td>${item.scaleMin} - ${item.scaleMax}</td><td><span class="badge ${item.dirty ? "draft" : "published"}">${item.dirty ? "有修改，待发布" : "已发布"}</span><br><span class="hint">${formatUpdatedAt(item.updatedAt)}</span></td><td><div class="actions"><button class="link-button edit-fish" data-index="${index}">编辑</button>${item.dirty ? `<button class="link-button view-diff" data-index="${index}">查看差异</button>` : ""}<button class="button publish" data-index="${index}" ${item.dirty ? "" : "disabled"}>发布</button><button class="link-button delete delete-fish" data-index="${index}">删除</button></div></td></tr>`; }).join("");
+			main.innerHTML = pageHeader("FISH ASSEMBLY", "鱼种装配", "配置鱼种资源、游动表现与投喂反馈。保存后会形成草稿，确认发布后才会同步给玩家。", `<button class="button primary" id="newFish">＋ 新建鱼种</button>`) + `<section class="panel"><div class="panel-head"><div><h3>鱼种列表</h3><div class="list-summary"><span class="summary-chip"><strong>${state.fish.length}</strong> 个鱼种</span><span class="summary-chip"><strong>${state.fish.filter(item => item.dirty).length}</strong> 个待发布</span><span class="summary-chip"><strong>${state.fish.filter(item => !fishResourceRows(item.resourcePath).length).length}</strong> 个未上传鱼图</span></div></div></div>${savedBannerHtml("fish", "fish")}${listFilterHtml("fish", "搜索名称或鱼种编号")}${items.length ? `<div class="table-wrap"><table><thead><tr><th>鱼种</th><th>资源状态</th><th>游动类型</th><th>缩放范围</th><th>发布状态 / 最近修改</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty"><strong>${state.fish.length ? "没有匹配的鱼种" : "还没有鱼种"}</strong>${state.fish.length ? "试试清空筛选条件" : "点击右上角新建第一个鱼种"}</div>`}</section>`;
 			document.getElementById("newFish").onclick = () => renderFishForm();
+			bindListFilter("fish", renderFishList);
+			bindSavedBanner("fish", "fish", renderFishList);
+			const fishCount = document.getElementById("fishCount");
+			if (fishCount) fishCount.textContent = `显示 ${items.length} / ${state.fish.length} 个`;
 			document.querySelectorAll(".edit-fish").forEach(button => button.onclick = () => renderFishForm(Number(button.dataset.index)));
+			document.querySelectorAll(".view-diff").forEach(button => button.onclick = () => { const item = state.fish[Number(button.dataset.index)]; showDiffDialog(item, item.name || item.fishid); });
 			document.querySelectorAll(".publish").forEach(button => button.onclick = () => publishItem("fish", Number(button.dataset.index)));
 			document.querySelectorAll(".delete-fish").forEach(button => button.onclick = async () => { if (!confirm("确定要删除这个配置吗？")) return; const item = state.fish[Number(button.dataset.index)]; try { await apiRequest(`/admin/fish/${encodeURIComponent(item.fishid)}`, { method: "DELETE" }); state.fish.splice(Number(button.dataset.index), 1); renderFishList(); } catch (error) { showToast(`删除失败：${error.message}`); } });
 		}
 		function renderFishForm(index = null) {
 			const item = index === null ? { fishid: "", name: "", resourcePath: "", movementCode: "", animationCode: "", tags: [], scaleMin: 1, scaleMax: 1, feedReaction: false } : state.fish[index]; editingIndex = index; editingType = "fish";
-			main.innerHTML = pageHeader("FISH ASSEMBLY", index === null ? "新建鱼种" : "编辑鱼种", "保存后返回鱼种列表，发布操作可单独进行。", `<button class="button secondary" id="backList">返回列表</button>`) + `<section class="panel form-panel"><div class="form-body"><form id="fishForm"><div class="form-grid"><div class="field"><label>fishid <span>*</span></label><input name="fishid" value="${esc(item.fishid)}" required></div><div class="field"><label>name <span>*</span></label><input name="name" value="${esc(item.name)}" required></div><div class="field full"><label>resourcePath（多资源 · 按插槽拼装）</label><div class="upload-row"><label class="file-button">上传资源<input id="fishResourceUpload" type="file" accept="image/*" multiple></label><select id="fishSlotPick" style="flex:0 0 130px">${fishSlotOptions("body")}</select></div><span class="hint">每张图挂一个插槽（body/tail/fin/shadow）；连续上传会从所选插槽起顺序分配，可在下方逐个调整。保存为 [{slot, path}] 数组</span><div class="file-list" id="fishResources">${fishResourceRows(item.resourcePath).map(row => fishResourceChip(row.slot, row.path)).join("")}</div></div><div class="field full"><label>animationCode（动画模块代码 · 可选）</label><textarea name="animationCode" rows="6" spellcheck="false" style="font-family:ui-monospace,Consolas,monospace">${esc(item.animationCode || "")}</textarea><div class="upload-row"><button type="button" class="button secondary" id="testFishAnimation">试运行</button><span class="hint">每帧调用一次，参数 fish：可读 t/x/y/facingLeft/scale/speed/parts；可用 fish.setPart(slot,{rotate,x,y,scaleX,scaleY,opacity})、fish.rand()、fish.randRange(a,b)。留空则用内置动画。语法或运行报错将不允许保存</span></div></div><div class="field"><label>movementCode（旧 · 内置速度提示）</label><input name="movementCode" value="${esc(item.movementCode)}"></div><label class="check"><input name="feedReaction" type="checkbox" ${item.feedReaction === true ? "checked" : ""}> feedReaction（对饲料产生反应）</label><div class="field"><label>scaleMin</label><input name="scaleMin" type="number" step="0.1" value="${item.scaleMin}"></div><div class="field"><label>scaleMax</label><input name="scaleMax" type="number" step="0.1" value="${item.scaleMax}"></div><div class="field full"><label>tags</label><input name="tags" value="${esc(tagsToInput(item.tags))}" placeholder="逗号分隔"><span class="hint">供随机事件按 tag 匹配这条鱼</span></div></div><div class="form-foot"><button type="button" class="button secondary" id="cancelForm">取消</button><button class="button primary">保存</button></div></form></div></section>`;
-			document.getElementById("backList").onclick = () => renderFishList(); document.getElementById("cancelForm").onclick = () => renderFishList();
+			main.innerHTML = pageHeader("FISH ASSEMBLY", index === null ? "新建鱼种" : "编辑鱼种", "保存后返回鱼种列表，发布操作可单独进行。", `<button class="button secondary" id="backList">返回列表</button>`) + `<section class="panel form-panel"><div class="form-body"><form id="fishForm"><div class="form-error" id="formError" hidden></div><div class="form-grid"><div class="field"><label>鱼种名称 <span>*</span></label><input name="name" value="${esc(item.name)}" required></div><label class="check"><input name="feedReaction" type="checkbox" ${item.feedReaction === true ? "checked" : ""}> 对投喂产生反应（玩家投喂时这条鱼会有反应）</label><div class="field full"><label>鱼缸资源（按部位拼装）</label><div class="upload-row"><label class="file-button">上传鱼图<input id="fishResourceUpload" type="file" accept="image/*" multiple></label><select id="fishSlotPick" style="flex:0 0 130px">${fishSlotOptions("body")}</select></div><span class="hint">每张图挂一个部位：身体 body / 尾巴 tail / 鱼鳍 fin / 影子 shadow。连续上传会从所选部位起顺序分配，可在下方逐个调整。不上传则玩家端用内置 CSS 鱼的样子</span><div class="file-list" id="fishResources">${fishResourceRows(item.resourcePath).map(row => fishResourceChip(row.slot, row.path)).join("")}</div></div><details class="adv"><summary>高级设置（编号 / 游动类型 / 动画代码 / 缩放 / 事件标签）</summary><div class="form-grid"><div class="field"><label>鱼种编号 <span>*</span></label><input name="fishid" value="${esc(item.fishid)}"><span class="hint">系统识别用，创建后不建议修改；建议字母、数字、下划线或连字符</span></div><div class="field"><label>游动类型（旧版速度提示）</label><input name="movementCode" value="${esc(item.movementCode)}"><span class="hint">旧字段：留空用内置游动即可</span></div><div class="field full"><label>动画代码（可选）</label><textarea name="animationCode" rows="6" spellcheck="false" style="font-family:ui-monospace,Consolas,monospace">${esc(item.animationCode || "")}</textarea><div class="upload-row"><button type="button" class="button secondary" id="testFishAnimation">试运行</button><span class="hint">每帧调用一次，参数 fish：可读 t/x/y/facingLeft/scale/speed/parts；可用 fish.setPart(slot,{rotate,x,y,scaleX,scaleY,opacity})、fish.rand()、fish.randRange(a,b)。留空则用内置动画。语法或运行报错将不允许保存</span></div></div><div class="field"><label>最小缩放</label><input name="scaleMin" type="number" step="0.1" value="${item.scaleMin}"></div><div class="field"><label>最大缩放</label><input name="scaleMax" type="number" step="0.1" value="${item.scaleMax}"></div><div class="field full"><label>事件标签</label><input name="tags" value="${esc(tagsToInput(item.tags))}" placeholder="逗号分隔"><span class="hint">供随机事件按标签匹配这条鱼</span></div></div></details></div><div class="form-foot"><button type="button" class="button secondary" id="cancelForm">取消</button><button class="button primary" type="submit">保存为草稿</button></div></form></div></section>`;
+			const goBackToFishList = () => { if (!confirmLeave()) return; editingIndex = null; setLeaveGuard(null); renderFishList(); };
+			document.getElementById("backList").onclick = goBackToFishList; document.getElementById("cancelForm").onclick = goBackToFishList;
+			let fishFormDirty = false;
+			setLeaveGuard(() => fishFormDirty);
+			document.getElementById("fishForm").addEventListener("input", () => { fishFormDirty = true; });
 			// 鱼类多资源上传（F1）：每个文件上传到 /admin/assets/image，成功后按插槽加入列表。
 			const bindFishResourceRows = () => { document.querySelectorAll("#fishResources .remove-fish-resource").forEach(button => button.onclick = () => button.closest(".fish-resource-row").remove()); };
 			bindFishResourceRows();
@@ -514,19 +914,54 @@
 						const response = await fetch(`${API_BASE}/admin/assets/image`, { method: "POST", body: form, headers });
 						const body = await response.json();
 						if (!response.ok) throw new Error((body && body.error) || "上传失败");
-						if (body.data.fallbackError) { showToast(`未保存：${body.data.fallbackError}${body.data.fallbackCode ? `（${body.data.fallbackCode}）` : ""}。`, 9000); continue; }
+						if (body.data.fallbackError) {
+						// 云存储失败：这张图发布出去必然 404，属于必须处理的错误 → banner + 控件旁边都说。
+						const message = `未保存：${body.data.fallbackError}${body.data.fallbackCode ? `（${body.data.fallbackCode}）` : ""}`;
+						showUploadError("fishResourceUpload", `${message}（${file.name}）`);
+						showErrorBanner(`${message} —— 图片「${file.name}」没有加入鱼种资源，请先解决云存储问题再重新上传。`);
+						continue;
+					}
 						const slot = FISH_SLOTS[Math.min(startIndex + i, FISH_SLOTS.length - 1)] || "body";
 						addFishResource(slot, body.data.url || body.data.path);
 						showToast(`已上传 ${file.name}（${slot}）`);
-					} catch (error) { showToast(`上传失败：${error.message}`); }
+					} catch (error) { showUploadError("fishResourceUpload", `上传失败：${error.message}（${file.name}）`); }
 				}
 			};
 			document.getElementById("testFishAnimation").onclick = () => {
 				const code = document.querySelector('#fishForm [name="animationCode"]').value;
 				const result = adminTestFishAnimation(code);
-				showToast(result.ok ? "试运行通过" : `试运行失败：${result.error}`, result.ok ? 3000 : 9000);
+				if (result.ok) { showToast("试运行通过"); return; }
+				const fishFormEl = document.getElementById("fishForm");
+				setFieldError(fishFormEl, "animationCode", `动画代码有问题：${result.error}`);
+				showFormError(fishFormEl, `动画代码有问题：${result.error}`);
 			};
-			document.getElementById("fishForm").onsubmit = async event => { event.preventDefault(); const data = formData(event.target); data.resourcePath = Array.from(document.querySelectorAll("#fishResources .fish-resource-row")).map(row => ({ slot: row.querySelector(".fish-slot").value, path: row.dataset.path })).filter(row => row.slot && row.path); const animCheck = adminTestFishAnimation(data.animationCode); if (!animCheck.ok) { showToast(`保存失败：动画代码${animCheck.error}`); return; } data.animationCode = String(data.animationCode || ""); data.tags = parseTagsInput(data.tags); if (state.fish.some((fish, fishIndex) => fish.fishid === data.fishid && fishIndex !== editingIndex)) { showToast("保存失败：fishid 已存在"); return; } data.feedReaction = event.target.elements.feedReaction.checked; data.scaleMin = Number(data.scaleMin); data.scaleMax = Number(data.scaleMax); try { const response = await apiRequest(`/admin/fish${editingIndex === null ? "" : `/${encodeURIComponent(data.fishid)}`}`, { method: editingIndex === null ? "POST" : "PUT", body: JSON.stringify(data) }); const saved = { ...response.data.data, published: editingIndex === null ? response.data.published : false, dirty: editingIndex !== null || !response.data.published }; if (editingIndex === null) state.fish.push(saved); else state.fish[editingIndex] = saved; showToast("鱼种已保存，等待发布"); renderFishList(); } catch (error) { showToast(`保存失败：${error.message}`); } };
+			document.getElementById("fishForm").onsubmit = async event => {
+				event.preventDefault();
+				const form = event.target;
+				clearFormErrors(form);
+				const data = formData(form);
+				data.resourcePath = Array.from(document.querySelectorAll("#fishResources .fish-resource-row")).map(row => ({ slot: row.querySelector(".fish-slot").value, path: row.dataset.path })).filter(row => row.slot && row.path);
+				const animCheck = adminTestFishAnimation(data.animationCode);
+				if (!animCheck.ok) { setFieldError(form, "animationCode", `动画代码${animCheck.error}`); showFormError(form, `保存失败：动画代码${animCheck.error}`); return; }
+				data.animationCode = String(data.animationCode || "");
+				data.tags = parseTagsInput(data.tags);
+				let invalid = false;
+				if (!String(data.name || "").trim()) { setFieldError(form, "name", "鱼种名称必须填写"); invalid = true; }
+				if (!String(data.fishid || "").trim()) { setFieldError(form, "fishid", "鱼种编号必须填写（在「高级设置」里）"); invalid = true; }
+				if (state.fish.some((fish, fishIndex) => fish.fishid === data.fishid && fishIndex !== editingIndex)) { setFieldError(form, "fishid", "这个编号已经被其它鱼种用了"); invalid = true; }
+				if (invalid) { showFormError(form, "请先修正标红的字段再保存"); return; }
+				data.feedReaction = form.elements.feedReaction.checked;
+				data.scaleMin = Number(data.scaleMin);
+				data.scaleMax = Number(data.scaleMax);
+				try {
+					const response = await apiRequest(`/admin/fish${editingIndex === null ? "" : `/${encodeURIComponent(data.fishid)}`}`, { method: editingIndex === null ? "POST" : "PUT", body: JSON.stringify(data) });
+					const saved = toEditableRecord(response.data);
+					if (editingIndex === null) state.fish.push(saved); else state.fish[editingIndex] = saved;
+					fishFormDirty = false; setLeaveGuard(null); lastSaved = { type: "fish", id: data.fishid };
+					showToast("鱼种已保存为草稿");
+					renderFishList();
+				} catch (error) { showFormError(form, `保存失败：${error.message}`); }
+			};
 		}
 		// ===== 事件设置（F6 / F7）=====
 		// 事件是**配置驱动**的：后台只填参数与文案，不写代码（用户 2026-09-23 决定）。
@@ -570,6 +1005,48 @@
 		];
 		function eventHandlerLabel(value) { return EVENT_HANDLER_OPTIONS.find(option => option.value === value)?.label || value || "—"; }
 		function eventTypeLabel(value) { return EVENT_TYPE_OPTIONS.find(option => option.value === value)?.label || value || "—"; }
+		function eventMessagePreview(message) {
+			return String(message || "").replaceAll("{count}", "12").replaceAll("{name}", "小丑鱼").replaceAll("{source}", "水草");
+		}
+		// 把一串数字参数翻译成一句人话。列表和表单预览共用同一份，避免两处口径不一致。
+		// 返回值里含用户输入（如 conditions.hasTag），所以内部就做转义，调用处不用再 esc 一遍。
+		function describeEventRule(data) {
+			const eventType = (data && data.eventType) || "online";
+			const percent = Math.round((Number(data && data.probability) || 0) * 1000) / 10;
+			const prefix = data && data.enabled === false ? "（已停用）" : "";
+			const parts = [];
+			if (eventType === "offline") {
+				parts.push(`玩家下次打开鱼缸时，有 ${percent}% 概率结算一次`);
+			} else {
+				const seconds = Number(data && data.checkIntervalSeconds) || 60;
+				parts.push(`玩家在线时，每 ${seconds} 秒检测一次，每次有 ${percent}% 概率触发`);
+			}
+			const handler = (data && data.handler) || "";
+			const params = (data && data.params) || {};
+			if (handler === "fish-escape") {
+				parts.push(`一次最多失去 ${Number(params.maxLostPerEvent) || 1} 条鱼`);
+			} else if (handler === "give-bubbles" || handler === "treasure") {
+				const min = Number(params.min);
+				const max = Number(params.max);
+				if (Number.isFinite(min) && Number.isFinite(max)) parts.push(`送出 ${min}～${max} 个泡泡`);
+			}
+			if (eventType === "offline" && params.maxOfflineHours != null) parts.push(`最多按 ${params.maxOfflineHours} 小时离线计算`);
+			const conditions = (data && data.conditions) || {};
+			const conditionBits = [];
+			if (Number(conditions.minFish) > 0) conditionBits.push(`缸里至少 ${Number(conditions.minFish)} 条鱼`);
+			if (Number(conditions.minBubbles) > 0) conditionBits.push(`至少 ${Number(conditions.minBubbles)} 个泡泡`);
+			if (String(conditions.hasTag || "").trim()) conditionBits.push(`缸里要有带「${esc(String(conditions.hasTag).trim())}」标签的资源`);
+			if (conditionBits.length) parts.push(`条件：${conditionBits.join("、")}`);
+			return `${prefix}${parts.join("，")}。`;
+		}
+		// 事件行摘要：一眼看出这条事件配置有没有配完。
+		function eventNotes(item) {
+			const notes = [];
+			if (!String(item.message || "").trim()) notes.push({ cls: "bad", text: "玩家文案未填写" });
+			if (item.enabled === false) notes.push({ cls: "info", text: "已停用（不会触发）" });
+			if (item.handler === "treasure" && !String(item.relatedTag || "").trim()) notes.push({ cls: "bad", text: "宝藏事件必须填关联标签" });
+			return notes;
+		}
 		function defaultEventItem() {
 			return {
 				id: "", name: "", description: "", enabled: true, eventType: "online",
@@ -586,9 +1063,16 @@
 			return eventParamFields(handler, eventType).map(field => `<div class="field"><label>${field.label}</label><input type="number" min="${field.min}" data-event-param="${field.key}" value="${esc(params?.[field.key] ?? field.default ?? "")}"></div>`).join("");
 		}
 		function renderEventList() {
-			main.innerHTML = pageHeader("EVENT CONFIG", "事件设置", "配置随机事件的触发条件、概率与文案；事件不写代码，只填参数。", `<button class="button primary" id="newEvent">＋ 新建事件</button>`) + `<section class="panel"><div class="panel-head"><div><h3>已配置事件</h3><p>共 ${state.events.length} 个事件；probability 是「每次检测」的命中率，不是每分钟</p></div></div>${state.events.length ? `<div class="table-wrap"><table><thead><tr><th>事件</th><th>处理器</th><th>触发方式</th><th>概率 / 间隔</th><th>冷却 / 每日上限</th><th>启用</th><th>发布状态</th><th>操作</th></tr></thead><tbody>${state.events.map((item, index) => `<tr><td><div class="item-name">${esc(item.name)}</div><div class="item-id">${esc(item.id)}</div></td><td>${esc(eventHandlerLabel(item.handler))}${item.relatedTag ? `<div class="item-id">tag: ${esc(item.relatedTag)}</div>` : ""}</td><td>${esc(eventTypeLabel(item.eventType))}</td><td>${esc(String(item.probability))} ${(item.eventType || "online") === "offline" ? "/ 每小时离线" : `/ ${esc(String(item.checkIntervalSeconds))}s`}</td><td>${esc(String(item.cooldownMinutes))} 分钟 / ${esc(String(item.maxPerDay))} 次</td><td>${item.enabled === false ? "停用" : "启用"}</td><td><span class="badge ${item.dirty ? "draft" : "published"}">${item.dirty ? "有修改，待发布" : "已发布"}</span></td><td><div class="actions"><button class="link-button edit-event" data-index="${index}">编辑</button><button class="button publish" data-index="${index}" ${item.dirty ? "" : "disabled"}>发布</button><button class="link-button delete delete-event" data-index="${index}">删除</button></div></td></tr>`).join("")}</tbody></table></div>` : `<p class="empty">还没有事件，点右上角新建。</p>`}</section>`;
+			const filter = listFilters.events;
+			const items = state.events.filter(item => recordMatches(item, filter));
+			const rows = items.map(item => { const index = state.events.indexOf(item); return `<tr><td><div class="item-name">${esc(item.name)}</div><div class="item-id">${esc(item.id)}</div><div class="item-id">玩家效果：${esc(eventMessagePreview(item.message || "未填写文案"))}</div>${notesHtml(eventNotes(item))}</td><td>${esc(eventHandlerLabel(item.handler))}${item.relatedTag ? `<div class="item-id">关联标签：${esc(item.relatedTag)}</div>` : ""}</td><td>${esc(eventTypeLabel(item.eventType))}</td><td>${describeEventRule(item)}</td><td>${esc(String(item.cooldownMinutes))} 分钟 / ${esc(String(item.maxPerDay))} 次</td><td>${item.enabled === false ? "停用" : "启用"}</td><td><span class="badge ${item.dirty ? "draft" : "published"}">${item.dirty ? "有修改，待发布" : "已发布"}</span><br><span class="hint">${formatUpdatedAt(item.updatedAt)}</span></td><td><div class="actions"><button class="link-button edit-event" data-index="${index}">编辑</button>${item.dirty ? `<button class="link-button view-diff" data-index="${index}">查看差异</button>` : ""}<button class="button publish" data-index="${index}" ${item.dirty ? "" : "disabled"}>发布</button><button class="link-button delete delete-event" data-index="${index}">删除</button></div></td></tr>`; }).join("");
+			main.innerHTML = pageHeader("EVENT CONFIG", "事件设置", "配置随机事件的触发条件与玩家文案。保存后会形成草稿，确认发布后才会生效。", `<button class="button primary" id="newEvent">＋ 新建事件</button>`) + `<section class="panel"><div class="panel-head"><div><h3>事件列表</h3><div class="list-summary"><span class="summary-chip"><strong>${state.events.length}</strong> 个事件</span><span class="summary-chip"><strong>${state.events.filter(item => item.dirty).length}</strong> 个待发布</span><span class="summary-chip"><strong>${state.events.filter(item => item.enabled !== false).length}</strong> 个已启用</span></div></div></div>${savedBannerHtml("events", "id")}${listFilterHtml("events", "搜索事件名称、编号或处理器")}${items.length ? `<div class="table-wrap"><table><thead><tr><th>事件 / 玩家效果</th><th>处理方式</th><th>触发方式</th><th>触发时机</th><th>冷却 / 每日上限</th><th>启用</th><th>发布状态 / 最近修改</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="empty">${state.events.length ? "没有匹配的事件，试试清空筛选条件" : "还没有事件，点右上角新建。"}</p>`}</section>`;
 			document.getElementById("newEvent").onclick = () => renderEventForm();
+			bindListFilter("events", renderEventList);
+			bindSavedBanner("events", "id", renderEventList);
+			document.getElementById("eventsCount").textContent = `显示 ${items.length} / ${state.events.length} 个`;
 			document.querySelectorAll(".edit-event").forEach(button => button.onclick = () => renderEventForm(Number(button.dataset.index)));
+			document.querySelectorAll(".view-diff").forEach(button => button.onclick = () => { const item = state.events[Number(button.dataset.index)]; showDiffDialog(item, item.name || item.id); });
 			document.querySelectorAll(".publish").forEach(button => button.onclick = () => publishItem("events", Number(button.dataset.index)));
 			document.querySelectorAll(".delete-event").forEach(button => button.onclick = async () => { if (!confirm("确定要删除这个事件吗？")) return; const item = state.events[Number(button.dataset.index)]; try { await apiRequest(`/admin/events/${encodeURIComponent(item.id)}`, { method: "DELETE" }); state.events.splice(Number(button.dataset.index), 1); renderEventList(); } catch (error) { showToast(`删除失败：${error.message}`); } });
 		}
@@ -596,31 +1080,22 @@
 			const item = index === null ? defaultEventItem() : state.events[index];
 			editingIndex = index; editingType = "events";
 			const conditions = item.conditions || {};
-			main.innerHTML = pageHeader("EVENT CONFIG", index === null ? "新建事件" : "编辑事件", "保存后返回事件列表，发布操作可单独进行。", `<button class="button secondary" id="backList">返回列表</button>`) + `<section class="panel form-panel"><div class="form-body"><form id="eventForm"><div class="form-grid"><div class="field"><label>id <span>*</span></label><input name="id" value="${esc(item.id)}" required></div><div class="field"><label>name <span>*</span></label><input name="name" value="${esc(item.name)}" required></div><div class="field"><label>handler <span>*</span></label><select name="handler">${EVENT_HANDLER_OPTIONS.map(option => `<option value="${option.value}" ${item.handler === option.value ? "selected" : ""}>${option.label}</option>`).join("")}</select></div><div class="field"><label>eventType</label><select name="eventType">${EVENT_TYPE_OPTIONS.map(option => `<option value="${option.value}" ${(item.eventType || "online") === option.value ? "selected" : ""}>${option.label}</option>`).join("")}</select></div><div class="field full"><label>description（列表里给运营看的说明）</label><textarea name="description">${esc(item.description || "")}</textarea></div><div class="field full"><label>message（玩家看到的叙事文案）<span>*</span></label><textarea name="message" required>${esc(item.message || "")}</textarea><span class="hint">可用占位符：{count} 泡泡数、{name} 鱼名、{source} 命中的装扮名</span></div></div><div class="form-grid" id="eventParams">${eventParamInputs(item.handler, item.params, item.eventType)}</div><div class="form-grid"><div class="field"><label>probability（0-1）</label><input name="probability" type="number" step="0.001" min="0" max="1" value="${esc(String(item.probability ?? 0.03))}"></div><div class="field"><label>checkIntervalSeconds</label><input name="checkIntervalSeconds" type="number" min="5" value="${esc(String(item.checkIntervalSeconds ?? 60))}"><span class="hint">仅在线事件使用：每隔多久检测一次</span></div><div class="field"><label>cooldownMinutes</label><input name="cooldownMinutes" type="number" min="0" value="${esc(String(item.cooldownMinutes ?? 30))}"></div><div class="field"><label>maxPerDay</label><input name="maxPerDay" type="number" min="1" value="${esc(String(item.maxPerDay ?? 3))}"></div><div class="field full"><label>relatedTag（关联资源的 tag）</label><input name="relatedTag" value="${esc(item.relatedTag || "")}" placeholder="如 undersea-treasure"><span class="hint">treasure 事件必填；命中的资源名会填进文案的 {source}</span></div></div><div class="form-grid">${EVENT_CONDITION_FIELDS.map(field => `<div class="field"><label>${field.label}</label><input ${field.text ? "" : 'type="number" min="' + field.min + '"'} name="cond_${field.key}" value="${esc(String(conditions[field.key] ?? (field.text ? "" : 0)))}"></div>`).join("")}</div><label class="check"><input name="enabled" type="checkbox" ${item.enabled === false ? "" : "checked"}> 启用这个事件</label></div><div class="form-foot"><button type="button" class="button secondary" id="cancelForm">取消</button><button class="button primary" type="submit">保存</button></div></form></section>`;
-			document.getElementById("backList").onclick = () => renderEventList();
-			document.getElementById("cancelForm").onclick = () => renderEventList();
-			// 换 handler 或换 eventType 时参数项都要跟着换（两件事都会改变需要哪些参数）。
-			const refreshEventParams = () => {
-				const params = readEventParams();
-				document.getElementById("eventParams").innerHTML = eventParamInputs(
-					document.querySelector('select[name="handler"]').value,
-					params,
-					document.querySelector('select[name="eventType"]').value
-				);
-			};
-			document.querySelector('select[name="handler"]').onchange = refreshEventParams;
-			document.querySelector('select[name="eventType"]').onchange = refreshEventParams;
-			document.getElementById("eventForm").onsubmit = async event => {
-				event.preventDefault();
-				// 显式构造事件配置：formData 会给所有表单加上 price / maxInventory / isMemberOnly，
-				// 那几个字段跟事件无关，不要写进配置里。
-				const raw = formData(event.target);
+			main.innerHTML = pageHeader("EVENT CONFIG", index === null ? "新建事件" : "编辑事件", "保存后返回事件列表，发布操作可单独进行。表单下方会实时生成一句「触发规则」，按它核对最不容易配错。", `<button class="button secondary" id="backList">返回列表</button>`) + `<section class="panel form-panel"><div class="form-body"><form id="eventForm"><div class="form-error" id="formError" hidden></div><div class="form-grid"><div class="field"><label>事件名称 <span>*</span></label><input name="name" value="${esc(item.name)}" required></div><div class="field"><label>玩家效果（发生什么）<span>*</span></label><select name="handler">${EVENT_HANDLER_OPTIONS.map(option => `<option value="${option.value}" ${item.handler === option.value ? "selected" : ""}>${option.label}</option>`).join("")}</select></div><div class="field"><label>触发方式</label><select name="eventType">${EVENT_TYPE_OPTIONS.map(option => `<option value="${option.value}" ${(item.eventType || "online") === option.value ? "selected" : ""}>${option.label}</option>`).join("")}</select></div><div class="field"><label>事件编号 <span>*</span></label><input name="id" value="${esc(item.id)}" required><span class="hint">系统识别用，创建后不建议修改；字母、数字、下划线或连字符</span></div><div class="field full"><label>备注（给自己看的说明，玩家看不到）</label><textarea name="description" rows="2">${esc(item.description || "")}</textarea></div><div class="field full"><label>玩家看到的文案 <span>*</span></label><textarea name="message" required>${esc(item.message || "")}</textarea><span class="hint">可用占位符：{count} 泡泡数、{name} 鱼名、{source} 命中的装扮名</span></div></div><div class="form-grid" id="eventParams">${eventParamInputs(item.handler, item.params, item.eventType)}</div><div class="form-grid"><div class="field"><label>触发概率（0-1，0.03 = 3%）</label><input name="probability" type="number" step="0.001" min="0" max="1" value="${esc(String(item.probability ?? 0.03))}"></div><div class="field"><label>检测间隔（秒）</label><input name="checkIntervalSeconds" type="number" min="5" value="${esc(String(item.checkIntervalSeconds ?? 60))}"><span class="hint">仅在线事件使用：每隔多久检测一次</span></div><div class="field"><label>两次触发至少间隔（分钟）</label><input name="cooldownMinutes" type="number" min="0" value="${esc(String(item.cooldownMinutes ?? 30))}"></div><div class="field"><label>每天最多触发几次</label><input name="maxPerDay" type="number" min="1" value="${esc(String(item.maxPerDay ?? 3))}"></div><div class="field full"><label>关联资源标签</label><input name="relatedTag" value="${esc(item.relatedTag || "")}" placeholder="如 undersea-treasure"><span class="hint">宝藏事件必填；命中的资源名会填进文案的 {source}</span></div></div><div class="form-grid">${EVENT_CONDITION_FIELDS.map(field => `<div class="field"><label>${field.label}</label><input ${field.text ? "" : 'type="number" min="' + field.min + '"'} name="cond_${field.key}" value="${esc(String(conditions[field.key] ?? (field.text ? "" : 0)))}"></div>`).join("")}</div><label class="check"><input name="enabled" type="checkbox" ${item.enabled === false ? "" : "checked"}> 启用这个事件</label><div class="form-foot"><button type="button" class="button secondary" id="cancelForm">取消</button><button class="button primary" type="submit">保存为草稿</button></div></form></div><div class="rule-preview" id="eventRulePreview"></div><div class="publish-note" id="eventPreview"><strong>玩家效果预览：</strong> ${esc(eventMessagePreview(item.message || "填写文案后，这里会显示玩家看到的效果"))}</div></section>`;
+			main.innerHTML += `<div class="publish-note" id="eventPreview"><strong>玩家效果预览：</strong> ${esc(eventMessagePreview(item.message || "填写文案后，这里会显示玩家看到的效果"))}</div>`;
+			const goBackToEventList = () => { if (!confirmLeave()) return; editingIndex = null; setLeaveGuard(null); renderEventList(); };
+			document.getElementById("backList").onclick = goBackToEventList;
+			document.getElementById("cancelForm").onclick = goBackToEventList;
+			document.querySelector('textarea[name="message"]').addEventListener("input", event => { document.getElementById("eventPreview").innerHTML = `<strong>玩家效果预览：</strong> ${esc(eventMessagePreview(event.target.value || "填写文案后，这里会显示玩家看到的效果"))}`; });
+			// 从表单读出一份完整的事件配置。提交和「触发规则预览」共用这一份，保证预览和保存的口径一致。
+			// 显式构造：formData 会给所有表单加上 price / maxInventory / isMemberOnly，那几个跟事件无关，不要写进配置。
+			const readEventDraft = form => {
+				const raw = formData(form);
 				const data = {
 					id: String(raw.id || "").trim(),
 					name: String(raw.name || "").trim(),
 					description: String(raw.description || ""),
 					message: String(raw.message || ""),
-					enabled: event.target.elements.enabled.checked,
+					enabled: form.elements.enabled.checked,
 					eventType: raw.eventType || "online",
 					handler: raw.handler,
 					params: readEventParams(),
@@ -632,19 +1107,53 @@
 					conditions: { minFish: 0, minBubbles: 0, hasTag: "" }
 				};
 				EVENT_CONDITION_FIELDS.forEach(field => {
-					const value = event.target.elements[`cond_${field.key}`].value;
+					const value = form.elements[`cond_${field.key}`].value;
 					data.conditions[field.key] = field.text ? String(value || "").trim() : Number(value) || 0;
 				});
+				return data;
+			};
+			// 实时把参数翻译成一句人话 —— 比让管理员自己核对四个数字可靠得多。
+			const refreshRulePreview = () => {
+				const box = document.getElementById("eventRulePreview");
+				if (!box) return;
+				try {
+					box.innerHTML = `<strong>触发规则：</strong>${describeEventRule(readEventDraft(document.getElementById("eventForm")))}`;
+				} catch (error) {
+					box.innerHTML = `<strong>触发规则：</strong>把参数填完整后，这里会实时生成一句话。`;
+				}
+			};
+			// 换 handler 或换 eventType 时参数项都要跟着换（两件事都会改变需要哪些参数）。
+			const refreshEventParams = () => {
+				const params = readEventParams();
+				document.getElementById("eventParams").innerHTML = eventParamInputs(
+					document.querySelector('select[name="handler"]').value,
+					params,
+					document.querySelector('select[name="eventType"]').value
+				);
+				refreshRulePreview();
+			};
+			document.querySelector('select[name="handler"]').onchange = refreshEventParams;
+			document.querySelector('select[name="eventType"]').onchange = refreshEventParams;
+			let eventFormDirty = false;
+			setLeaveGuard(() => eventFormDirty);
+			document.getElementById("eventForm").addEventListener("input", () => { eventFormDirty = true; refreshRulePreview(); });
+			refreshRulePreview();
+			document.getElementById("eventForm").onsubmit = async event => {
+				event.preventDefault();
+				const form = event.target;
+				clearFormErrors(form);
+				const data = readEventDraft(form);
 				const error = validateEventDraft(data);
-				if (error) { showToast(`保存失败：${error}`); return; }
-				if (state.events.some((item, itemIndex) => item.id === data.id && itemIndex !== editingIndex)) { showToast("保存失败：id 已存在"); return; }
+				if (error) { showFormError(form, `保存失败：${error}`); return; }
+				if (state.events.some((item, itemIndex) => item.id === data.id && itemIndex !== editingIndex)) { setFieldError(form, "id", "这个编号已经被其它事件用了"); showFormError(form, "保存失败：事件编号重复"); return; }
 				try {
 					const response = await apiRequest(`/admin/events${editingIndex === null ? "" : `/${encodeURIComponent(data.id)}`}`, { method: editingIndex === null ? "POST" : "PUT", body: JSON.stringify(data) });
-					const saved = { ...response.data.data, published: editingIndex === null ? response.data.published : false, dirty: editingIndex !== null || !response.data.published };
+					const saved = toEditableRecord(response.data);
 					if (editingIndex === null) state.events.push(saved); else state.events[editingIndex] = saved;
-					showToast("已保存");
+					eventFormDirty = false; setLeaveGuard(null); lastSaved = { type: "events", id: data.id };
+					showToast("事件已保存为草稿");
 					renderEventList();
-				} catch (error) { showToast(`保存失败：${error.message}`); }
+				} catch (error) { showFormError(form, `保存失败：${error.message}`); }
 			};
 		}
 		// 把参数输入框读成对象；换 handler / eventType 时用它把已填的值带过去。
@@ -693,29 +1202,42 @@
 		}
 		function renderFocus() {
 			const focus = focusConfig();
+			setLeaveGuard(() => focusGuardOn);
 			const publishButton = `<button class="button publish" id="publishFocus" ${focusDirty ? "" : "disabled"}>${focusDirty ? "待发布" : (focusPublished ? "已发布" : "待发布")}</button>`;
-			main.innerHTML = pageHeader("FOCUS CONFIG", "专注配置", "设置专注时长与不同阶段的气泡奖励。", `${publishButton}<button class="button primary" id="saveFocus">保存配置</button>`) + `<section class="panel form-panel"><div class="form-body"><div class="form-grid"><div class="field"><label>minFocusDuration</label><input id="minFocusDuration" type="number" min="0" value="${focus.minFocusDuration}"></div><div class="field"><label>maxFocusDuration</label><input id="maxFocusDuration" type="number" min="0" value="${focus.maxFocusDuration}"></div></div><h3 class="section-title">rewardTiers <span class="hint">按 endMinute 从小到大显示</span></h3><div id="tiers">${focus.rewardTiers.map((tier, index) => tierTemplate(tier, index)).join("")}</div><button class="button secondary" id="addTier">＋ 新增梯度</button></div></section>`;
-			const markFocusDirty = () => { focusDirty = true; focusPublished = false; };
+			const savedStrip = lastSaved && lastSaved.type === "focus" && focusDirty ? `<div class="saved-banner"><span class="grow"><b>已保存为草稿。</b>当前线上版本：${focusPublishedData ? "发布中的旧版本" : "还没有发布过（全新配置）"}</span><button class="button secondary" id="focusViewDiff">查看差异</button><button class="button publish" id="focusPublishNow">发布</button></div>` : "";
+			main.innerHTML = pageHeader("FOCUS CONFIG", "专注配置", "设置专注时长与不同阶段的气泡奖励。", `${publishButton}<button class="button primary" id="saveFocus">保存配置</button>`) + savedStrip + `<section class="panel form-panel"><div class="form-body"><div class="form-error" id="formError" hidden></div><div class="form-grid"><div class="field"><label>最短专注时长（分钟）</label><input id="minFocusDuration" type="number" min="0" value="${focus.minFocusDuration}"></div><div class="field"><label>最长专注时长（分钟）</label><input id="maxFocusDuration" type="number" min="0" value="${focus.maxFocusDuration}"></div></div><h3 class="section-title">奖励梯度 <span class="hint">玩家专注达到对应分钟数后，每分钟产生多少泡泡；按结束时间从小到大生效</span></h3><div id="tiers">${focus.rewardTiers.map((tier, index) => tierTemplate(tier, index)).join("")}</div><button class="button secondary" id="addTier">＋ 新增梯度</button></div></section>`;
+			const markFocusDirty = () => { focusDirty = true; focusPublished = false; focusGuardOn = true; };
 			document.querySelectorAll("#minFocusDuration, #maxFocusDuration, #tiers input").forEach(input => input.addEventListener("input", markFocusDirty));
 			document.getElementById("addTier").onclick = () => { focus.rewardTiers.push({ id: `tier-${Date.now()}`, endMinute: 0, normalBubblePerMinute: 0, memberBubblePerMinute: 0 }); markFocusDirty(); renderFocus(); };
 			document.querySelectorAll(".remove-tier").forEach(button => button.onclick = () => { if (focus.rewardTiers.length <= 1) { showToast("至少保留一个奖励梯度"); return; } if (!confirm("确定要删除这个配置吗？")) return; focus.rewardTiers.splice(Number(button.dataset.index), 1); markFocusDirty(); renderFocus(); });
 			document.getElementById("saveFocus").onclick = async () => {
+				clearFormErrors(main);
 				const minFocusDuration = Number(document.getElementById("minFocusDuration").value);
 				const maxFocusDuration = Number(document.getElementById("maxFocusDuration").value);
 				const rewardTiers = [...document.querySelectorAll(".tier-row")].map(row => { const values = row.querySelectorAll("input"); return { id: values[0].value, endMinute: Number(values[1].value), normalBubblePerMinute: Number(values[2].value), memberBubblePerMinute: Number(values[3].value) }; });
 				const errors = [];
-				if (minFocusDuration > maxFocusDuration) errors.push("minFocusDuration 不能大于 maxFocusDuration");
-				if (rewardTiers.some(tier => tier.endMinute <= 0)) errors.push("endMinute 必须大于 0");
-				if (new Set(rewardTiers.map(tier => tier.endMinute)).size !== rewardTiers.length) errors.push("endMinute 不允许重复");
-				if (rewardTiers.some(tier => tier.normalBubblePerMinute < 0)) errors.push("normalBubblePerMinute 不能小于 0");
-				if (rewardTiers.some(tier => tier.memberBubblePerMinute < 0)) errors.push("memberBubblePerMinute 不能小于 0");
-				if (errors.length) { showToast(`保存失败：${errors.join("；")}`); return; }
+				if (!Number.isFinite(minFocusDuration) || minFocusDuration <= 0) errors.push("最短专注时长必须大于 0");
+				if (!Number.isFinite(maxFocusDuration) || maxFocusDuration < minFocusDuration) errors.push("最长专注时长不能短于最短专注时长");
+				if (rewardTiers.some(tier => tier.endMinute <= 0)) errors.push("每个梯度的结束时间必须大于 0");
+				if (new Set(rewardTiers.map(tier => tier.endMinute)).size !== rewardTiers.length) errors.push("结束时间不允许重复");
+				if (rewardTiers.some(tier => tier.normalBubblePerMinute < 0) || rewardTiers.some(tier => tier.memberBubblePerMinute < 0)) errors.push("泡泡速率不能小于 0");
+				if (errors.length) { showFormError(null, `保存失败：${errors.join("；")}`); return; }
 				const data = { minFocusDuration, maxFocusDuration, rewardTiers: rewardTiers.sort((a, b) => a.endMinute - b.endMinute) };
-				try { const response = await apiRequest("/admin/focus/focus", { method: "PUT", body: JSON.stringify(data) }); focus.minFocusDuration = response.data.data.minFocusDuration; focus.maxFocusDuration = response.data.data.maxFocusDuration; focus.rewardTiers = response.data.data.rewardTiers; focusPublished = response.data.published; focusDirty = !focusPublished; showToast("专注配置已保存，等待发布"); renderFocus(); } catch (error) { showToast(`保存失败：${error.message}`); }
+				try { const response = await apiRequest("/admin/focus/focus", { method: "PUT", body: JSON.stringify(data) }); focus.minFocusDuration = response.data.data.minFocusDuration; focus.maxFocusDuration = response.data.data.maxFocusDuration; focus.rewardTiers = response.data.data.rewardTiers; focusPublished = response.data.published; focusDirty = !focusPublished; focusPublishedData = response.data.publishedData || focusPublishedData; focusGuardOn = false; lastSaved = { type: "focus", id: "focus" }; showToast("已保存为草稿，等待发布"); renderFocus(); } catch (error) { showFormError(null, `保存失败：${error.message}`); }
 			};
-			document.getElementById("publishFocus").onclick = async () => { try { await apiRequest("/admin/focus/focus/publish", { method: "POST" }); focusDirty = false; focusPublished = true; showToast("专注配置已发布"); renderFocus(); } catch (error) { showToast(`发布失败：${error.message}`); } };
+			// 发布走统一的差异弹窗：先看清「草稿 vs 线上」改了什么，再确认。
+			const focusDraft = () => ({ publishedData: focusPublishedData, data: { minFocusDuration: focus.minFocusDuration, maxFocusDuration: focus.maxFocusDuration, rewardTiers: focus.rewardTiers } });
+			const runPublishFocus = async () => {
+				if (!await openPublishDialog(focusDraft(), "专注配置")) return;
+				try { const response = await apiRequest("/admin/focus/focus/publish", { method: "POST" }); if (response && response.data) focusPublishedData = response.data.data || focusPublishedData; focusDirty = false; focusPublished = true; focusGuardOn = false; lastSaved = null; showToast("专注配置已发布", 2400, "success"); renderFocus(); } catch (error) { showFormError(null, `发布失败：${error.message}`); }
+			};
+			document.getElementById("publishFocus").onclick = runPublishFocus;
+			const stripDiff = document.getElementById("focusViewDiff");
+			if (stripDiff) stripDiff.onclick = () => showDiffDialog(focusDraft(), "专注配置");
+			const stripPublish = document.getElementById("focusPublishNow");
+			if (stripPublish) stripPublish.onclick = runPublishFocus;
 		}
-		function tierTemplate(tier, index) { return `<div class="tier-row"><div class="field"><label>id</label><input value="${esc(tier.id)}"></div><div class="field"><label>endMinute</label><input type="number" min="0" value="${tier.endMinute}"></div><div class="field"><label>normalBubblePerMinute</label><input type="number" min="0" value="${tier.normalBubblePerMinute}"></div><div class="field"><label>memberBubblePerMinute</label><input type="number" min="0" value="${tier.memberBubblePerMinute}"></div><button class="icon-button remove-tier" data-index="${index}" title="删除梯度">×</button></div>`; }
+		function tierTemplate(tier, index) { return `<div class="tier-row"><div class="field"><label>梯度编号</label><input value="${esc(tier.id)}"></div><div class="field"><label>结束时间（分钟）</label><input type="number" min="0" value="${tier.endMinute}"></div><div class="field"><label>普通用户泡泡 / 分钟</label><input type="number" min="0" value="${tier.normalBubblePerMinute}"></div><div class="field"><label>会员泡泡 / 分钟</label><input type="number" min="0" value="${tier.memberBubblePerMinute}"></div><button class="icon-button remove-tier" data-index="${index}" title="删除梯度">×</button></div>`; }
 		const audioCategoryLabel = key => state.audio?.categories?.[key]?.label || DEFAULT_AUDIO.categories[key]?.label || key;
 		// 「装点鱼缸配置」里的商品可以直接挂载音效管理里已上传的音频文件。
 		// 只列 resourcePath 非空的（没上传过的音效挂上去等于没有声音），并按路径去重。
@@ -746,14 +1268,16 @@
 		}
 		function soundTemplate(sound, index) {
 			const options = audioCategoryKeys().map(value => `<option value="${esc(value)}" ${sound.category === value ? "selected" : ""}>${esc(audioCategoryLabel(value))}</option>`).join("");
-			return `<div class="audio-row" data-index="${index}"><div class="field"><label>id</label><input data-prop="id" value="${esc(sound.id)}"></div><div class="field"><label>名称</label><input data-prop="name" value="${esc(sound.name)}"></div><div class="field"><label>分类</label><select data-prop="category">${options}</select></div><label class="check"><input type="checkbox" data-prop="enabled" ${sound.enabled ? "checked" : ""}> 启用</label><div class="field"><label>音量 0-100</label><input type="number" min="0" max="100" data-prop="volume" value="${Number(sound.volume)}"></div><div class="field full"><label>resourcePath</label><div class="upload-row"><input data-prop="resourcePath" value="${esc(sound.resourcePath)}" placeholder="上传音频后自动回填，或手动填写已有路径" style="flex:1"><label class="file-button">上传音频<input type="file" class="sound-upload" data-index="${index}" accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac,.webm"></label></div><span class="hint">支持 mp3/wav/ogg/m4a 等，单个 ≤15MB；留空则使用内置音效</span></div><button class="icon-button remove-sound" data-index="${index}" title="删除音效">×</button></div>`;
+			return `<div class="audio-row" data-index="${index}"><div class="field"><label>编号</label><input data-prop="id" value="${esc(sound.id)}"></div><div class="field"><label>名称</label><input data-prop="name" value="${esc(sound.name)}"></div><div class="field"><label>分类</label><select data-prop="category">${options}</select></div><label class="check"><input type="checkbox" data-prop="enabled" ${sound.enabled ? "checked" : ""}> 启用</label><div class="field"><label>音量 0-100</label><input type="number" min="0" max="100" data-prop="volume" value="${Number(sound.volume)}"></div><div class="field full"><label>音频文件</label><div class="upload-row"><input data-prop="resourcePath" value="${esc(sound.resourcePath)}" placeholder="上传音频后自动回填，或手动填写已有路径" style="flex:1"><label class="file-button">上传音频<input type="file" class="sound-upload" data-index="${index}" accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac,.webm"></label></div><span class="hint">支持 mp3/wav/ogg/m4a 等，单个 ≤15MB；留空则使用内置音效</span></div><button class="icon-button remove-sound" data-index="${index}" title="删除音效">×</button></div>`;
 		}
 		function renderAudio() {
 			if (!state.audio || !state.audio.categories || !Array.isArray(state.audio.sounds)) state.audio = JSON.parse(JSON.stringify(DEFAULT_AUDIO));
 			const audio = state.audio;
+			setLeaveGuard(() => audioGuardOn);
 			const publishButton = `<button class="button publish" id="publishAudio" ${audioDirty ? "" : "disabled"}>${audioDirty ? "待发布" : (audioPublished ? "已发布" : "待发布")}</button>`;
-			main.innerHTML = pageHeader("AUDIO CONFIG", "音效管理", "配置各音效分类的开关与音量，分类可自由增删。", `${publishButton}<button class="button primary" id="saveAudio">保存配置</button>`) + `<section class="panel form-panel"><div class="form-body"><h3 class="section-title">音效分类 <span class="hint">关闭后该分类下的全部音效静音</span></h3><div class="form-grid" id="audioCategories">${Object.entries(audio.categories).map(([key, category]) => categoryTemplate(key, category)).join("")}</div><button class="button secondary" id="addCategory">＋ 新增分类</button><h3 class="section-title">音效列表 <span class="hint">共 ${audio.sounds.length} 个音效，音量取值 0-100</span></h3>${audio.sounds.length ? `<div id="sounds">${audio.sounds.map((sound, index) => soundTemplate(sound, index)).join("")}</div>` : `<div class="empty"><strong>还没有音效</strong>点击下方按钮新增第一个音效</div><div id="sounds"></div>`}<button class="button secondary" id="addSound">＋ 新增音效</button></div></section>`;
-			const markAudioDirty = () => { audioDirty = true; audioPublished = false; const button = document.getElementById("publishAudio"); button.disabled = false; button.textContent = "待发布"; };
+			const savedStrip = lastSaved && lastSaved.type === "audio" && audioDirty ? `<div class="saved-banner"><span class="grow"><b>已保存为草稿。</b>当前线上版本：${audioPublishedData ? "发布中的旧版本" : "还没有发布过（全新配置）"}</span><button class="button secondary" id="audioViewDiff">查看差异</button><button class="button publish" id="audioPublishNow">发布</button></div>` : "";
+			main.innerHTML = pageHeader("AUDIO CONFIG", "音效管理", "配置各音效分类的开关与音量，分类可自由增删。", `${publishButton}<button class="button primary" id="saveAudio">保存配置</button>`) + savedStrip + `<section class="panel form-panel"><div class="form-body"><div class="form-error" id="formError" hidden></div><h3 class="section-title">音效分类 <span class="hint">关闭后该分类下的全部音效静音</span></h3><div class="form-grid" id="audioCategories">${Object.entries(audio.categories).map(([key, category]) => categoryTemplate(key, category)).join("")}</div><button class="button secondary" id="addCategory">＋ 新增分类</button><h3 class="section-title">音效列表 <span class="hint">共 ${audio.sounds.length} 个音效，音量取值 0-100</span></h3>${audio.sounds.length ? `<div id="sounds">${audio.sounds.map((sound, index) => soundTemplate(sound, index)).join("")}</div>` : `<div class="empty"><strong>还没有音效</strong>点击下方按钮新增第一个音效</div><div id="sounds"></div>`}<button class="button secondary" id="addSound">＋ 新增音效</button></div></section>`;
+			const markAudioDirty = () => { audioDirty = true; audioPublished = false; audioGuardOn = true; const button = document.getElementById("publishAudio"); button.disabled = false; button.textContent = "待发布"; };
 			document.querySelectorAll(".volume-row input[type=\"range\"]").forEach(input => input.addEventListener("input", () => { const label = document.querySelector(`[data-volume-label="${input.dataset.category}"]`); if (label) label.textContent = input.value; markAudioDirty(); }));
 			// 分类名称与启用开关也要触发「待发布」，否则改完点不了发布。
 			const categoryList = document.getElementById("audioCategories");
@@ -780,14 +1304,16 @@
 					// 否则发布出去的是一段必然失效的路径。
 					if (body.data.fallbackError) {
 						input.value = "";
-						showToast(`上传未保存：${body.data.fallbackError}${body.data.fallbackCode ? `（${body.data.fallbackCode}）` : ""}。音效配置保持原值未改动，请先解决云存储问题再上传。`, 9000);
+						const message = `上传未保存：${body.data.fallbackError}${body.data.fallbackCode ? `（${body.data.fallbackCode}）` : ""}。音效配置保持原值未改动。`;
+						showUploadError(input, message);
+						showErrorBanner(`云存储出了问题，这次上传没有保存 —— 请先解决再重新上传。`);
 						return;
 					}
 					pathInput.value = body.data.url || body.data.path;
 					markAudioDirty();
 					showToast(`已上传 ${file.name}（${(body.data.size / 1048576).toFixed(2)}MB）到${body.data.driver === "cloudbase" ? "云存储" : "本地"}，记得保存并发布`);
 				} catch (error) {
-					showToast(`上传失败：${error.message}`);
+					showUploadError(input, `上传失败：${error.message}`);
 				}
 				input.value = "";
 			});
@@ -814,7 +1340,17 @@
 			});
 			document.querySelectorAll(".remove-sound").forEach(button => button.onclick = () => { if (!confirm("确定要删除这个音效吗？")) return; audio.sounds.splice(Number(button.dataset.index), 1); markAudioDirty(); renderAudio(); });
 			document.getElementById("saveAudio").onclick = saveAudio;
-			document.getElementById("publishAudio").onclick = async () => { try { await apiRequest("/admin/audio/audio/publish", { method: "POST" }); audioDirty = false; audioPublished = true; showToast("音效配置已发布"); renderAudio(); } catch (error) { showToast(`发布失败：${error.message}`); } };
+			// 发布走统一的差异弹窗：先看清「草稿 vs 线上」改了什么，再确认。
+			const audioDraft = () => ({ publishedData: audioPublishedData, data: state.audio });
+			const runPublishAudio = async () => {
+				if (!await openPublishDialog(audioDraft(), "音效配置")) return;
+				try { const response = await apiRequest("/admin/audio/audio/publish", { method: "POST" }); if (response && response.data) audioPublishedData = response.data.data || audioPublishedData; audioDirty = false; audioPublished = true; audioGuardOn = false; lastSaved = null; showToast("音效配置已发布", 2400, "success"); renderAudio(); } catch (error) { showFormError(null, `发布失败：${error.message}`); }
+			};
+			document.getElementById("publishAudio").onclick = runPublishAudio;
+			const stripDiff = document.getElementById("audioViewDiff");
+			if (stripDiff) stripDiff.onclick = () => showDiffDialog(audioDraft(), "音效配置");
+			const stripPublish = document.getElementById("audioPublishNow");
+			if (stripPublish) stripPublish.onclick = runPublishAudio;
 		}
 		async function saveAudio() {
 			// 分类清单以页面上的实际输入为准：新增/重命名/删除都在这里落到数据上。
@@ -834,20 +1370,23 @@
 			const categoryKeys = Object.keys(categories);
 			if (!categoryKeys.length) errors.push("至少要保留一个音效分类");
 			categoryKeys.forEach(key => { if (!/^[A-Za-z0-9_-]{1,32}$/.test(key)) errors.push(`分类 key 不合法：${key}`); });
-			if (sounds.some(sound => !sound.id || !sound.name)) errors.push("每个音效都必须填写 id 和 name");
-			if (new Set(sounds.map(sound => sound.id)).size !== sounds.length) errors.push("音效 id 不允许重复");
-			if (sounds.some(sound => !categoryKeys.includes(sound.category))) errors.push("音效分类必须是已定义的分类之一");
+			if (sounds.some(sound => !sound.id || !sound.name)) errors.push("每个音效都必须填写编号和名称");
+			if (new Set(sounds.map(sound => sound.id)).size !== sounds.length) errors.push("音效编号不允许重复");
+			if (sounds.some(sound => !categoryKeys.includes(sound.category))) errors.push("音效的分类必须是已定义的分类之一");
 			if (sounds.some(sound => !Number.isFinite(sound.volume) || sound.volume < 0 || sound.volume > 100)) errors.push("音效音量必须在 0-100 之间");
 			Object.entries(categories).forEach(([key, category]) => { if (!Number.isFinite(Number(category.volume)) || category.volume < 0 || category.volume > 100) errors.push(`分类 ${key} 的音量必须在 0-100 之间`); });
-			if (errors.length) { showToast(`保存失败：${errors.join("；")}`); return; }
+			if (errors.length) { showFormError(null, `保存失败：${errors.join("；")}`); return; }
 			try {
 				const response = await apiRequest("/admin/audio/audio", { method: "PUT", body: JSON.stringify({ categories, sounds }) });
 				state.audio = JSON.parse(JSON.stringify(response.data.data));
 				audioPublished = response.data.published;
 				audioDirty = !audioPublished;
-				showToast("音效配置已保存，等待发布");
+				audioPublishedData = response.data.publishedData || audioPublishedData;
+				audioGuardOn = false;
+				lastSaved = { type: "audio", id: "audio" };
+				showToast("已保存为草稿，等待发布");
 				renderAudio();
-			} catch (error) { showToast(`保存失败：${error.message}`); }
+			} catch (error) { showFormError(null, `保存失败：${error.message}`); }
 		}
 		function renderPlaceholder() { const title = state.module === "events" ? "事件设置" : "付费配置"; main.innerHTML = pageHeader(state.module === "events" ? "EVENT SETTINGS" : "PAYMENT CONFIG", title, "该模块将在后续版本中接入。", "") + `<section class="panel"><div class="empty"><strong>功能预留中</strong>这里暂时没有可配置内容。</div></section>`; }
 		// ===== 玩家管理 =====
@@ -956,26 +1495,47 @@
 		async function publishItem(type, index) {
 			const item = state[type][index];
 			const id = type === "fish" ? item.fishid : item.id;
+			// 发布前先看差异再确认 —— 确认动作本身在弹窗里完成。
+			if (!await openPublishDialog(item, item.name || id)) return;
 			try {
-				await apiRequest(`/admin/${type}/${encodeURIComponent(id)}/publish`, { method: "POST" });
+				const response = await apiRequest(`/admin/${type}/${encodeURIComponent(id)}/publish`, { method: "POST" });
+				// 发布接口返回的是发布后的完整记录：把 publishedData 同步成刚发的内容，
+				// 否则界面上的「草稿 vs 线上」对比用的还是发布前的旧数据。
+				if (response && response.data) Object.assign(item, toEditableRecord(response.data));
 				item.dirty = false; item.published = true;
+				lastSaved = null;
 				showToast("内容已发布");
 			} catch (error) { showToast(`发布失败：${error.message}`); return; }
 			// 渲染放在 try 外面：渲染出错不该被报成「发布失败」（发布其实已经成功了），
 			// 那会让人以为接口挂了、往错的方向查。
 			renderModule();
 		}
-		document.getElementById("navList").onclick = event => { const button = event.target.closest(".nav-item"); if (!button) return; state.module = button.dataset.module; editingIndex = null; render(); };
+		document.getElementById("navList").onclick = event => { const button = event.target.closest(".nav-item"); if (!button) return; if (!confirmLeave()) return; state.module = button.dataset.module; editingIndex = null; setLeaveGuard(null); render(); };
 		function connectWithKey() {
 			adminKey = adminKeyInput.value.trim();
 			if (adminKey) sessionStorage.setItem("fishtank_admin_key", adminKey);
 			else sessionStorage.removeItem("fishtank_admin_key");
-			loadAdminData().then(() => { adminKeyBtn.textContent = "已连接"; adminKeyBtn.classList.add("connected"); render(); }).catch(error => { adminKeyBtn.classList.remove("connected"); adminKeyBtn.textContent = "连接"; showToast(`连接失败：${error.message}`); render(); });
+			setConnectionState("", "正在连接 · 读取配置");
+			loadAdminData().then(() => {
+				lastSyncedAt = Date.now();
+				setConnectionState("connected", "已连接 · 配置已同步");
+				refreshConnEnv();
+				// 连上就收起密钥框 —— 密钥不是常态操作，别让它一直占着侧边栏。
+				collapseConnBody();
+				clearErrorBanner();
+				render();
+			}).catch(error => {
+				setConnectionState("error", `连接失败 · ${error.message}`);
+				showErrorBanner(`连接后台失败：${error.message}。请确认管理密钥与 API 地址，改好后重试。`);
+				render();
+			});
 		}
 		adminKeyBtn.onclick = connectWithKey;
 		adminKeyInput.addEventListener("keydown", event => { if (event.key === "Enter") connectWithKey(); });
-		if (adminKey) { loadAdminData().then(() => { render(); }).catch(error => { showToast(`API 连接失败：${error.message}`); adminKeyBtn.classList.remove("connected"); adminKeyBtn.textContent = "连接"; render(); }); }
-		else { render(); showToast("请输入管理密钥后点击连接"); }
+		if (adminKey) {
+			loadAdminData().then(() => { lastSyncedAt = Date.now(); setConnectionState("connected", "已连接 · 配置已同步"); refreshConnEnv(); collapseConnBody(); render(); })
+				.catch(error => { setConnectionState("error", `连接失败 · ${error.message}`); showErrorBanner(`连接后台失败：${error.message}。请确认管理密钥与 API 地址，改好后重试。`); render(); });
+		} else { setConnectionState("", "未连接 · 输入密钥后连接 API"); refreshConnEnv(); render(); showToast("请输入管理密钥后点击连接", 4000, "warning"); }
 	</script>
 </body>
 </html>

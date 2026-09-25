@@ -121,69 +121,53 @@
     100% { transform: translateY(-90vh) scale(1.1); opacity: 0; }
   }
 
-  /* 升级版海报标题：纯白高对比度 + 立体阴影浮雕感 */
-  .poster-title {
-    position: absolute;
-    /* 顶栏是通栏的（约 52px），标题必须落在它下面，否则会被毛玻璃糊掉一半。 */
-    top: max(64px, 5.5%);
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 100;
+  /* 品牌标题：2026-09-25 从鱼缸里的大海报字收进顶栏左上角。
+     鱼缸中段只留计时器（dominik），标题在顶栏常驻、不挡水面，也不用再跟毛玻璃抢层级。 */
+  .v02-brand-title {
     margin: 0;
-    font-size: clamp(24px, 5.5vw, 54px);
+    font-family: var(--font-ui);
+    font-size: clamp(15px, 2.4vw, 19px);
+    font-weight: 800;
+    letter-spacing: 0.12em;
     white-space: nowrap;
-    font-weight: 900;
-    letter-spacing: 0.22em;
-    padding-left: 0.22em; /* 居中校正 letter-spacing 的偏移 */
-    pointer-events: none;
-    
-    /* 改为纯白实色，增强清晰度 */
     color: #ffffff;
-    
-    /* 强对比水体阴影，确保在任何水色背景下都极为清晰 */
-    filter: drop-shadow(0 2px 8px rgba(16, 52, 60, 0.45))
-            drop-shadow(0 0 20px rgba(255, 255, 255, 0.4));
-    
+    text-shadow: 0 2px 8px rgba(16, 52, 60, 0.45), 0 0 18px rgba(255, 255, 255, 0.35);
+    pointer-events: none;
     will-change: transform, opacity, filter;
   }
 
-  /* 泡泡破裂消散动画 */
-  .poster-title.bubble-dissolve {
+  /* 泡泡破裂消散动画（开始专注时标题化成气泡浮走） */
+  .v02-brand-title.bubble-dissolve {
     animation: bubbleUpDissolve 0.85s cubic-bezier(0.25, 1, 0.5, 1) forwards;
   }
 
   /* 泡泡生成淡入恢复动画 */
-  .poster-title.bubble-appear {
+  .v02-brand-title.bubble-appear {
     animation: bubbleIn 0.75s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
 
+  /* 标题从「缸中央的大海报」搬进顶栏后，专注时的消散动画必须改成**不位移、不消失**的版本：
+     顶栏是固定导航，标题飘走或 visibility:hidden 都会在栏上留一个空洞。
+     现在只做一次「暗下去」的呼吸 —— 专注中标题降到半透明，结束后亮回来。 */
   @keyframes bubbleUpDissolve {
     0% {
       opacity: 1;
-      transform: translateX(-50%) translateY(0) scale(1);
-      filter: drop-shadow(0 2px 8px rgba(16, 52, 60, 0.45)) blur(0px);
-    }
-    50% {
-      opacity: 0.7;
-      filter: drop-shadow(0 4px 12px rgba(255, 255, 255, 0.8)) blur(2px);
+      text-shadow: 0 2px 8px rgba(16, 52, 60, 0.45), 0 0 18px rgba(255, 255, 255, 0.35);
     }
     100% {
-      opacity: 0;
-      transform: translateX(-50%) translateY(-55px) scale(1.3);
-      filter: drop-shadow(0 0 15px rgba(255, 255, 255, 0)) blur(8px);
+      opacity: 0.5;
+      text-shadow: 0 1px 4px rgba(16, 52, 60, 0.30);
     }
   }
 
   @keyframes bubbleIn {
     0% {
-      opacity: 0;
-      transform: translateX(-50%) translateY(20px) scale(0.85);
-      filter: blur(6px);
+      opacity: 0.5;
+      text-shadow: 0 1px 4px rgba(16, 52, 60, 0.30);
     }
     100% {
       opacity: 1;
-      transform: translateX(-50%) translateY(0) scale(1);
-      filter: drop-shadow(0 2px 8px rgba(16, 52, 60, 0.45)) drop-shadow(0 0 20px rgba(255, 255, 255, 0.4)) blur(0px);
+      text-shadow: 0 2px 8px rgba(16, 52, 60, 0.45), 0 0 18px rgba(255, 255, 255, 0.35);
     }
   }
 
@@ -195,6 +179,10 @@
       #dfcb92;
     background-size: 38px 31px, 47px 39px, auto;
   }
+  /* 用后台上传的沙子图时整层拉到整缸高：图按高度撑满（JS 写 inline background），
+     沙子条带落在图片底部约 20%，上方透明区让水色/背景透出来。左右超出部分被裁切或平铺。
+     层级不变（z-index:2）—— 在背景层之上、装饰层之下。 */
+  .sand.sand-image { height: 100%; }
 
   .plant { position: absolute; bottom: 10.5%; width: 100px; height: 25%; z-index: 3; }
   .plant.left { left: 5%; }
@@ -338,22 +326,52 @@
   .time-step:disabled { opacity: .28; cursor: default; transform: none; }
   .time-sub { font-size: 11px; color: #5a7378; max-width: 85%; }
 
+  /* 开始 / 结束：圆形泡泡按钮（dominik 2026-09-25）。
+     播放 ▶ = 开始，方块 ■ = 结束。颜色统一到规定的蓝（--screen-blue-500 / 700），
+     旧的青绿（#4d8a8c / #667f82）全部退役。
+     ⚠️ 显示/隐藏仍由 JS 写 inline style（display:inline-block / none），
+     所以这里不能用 display:flex 覆盖 —— 图标居中靠 line-height + flex 兜底。 */
   .start, .end {
-    margin-top: 10px; border: 0; border-radius: 20px; padding: 7px 18px;
-    background: #4d8a8c; color: white; font-size: 13px; cursor: pointer;
-    box-shadow: 0 4px 10px rgba(77, 138, 140, 0.3);
-    transition: transform .1s ease, background .2s ease;
+    margin-top: 10px; border: 0; border-radius: 50%;
+    width: 54px; height: 54px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 32% 28%, rgba(255,255,255,.55) 0%, var(--screen-blue-500) 46%, var(--screen-blue-700) 100%);
+    color: #fff; font-size: 17px; line-height: 1; cursor: pointer;
+    box-shadow: 0 6px 16px rgba(10, 77, 184, .34), inset 0 1px 0 rgba(255,255,255,.55);
+    transition: transform .12s ease, box-shadow .2s ease;
+    -webkit-tap-highlight-color: transparent;
   }
-  .start:hover, .end:hover { transform: scale(1.05); }
-  .end { display: none; background: #667f82; }
+  .start:hover, .end:hover { transform: scale(1.07); }
+  .start:active, .end:active { transform: scale(.94); }
+  /* 结束用更深的蓝（停止 = 收束），并加一圈内描边，和播放态一眼能分开。 */
+  .end {
+    /* 未专注时必须藏起来：开始/结束是两个互斥的圆形泡泡按钮，同时露出来玩家会不知道点哪个。
+       专注中由 JS 写 inline display = inline-flex 打开（inline 优先级高于这条）。 */
+    display: none;
+    background: radial-gradient(circle at 32% 28%, rgba(255,255,255,.45) 0%, var(--screen-blue-700) 46%, var(--screen-blue-900) 100%);
+    box-shadow: 0 6px 16px rgba(6, 41, 94, .40), inset 0 0 0 2px rgba(255,255,255,.35);
+  }
+  .end-glyph { font-size: 13px; }
+  /* 专注进度行：只在专注中出现，说清「进行了多久 + 结束能拿多少泡泡」。 */
+  .focus-progress {
+    margin-bottom: 3px;
+    font-size: 11px; font-weight: 700; letter-spacing: .04em; line-height: 1.4;
+    color: var(--screen-blue-700);
+    max-width: 92%;
+    /* 这句话在计时器圆里放不下会折成两行。balance 让两行长度接近，
+       否则会在「预计获得」中间断开，第二行只剩「得 25 泡泡」几个字。 */
+    text-wrap: balance;
+  }
+  .focus-progress[hidden] { display: none; }
 
   .modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; z-index: 1001; background: rgba(22, 46, 50, .20); }
   .modal.show { display: flex; }
   .modal-card { width: min(340px, calc(100vw - 40px)); padding: 27px; border-radius: 22px; background: #f6fbfb; text-align: center; }
   .modal-actions { display: flex; gap: 10px; justify-content: center; margin-top: 20px; }
   .modal-actions button { border: 0; border-radius: 11px; padding: 10px 18px; font-size: 15px; cursor: pointer; }
-  .continue { background: #e1eeee; color: #3d5559; }
-  .confirm { background: #5a8588; color: white; }
+  /* 旧青绿（#e1eeee / #5a8588）已统一换成规定的蓝：次级按钮用浅蓝底，主按钮用蓝 500。 */
+  .continue { background: var(--screen-blue-50); color: var(--screen-blue-700); }
+  .confirm { background: var(--screen-blue-500); color: white; }
 
   .completion-flash {
     position:absolute; left:50%; top:53%; z-index:1100;
@@ -377,12 +395,6 @@
   @keyframes completionPulse {
     0%,100%{transform:translate(-50%,-50%) translateY(0) scale(1)}
     50%{transform:translate(-50%,-50%) translateY(-13px) scale(1.045)}
-  }
-  @media (max-width:520px) {
-    .poster-title{top:max(60px,4.5%);font-size:clamp(21px,7vw,31px);letter-spacing:.12em;padding-left:.12em}
-    .timer{width:min(230px,62vw);height:min(230px,62vw)}
-    /* 计时器在小屏缩到 62vw，状态条的跟随偏移必须同步缩，否则会掉到缸底外面。 */
-    .v02-focus{top:calc(53% + min(115px,31vw) + 20px)}
   }
 
 
@@ -508,10 +520,10 @@
   font-family:var(--font-ui);color:var(--text-on-water);
 }
 /* 专注聚合状态条：只读展示「今日 / 累计」，不暴露逐条明细。
-   位置从右上角挪到计时器正下方（dominik 2026-09-25）：屏幕一长，右上角那块就飘到
-   视野之外，而这里永远跟着计时器走。计时器是 top:53% + 自身高度的一半，所以用
-   min(130px,35vw) 复刻它的半高（260/2 与 70vw/2），再留 22px 给 bubbleFloat 的浮动幅度。 */
-.v02-focus{position:absolute;left:50%;transform:translateX(-50%);top:calc(53% + min(130px,35vw) + 22px);z-index:1000;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 13px;border:1px solid var(--shell-border);background:var(--shell-bg);box-shadow:var(--shell-edge),var(--shell-shadow);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-radius:var(--radius-lg);color:var(--text-on-water);font-family:var(--font-ui);line-height:1.4;pointer-events:none;}
+   位置：页面偏底部（dominik 2026-09-25 二次调整）—— 中段只留计时器，这块是「扫一眼就行」的
+   信息，贴底最不碍事，也不会像贴计时器那样被 bubbleFloat 的浮动幅度带得忽上忽下。
+   ⚠️ 不再写 top —— fixed/absolute 同时写 top 和 bottom 时 top 会赢，贴底就会失效。 */
+.v02-focus{position:absolute;left:50%;transform:translateX(-50%);bottom:max(16px,3.5vh);z-index:1000;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 13px;border:1px solid var(--shell-border);background:var(--shell-bg);box-shadow:var(--shell-edge),var(--shell-shadow);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-radius:var(--radius-lg);color:var(--text-on-water);font-family:var(--font-ui);line-height:1.4;pointer-events:none;}
 .v02-focus[hidden]{display:none;}
 .v02-focus .focus-today{font-size:12px;letter-spacing:.04em;font-weight:700;}
 .v02-focus .focus-total{font-size:11px;letter-spacing:.04em;opacity:.85;}
@@ -521,6 +533,9 @@
   font-family:var(--font-num);font-weight:700;font-size:14px;
   font-variant-numeric:tabular-nums;letter-spacing:.04em;
   color:var(--text-on-water);
+  /* 窄屏下「🫧 3000」会在 emoji 和数字之间断行，把顶栏撑成两行（360px 实测）。
+     泡泡数是顶栏里最不能换行的东西，直接锁死。 */
+  white-space:nowrap;flex:0 0 auto;
 }
 /* 右：三个直接可见入口，点哪个开哪个右侧抽屉（原型 .top-entries）。 */
 .v02-topbar-entries{display:flex;align-items:center;gap:8px;}
@@ -592,7 +607,7 @@
 .v02-item{border:1px solid var(--shell-border);border-radius:var(--radius-md);padding:var(--space-sm);background:rgba(10,132,255,0.14);display:flex;flex-direction:column;gap:6px;transition:border-color .15s ease,transform .1s ease,background .15s ease;}
 .v02-item:hover{transform:translateY(-2px);background:rgba(10,132,255,0.22)}
 .v02-preview{height:96px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;overflow:hidden;background:linear-gradient(135deg,#a9dfe8,#d9f2ef);}
-.v02-preview:hover{filter:brightness(1.03);box-shadow:inset 0 0 0 2px rgba(77,138,140,.25)}
+.v02-preview:hover{filter:brightness(1.03);box-shadow:inset 0 0 0 2px rgba(10,132,255,.25)}
 .v02-preview-fish{font-size:48px;filter:drop-shadow(0 5px 4px rgba(0,0,0,.12));}
 /* object-fit 用 contain：完整显示整张图、绝不裁切（正方形图上下被裁的元凶就是 cover）。
    contain 留出的空白露出的正是这层渐变，而它与 .v02-preview 的底色完全一致 → 留白肉眼看不出来。
@@ -610,7 +625,7 @@
 .v02-preview-sand{width:100%;height:100%;background:linear-gradient(to bottom,#9dd4dc 0 70%,#dfcb92 71%)}
 .v02-preview-sand.dark{background:linear-gradient(to bottom,#9dd4dc 0 70%,#b8a477 71%)}
 .v02-preview-sound{font-size:42px}
-.v02-item-name{margin-top:2px;font-weight:700;color:var(--text-on-water)}.v02-item-meta{margin-top:4px;font-size:11px;color:var(--text-on-water-dim);min-height:28px}
+.v02-item-name{margin-top:2px;font-weight:700;color:var(--text-on-water)}.v02-item-meta{margin-top:4px;font-size:11px;color:var(--text-on-water-dim);min-height:30px}
 .v02-item-name{
   display:flex;
   align-items:center;
@@ -630,8 +645,17 @@
   white-space:nowrap;
   font-size:10px;
 }
+/* 商品描述最多两行（dominik 2026-09-25）：长描述会把卡片撑得高矮不一，
+   卡片高度参差比信息少更难看。超出用省略号，完整文案在预览/后台里看。 */
 .v02-description{
-  display:block;
+  /* ⚠️ display 必须是 -webkit-box，写 block 的话 -webkit-line-clamp 直接被忽略。
+     这里只能有这一条 .v02-description 规则 —— 同权重后写的赢，之前就是被一条
+     靠后的 display:block 悄悄覆盖掉，两行限制成了空闸。 */
+  display:-webkit-box;
+  -webkit-line-clamp:2;
+  line-clamp:2;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
   margin-top:5px;
   line-height:1.45;
   color:var(--text-on-water-dim);
@@ -727,7 +751,7 @@
 .v02-quantity button:disabled{background:rgba(190,225,255,.16);color:var(--text-on-water-dim);cursor:not-allowed}
 /* 抽屉宽度恒定（min(440px,92vw)），窄屏靠 92vw 收缩即可，不再按视口砍列数。 */
 @media(max-width:480px){.v02-preview{height:88px}}
-@media(max-width:480px){.v02-bubbles{display:none}.v02-shop-btn{padding:9px 13px}}
+@media(max-width:480px){.v02-shop-btn{padding:9px 13px}}
 
 /* ===== 商店固定操作栏 ===== */
 #shopModal .v02-shop-body{
@@ -992,9 +1016,9 @@ body:not(.dev-on) .dev-panel{display:none!important}
 .v02-paper-shadow{position:relative;max-width:100%;margin:auto;filter:drop-shadow(0 20px 44px rgba(20,50,55,.34));}
 .v02-paper{
   position:relative;
-  /* 两侧各留 18px 给贴纸（贴纸骑在纸边上，最远伸到 -18px）——
-     不留的话贴纸会把弹窗的 overflow:auto 撑出横向滚动条。 */
-  width:min(348px,calc(100vw - 76px));
+  /* 贴纸已下线（dominik 2026-09-25：先都去掉，以后画了图再贴），
+     所以不用再给两侧留 18px 的让位空间，纸可以放宽回来。 */
+  width:min(348px,calc(100vw - 40px));
   min-height:min(430px,74vh);
   display:flex;flex-direction:column;
   background:var(--paper-bg);
@@ -1003,15 +1027,6 @@ body:not(.dev-on) .dev-panel{display:none!important}
   clip-path:var(--paper-notch);
   font-family:var(--font-ui);
 }
-/* 贴纸：故意骑在纸的轮廓外面 —— 父层没有被 clip-path 裁，所以能露出来。
-   做成"白底圆片"而不是一个裸 emoji：裸 emoji 落在花花的背景上就是几个脏点，
-   加了白底和投影才像一张贴上去的贴纸。
-   横向最多伸出 18px，纸的内边距是 24px，所以再怎么样也压不到正文。 */
-.v02-paper-sticker{position:absolute;width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;line-height:1;background:#fffdf7;box-shadow:0 3px 9px rgba(20,50,55,.30),inset 0 0 0 1px rgba(47,74,78,.10);pointer-events:none;}
-.v02-paper-sticker.s1{left:-18px;top:24px;transform:rotate(-16deg)}
-.v02-paper-sticker.s2{right:-18px;top:74px;transform:rotate(13deg)}
-.v02-paper-sticker.s3{left:-18px;bottom:112px;transform:rotate(10deg)}
-.v02-paper-sticker.s4{right:-18px;bottom:44px;transform:rotate(-12deg)}
 /* 抬头：店标 + 店名 + 英文名，三行居中。 */
 .v02-paper-logo{display:flex;flex-direction:column;align-items:center;gap:3px;text-align:center;}
 .v02-paper-mark{font-size:23px;line-height:1;filter:drop-shadow(0 2px 3px rgba(20,50,55,.18));}
@@ -1048,7 +1063,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
 }
 .v02-receipt-close{
   display:block;
-  background:#5a8588;
+  background:var(--screen-blue-500);
 }
 
 /* ===== 随机事件小票（F10 / F12）=====
@@ -1060,12 +1075,12 @@ body:not(.dev-on) .dev-panel{display:none!important}
 /* 事件对鱼缸做了什么，用两枚小标签说清 —— 叙事文案里不一定带数字。 */
 .v02-event-impact{display:flex;flex-wrap:wrap;justify-content:center;gap:7px;margin-top:14px;}
 .v02-event-impact[hidden]{display:none;}
-.v02-event-impact span{font-size:11px;font-weight:700;letter-spacing:.04em;padding:4px 10px;border-radius:999px;background:rgba(90,133,136,.14);color:#3f6a6d;font-variant-numeric:tabular-nums;}
+.v02-event-impact span{font-size:11px;font-weight:700;letter-spacing:.04em;padding:4px 10px;border-radius:999px;background:rgba(10,132,255,.12);color:var(--screen-blue-700);font-variant-numeric:tabular-nums;}
 .v02-event-impact span.loss{background:rgba(216,92,92,.14);color:#a4453f;}
 .v02-event-actions{display:flex;gap:10px;margin-top:18px;}
 .v02-event-actions button{flex:1;height:40px;border:0;border-radius:10px;padding:0 12px;color:#fff;cursor:pointer;font-family:inherit;font-weight:700;}
 .v02-event-actions button[hidden]{display:none;}
-.v02-event-close{background:#5a8588;}
+.v02-event-close{background:var(--screen-blue-500);}
 .v02-event-shop{background:#c98a3f;}
 
 /* ===== 专注完成确认弹窗 ===== */
@@ -1095,7 +1110,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
   margin-top:13px;
   font-size:18px;
   font-weight:800;
-  color:#4f7d80;
+  color:var(--screen-blue-700);
 }
 .completion-confirm{
   margin-top:18px;
@@ -1103,7 +1118,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
   border:0;
   border-radius:10px;
   padding:10px 18px;
-  background:#5a8588;
+  background:var(--screen-blue-500);
   color:#fff;
   font:700 14px inherit;
   cursor:pointer;
@@ -1112,7 +1127,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
 .v02-focus-blocker.show{display:flex}
 .v02-focus-blocker-card{width:min(320px,calc(100vw - 40px));padding:25px 24px 20px;border-radius:20px;background:#f6fbfb;box-shadow:0 18px 55px rgba(20,50,55,.25);text-align:center;color:#34484b}
 .v02-focus-blocker-message{font-size:16px;font-weight:700}
-.v02-focus-blocker-confirm{margin-top:18px;border:0;border-radius:10px;padding:10px 25px;background:#5a8588;color:#fff;font:700 14px inherit;cursor:pointer}
+.v02-focus-blocker-confirm{margin-top:18px;border:0;border-radius:10px;padding:10px 25px;background:var(--screen-blue-500);color:#fff;font:700 14px inherit;cursor:pointer}
 
 /* 配置加载失败提示：层级高于所有弹窗，保证任何界面下用户都能看到。 */
 .config-notice{position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:6000;display:flex;align-items:center;gap:10px;width:min(520px,calc(100vw - 32px));padding:11px 12px;border-radius:14px;border:1px solid #e8b978;background:#fff6e8;color:#7c4a12;font-size:13px;line-height:1.5;box-shadow:0 10px 30px rgba(20,50,55,.18)}
@@ -1162,6 +1177,43 @@ body:not(.dev-on) .dev-panel{display:none!important}
 .sync-guide-go{background:var(--screen-blue-500);color:#fff;box-shadow:0 4px 10px rgba(10,132,255,.3)}
 .sync-guide-skip{background:#e4eeef;color:#48646a}
 
+/* ⚠️ 响应式覆盖必须放在样式表最后。媒体查询不增加选择器权重，
+   同一个类名后写的赢 —— 这两个块原来排在 .v02-topbar / .v02-top-entry / .v02-bubbles
+   的基础规则之前，里面的覆盖全是死代码（360px 实测顶栏 padding 仍是 10px 16px，
+   横屏顶栏高度仍是 52px 而不是 42px）。改动时别把它们挪回去。 */
+  @media (max-width:520px) {
+    .v02-brand-title{font-size:14px;letter-spacing:.08em;min-width:0;overflow:hidden;text-overflow:ellipsis}
+    .timer{width:min(230px,62vw);height:min(230px,62vw)}
+    /* 泡泡数搬进顶栏后不能再在小屏上藏起来（否则手机端根本看不到自己有多少泡泡）：
+       改成整体收紧，让它和标题、三个入口挤在同一行。
+       标题允许被压缩（min-width:0）—— flex 子项默认 min-width:auto，不放开的话
+       标题会顶着不让，把右侧入口挤出屏幕。 */
+    .v02-topbar{padding:8px 10px;gap:8px}
+    .v02-topbar-entries{gap:6px}
+    .v02-bubbles{font-size:12px;gap:2px}
+    .v02-top-entry{padding:5px 9px;font-size:12px}
+  }
+  /* 手机横屏：高度被压到 ~390px，纵向空间是稀缺资源。
+     计时器改成按视口高度取尺寸（不再按 62vw —— 横屏下 vw 很大，会撑出屏幕），
+     顶栏压薄、副标题隐藏，保证计时器和底部状态条都还在视野里。 */
+  @media (orientation: landscape) and (max-height: 560px) {
+    .v02-topbar{min-height:42px;padding:6px 12px}
+    .v02-brand-title{font-size:13px;letter-spacing:.06em}
+    .v02-bubbles{font-size:12px}
+    .v02-top-entry{padding:4px 10px;font-size:12px}
+    .timer{width:min(196px,54vh);height:min(196px,54vh);top:50%;padding:12px}
+    .mode{font-size:11px;margin-bottom:2px}
+    .focus-progress{font-size:10px;margin-bottom:2px}
+    .time{font-size:clamp(22px,7vh,32px)}
+    .time-step{width:26px;height:26px;flex:0 0 26px;font-size:16px}
+    .time-sub{display:none}
+    .start,.end{width:40px;height:40px;margin-top:6px;font-size:14px}
+    .v02-focus{bottom:8px;padding:5px 10px}
+    .v02-focus .focus-today{font-size:11px}
+    .v02-focus .focus-total{font-size:10px}
+    .plant{height:20%}
+  }
+
 </style>
 </head>
 
@@ -1170,7 +1222,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
 <div class="config-notice" id="configNotice" role="status" aria-live="polite" hidden>
   <span class="config-notice-text" id="configNoticeText"></span>
   <button type="button" class="config-notice-retry" id="configNoticeRetry">重试</button>
-  <button type="button" class="config-notice-close" id="configNoticeClose" aria-label="关闭提示">×</button>
+  <button type="button" class="config-notice-close" id="configNoticeClose" aria-label="关闭提示" title="关闭提示">×</button>
 </div>
 
 <div class="sync-guide" id="syncGuide" hidden role="dialog" aria-modal="true" aria-labelledby="syncGuideTitle">
@@ -1190,17 +1242,15 @@ body:not(.dev-on) .dev-panel{display:none!important}
   <div class="water-glow"></div>
   <div class="bubbles" id="bubbles" aria-hidden="true"></div>
   <div class="v02-topbar">
-    <div class="v02-bubbles" id="bubbleDisplay">🫧 0</div>
+    <h1 class="v02-brand-title" id="appTitle">鱼儿乐水族馆</h1>
     <nav class="v02-topbar-entries">
-      <button type="button" class="v02-top-entry" id="shopOpenBtn" data-drawer="shopModal">装点</button>
-      <button type="button" class="v02-top-entry" id="mineOpenBtn" data-drawer="mineDrawer">我的</button>
-      <button type="button" class="v02-top-entry" id="settingsOpenBtn" data-drawer="settingsDrawer">设置</button>
+      <div class="v02-bubbles" id="bubbleDisplay" aria-label="当前泡泡数">🫧 0</div>
+      <button type="button" class="v02-top-entry" id="shopOpenBtn" data-drawer="shopModal" aria-label="打开装点鱼缸" title="装点鱼缸">装点</button>
+      <button type="button" class="v02-top-entry" id="mineOpenBtn" data-drawer="mineDrawer" aria-label="打开我的鱼缸" title="我的鱼缸">我的</button>
+      <button type="button" class="v02-top-entry" id="settingsOpenBtn" data-drawer="settingsDrawer" aria-label="打开设置" title="设置">设置</button>
     </nav>
   </div>
-  <!-- 音频控件已收进「设置」抽屉（见 #settingsDrawer），顶栏只留泡泡数 + 三个入口 -->
-
-    <!-- 纯白清晰海报标题 -->
-    <h1 class="poster-title" id="appTitle">鱼儿乐水族馆</h1>
+  <!-- 音频控件已收进「设置」抽屉（见 #settingsDrawer），顶栏只留标题 + 泡泡数 + 三个入口 -->
 
     <div class="plant left"><span class="leaf"></span><span class="leaf"></span><span class="leaf"></span><span class="leaf"></span></div>
     <div class="plant right"><span class="leaf"></span><span class="leaf"></span><span class="leaf"></span><span class="leaf"></span></div>
@@ -1212,14 +1262,15 @@ body:not(.dev-on) .dev-panel{display:none!important}
 
     <section class="timer" id="timer">
       <div class="mode" id="mode">准备专注</div>
+      <div class="focus-progress" id="focusProgress" hidden aria-live="polite"></div>
       <div class="time-row" id="timeRow">
         <button type="button" class="time-step" id="timeMinus" aria-label="减少专注时长" title="减少 5 分钟">−</button>
         <div class="time" id="time">25:00</div>
         <button type="button" class="time-step" id="timePlus" aria-label="增加专注时长" title="增加 5 分钟">+</button>
       </div>
       <div class="time-sub" id="hint">点 − / + 调时长 · 开始专注后解锁投喂</div>
-      <button class="start" id="start">开始专注</button>
-      <button class="end" id="end">结束专注</button>
+      <button class="start" id="start" type="button" aria-label="开始专注" title="开始专注"><span class="start-glyph" aria-hidden="true">▶</span></button>
+      <button class="end" id="end" type="button" aria-label="结束专注" title="结束专注"><span class="end-glyph" aria-hidden="true">■</span></button>
     </section>
     <!-- 专注聚合状态条：贴在计时器下面。放这里而不是右上角，是因为右上角会随着
          屏幕变长飘出视野，而它跟着计时器走，任何屏幕比例下都在视线中心附近。 -->
@@ -1245,7 +1296,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
     <div class="v02-shop-header">
     <div class="v02-shop-head">
       <div><div class="v02-shop-title">装点鱼缸</div><div class="v02-shop-sub">点击商品预览图即可体验，保存时可一次结算当前鱼缸</div></div>
-      <button type="button" class="v02-close" id="shopCloseBtn" aria-label="关闭">×</button>
+      <button type="button" class="v02-close" id="shopCloseBtn" aria-label="关闭装点鱼缸" title="关闭">×</button>
     </div>
     <div class="v02-tabs" id="shopTabs">
         <button type="button" class="v02-tab active" data-category="all">全部</button>
@@ -1272,7 +1323,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
     <div class="v02-shop-header">
       <div class="v02-shop-head">
         <div><div class="v02-shop-title">我的</div><div class="v02-shop-sub">换设备时用同步码把鱼缸搬过去</div></div>
-        <button type="button" class="v02-close" data-close-drawer="mineDrawer" aria-label="关闭">×</button>
+        <button type="button" class="v02-close" data-close-drawer="mineDrawer" aria-label="关闭我的鱼缸" title="关闭">×</button>
       </div>
     </div>
     <div class="v02-shop-content">
@@ -1323,13 +1374,13 @@ body:not(.dev-on) .dev-panel{display:none!important}
     <div class="v02-shop-header">
       <div class="v02-shop-head">
         <div><div class="v02-shop-title">设置</div><div class="v02-shop-sub">声音大小与静音</div></div>
-        <button type="button" class="v02-close" data-close-drawer="settingsDrawer" aria-label="关闭">×</button>
+        <button type="button" class="v02-close" data-close-drawer="settingsDrawer" aria-label="关闭设置" title="关闭">×</button>
       </div>
     </div>
     <div class="v02-shop-content">
       <div class="audio-controls" id="audioControls">
-    <button type="button" class="audio-toggle" id="audioToggle" aria-label="静音" aria-pressed="false">🔊</button>
-    <button type="button" class="audio-settings-toggle" id="audioSettingsToggle" aria-label="音频设置" aria-expanded="false">•••</button>
+    <button type="button" class="audio-toggle" id="audioToggle" aria-label="静音" title="静音 / 取消静音" aria-pressed="false">🔊</button>
+    <button type="button" class="audio-settings-toggle" id="audioSettingsToggle" aria-label="音频设置" title="音频设置" aria-expanded="false">•••</button>
     <div class="audio-settings" id="audioSettings" aria-hidden="true">
       <div class="audio-settings-title">音频</div>
       <!-- 滑块按后台配置的音效分类动态生成，分类可增删，这里不再写死 -->
@@ -1340,7 +1391,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
   </div>
 </aside>
 
-<button type="button" class="dev-toggle" id="devToggle">DEV</button>
+<button type="button" class="dev-toggle" id="devToggle" aria-label="开发者面板" title="开发者面板（?dev=1 才可用）">DEV</button>
 <div class="dev-panel" id="devPanel" aria-hidden="true">
   <div class="dev-title">🛠 开发者测试工具</div>
   <div class="dev-sub">仅用于 v0.2 开发测试，不属于正式游戏 UI</div>
@@ -1361,10 +1412,6 @@ body:not(.dev-on) .dev-panel{display:none!important}
 
 <div class="v02-receipt" id="purchaseReceipt" aria-hidden="true">
   <div class="v02-paper-shadow">
-    <span class="v02-paper-sticker s1" aria-hidden="true">🐠</span>
-    <span class="v02-paper-sticker s2" aria-hidden="true">🫧</span>
-    <span class="v02-paper-sticker s3" aria-hidden="true">🌿</span>
-    <span class="v02-paper-sticker s4" aria-hidden="true">✦</span>
     <div class="v02-paper v02-receipt-card" role="dialog" aria-modal="true" aria-labelledby="receiptTitle">
       <div class="v02-paper-logo">
         <span class="v02-paper-mark" aria-hidden="true">🐠</span>
@@ -1389,10 +1436,6 @@ body:not(.dev-on) .dev-panel{display:none!important}
 
 <div class="v02-event" id="eventModal" aria-hidden="true">
   <div class="v02-paper-shadow">
-    <span class="v02-paper-sticker s1" aria-hidden="true">🐠</span>
-    <span class="v02-paper-sticker s2" aria-hidden="true">🫧</span>
-    <span class="v02-paper-sticker s3" aria-hidden="true">🌿</span>
-    <span class="v02-paper-sticker s4" aria-hidden="true">✦</span>
     <div class="v02-paper v02-event-card" role="dialog" aria-modal="true" aria-labelledby="eventModalTitle">
       <div class="v02-paper-logo">
         <span class="v02-paper-mark" aria-hidden="true">🐠</span>
@@ -1456,6 +1499,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
   const timeEl = document.getElementById("time");
   const modeEl = document.getElementById("mode");
   const hintEl = document.getElementById("hint");
+  const focusProgressEl = document.getElementById("focusProgress");
   const startBtn = document.getElementById("start");
   const endBtn = document.getElementById("end");
   const modal = document.getElementById("modal");
@@ -1775,10 +1819,18 @@ body:not(.dev-on) .dev-panel{display:none!important}
   //      相对路径，线上实测全 404 —— 拿它当背景会把好好的内置渐变换成一片空白。
   //      后台上传走云存储，返回的都是带签名的 https 链接，不会误伤。
   const IMAGE_SOURCE_RE = /^https?:\/\/.+\.(png|jpe?g|gif|webp|avif|svg|bmp)(?:[?#].*)?$/i;
-  // 路径转成 CSS background。背景/底砂要铺满（cover），装饰件要完整不裁切（contain，贴底）。
+  // 路径转成 CSS background。
+  //   backgrounds → cover（铺满整缸）
+  //   decorations → contain（完整不裁切，贴底）
+  //   sands       → auto 100% + repeat-x（**按高度撑满**，左右可裁切/平铺）
+  // 沙子为什么不能用 cover：dominik 上传的是「透明底 PNG，沙子只占图片高度约 20%」。
+  // 一个近似方形的图走 cover 时缩放比由宽高里较大的那个决定，结果整张图按 1:1 铺进
+  // 只有 19% 高的 .sand 里，居中的透明区正好填满可见区域 → **沙子完全不显示**（线上实测）。
+  // 改成按高度撑满后：图片高度 = 容器高度，沙子条带落在底部 20%，透明区让背景透出来。
   function cssFromImagePath(path, fit){
     const src = String(path || "").trim();
     if(!src || !IMAGE_SOURCE_RE.test(src)) return "";
+    if(fit === "sand") return `url("${src.replace(/["\\]/g, "")}") center bottom / auto 100% repeat-x`;
     const size = fit === "contain" ? "center bottom / contain" : "center / cover";
     return `url("${src.replace(/["\\]/g, "")}") ${size} no-repeat`;
   }
@@ -1792,7 +1844,8 @@ body:not(.dev-on) .dev-panel{display:none!important}
     const override = item && typeof item.visual === "string" ? item.visual.trim() : "";
     const field = VISUAL_FIELD_BY_CATEGORY[category];
     // 装饰件按 class 渲染，图片走独立的 images 列表（可多层：后景 + 前景）。
-    const fit = field === "css" ? "cover" : "contain";
+    // 沙子单独一档 fit：透明底 PNG 必须按高度撑满才看得见（见 cssFromImagePath 的注释）。
+    const fit = category === "sands" ? "sand" : (field === "css" ? "cover" : "contain");
     visual.images = itemImagePaths(item).map(path => cssFromImagePath(path, fit)).filter(Boolean);
     // image   = 可直接当 CSS background 用的值（url("…") center / cover no-repeat）
     // imageUrl = **裸地址**，给 <img src> 用。两者不能混用：把 image 塞进 src 会被浏览器
@@ -2272,7 +2325,11 @@ body:not(.dev-on) .dev-panel{display:none!important}
     if(tankBgEl) tankBgEl.style.background=backgroundCss;
     else tank.style.background=backgroundCss;
     const sandEl=document.getElementById("sand");
-    sandEl.style.background=visualForItem("sands", data.sand).css;
+    const sandVisual=visualForItem("sands", data.sand);
+    sandEl.style.background=sandVisual.css;
+    // 上传的沙子图必须整缸高：沙子只占图片底部约 20%，上面是透明区（让背景透出来）。
+    // 内置渐变则保持原来的底部 19% 条带。层级仍是 z-index:2 —— 压在背景层之上、装饰层之下。
+    sandEl.classList.toggle("sand-image", Boolean(sandVisual.image));
     document.querySelectorAll(".plant").forEach(p=>{
       p.style.display="none";
     });
@@ -2298,9 +2355,16 @@ body:not(.dev-on) .dev-panel{display:none!important}
 
   // ===== 鱼类资源装配（F2）=====
   // 鱼的资源有两种形态：
-  //   - 旧格式：单个字符串 → 走下面的 CSS 鱼模型，老鱼完全不受影响
-  //   - 新格式：[{ slot, path }, ...] → 按插槽用后台上传的图片拼装
+  //   - 旧格式：单个字符串（或 [{slot,path}] 里塞着旧相对路径）→ 走下面的 CSS 鱼模型，老鱼完全不受影响
+  //   - 新格式：[{ slot, path }, ...]，path 是后台上传回来的**绝对图片地址** → 按插槽用图片拼装
   // 返回 { slot: 原始路径 } 映射；没有可用图片资源时返回 null，调用方回退 CSS 鱼。
+  //
+  // 🔴 必须用 IMAGE_SOURCE_RE 过滤（2026-09-25 修）：种子鱼的 resourcePath 是
+  //    "assets/fish/blue-tang.png" 这种**相对路径**，线上根本没有这些文件。以前只要
+  //    resourcePath 是数组就一律走图片分支 → 渲染出 404 的 <img> → 鱼直接看不见。
+  //    触发路径很隐蔽：在后台把这条鱼的「对投喂产生反应」关掉再保存，旧字符串会被
+  //    规整成 [{slot:"body",path:"assets/fish/…"}]，从这一刻起蓝尾鱼就消失了。
+  //    装饰件/背景/沙子早就用同一条规则挡掉了这种路径，只有鱼漏了。
   function fishPartsFromAssembly(assembly){
     const rp = assembly && assembly.resourcePath;
     if(!Array.isArray(rp)) return null;
@@ -2308,7 +2372,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
     rp.forEach(entry => {
       const slot = typeof entry === "string" ? "body" : String((entry && entry.slot) || "").trim();
       const path = typeof entry === "string" ? entry : String((entry && entry.path) || "").trim();
-      if(slot && path) parts[slot] = path;
+      if(slot && path && IMAGE_SOURCE_RE.test(path)) parts[slot] = path;
     });
     return Object.keys(parts).length ? parts : null;
   }
@@ -2910,7 +2974,9 @@ body:not(.dev-on) .dev-panel{display:none!important}
   }
   // 条码内容固定是这句英文致谢（dominik 2026-09-25 定：扫出来就是这句话）。
   // 必须全 ASCII —— 码集 B 只收 32–126 的可打印字符，中文进不去。
-  const RECEIPT_BARCODE_TEXT = "Thank you for visiting Yuerle Aquarium";
+  // 条码内容（dominik 2026-09-25 定为品牌短码）：16 字符 → 模块更宽，手机相机更容易扫出来
+  // （上一版是 38 字符的整句，实测 0.6~0.7px/模块，处在扫得出来与扫不出来的临界值）。
+  const RECEIPT_BARCODE_TEXT = "YUERLE-AQUARIUM";
   // Code128 码集 B 的 107 个符号图案：0–102 是数据符，103/104/105 是起始符，106 是终止符。
   // 每个图案 6 位数字 = [条,空,条,空,条,空] 的宽度，合计 11 个模块（终止符 7 位、13 个模块）。
   // 这份表逐位对齐过 jsbarcode 的编码器，对照用例在 api/test/barcode.test.js。
@@ -3094,7 +3160,8 @@ body:not(.dev-on) .dev-panel{display:none!important}
       const fishAtMax=item.category==="fish" && previewCount>=item.maxInventory;
       let action="";
       if(item.category==="fish"){
-        action=`<div class="v02-quantity"><button type="button" data-minus="${item.id}" ${previewCount<=0?'disabled':''}>−</button><span>${previewCount}</span><button type="button" data-plus="${item.id}" ${fishAtMax?'disabled':''}>+</button></div>`;
+        // 图标按钮（− / +）必须有可识别的名字：只有符号的话读屏软件只会念「减号」。
+        action=`<div class="v02-quantity"><button type="button" data-minus="${item.id}" aria-label="减少一条${item.name}" title="减少一条" ${previewCount<=0?'disabled':''}>−</button><span>${previewCount}</span><button type="button" data-plus="${item.id}" aria-label="增加一条${item.name}" title="增加一条" ${fishAtMax?'disabled':''}>+</button></div>`;
       }else{
         action=`<button type="button" class="v02-dress" data-preview-action="${item.id}" ${equipped?'disabled':''}>${equipped?'装扮中':'装扮'}</button>`;
       }
@@ -3917,6 +3984,17 @@ function categoryScale(key){
     timeEl.textContent = `${String(Math.floor(remaining / 60)).padStart(2, "0")}:${String(remaining % 60).padStart(2, "0")}`;
   }
 
+  // 专注中那行状态（dominik 2026-09-25）：「专注中 · 已进行 18 分钟，完成后预计获得 25 泡泡」。
+  // 预计奖励按**计划时长**算 —— 这才是「做完能拿多少」；提前结束会按实际分钟重算。
+  function updateFocusProgress() {
+    if (!focusProgressEl) return;
+    if (!running) { focusProgressEl.hidden = true; return; }
+    const elapsedMinutes = Math.max(0, Math.floor((Date.now() - startedAt) / 60000));
+    const planned = focusRewardMinutes(minutes, PlayerData.isMember === true);
+    focusProgressEl.hidden = false;
+    focusProgressEl.textContent = `专注中 · 已进行 ${elapsedMinutes} 分钟，完成后预计获得 ${planned} 泡泡`;
+  }
+
   // 改时长的唯一入口：滚轮和 −/+ 按钮都走这里，边界只写一遍。
   function stepFocusMinutes(delta) {
     if (running) return false;
@@ -3982,23 +4060,22 @@ function categoryScale(key){
     // 向服务端登记本次专注，结束时由服务端结算奖励（失败则本地兜底）。
     beginServerFocusSession(minutes, sessionIsMember);
 
-    // 清除现有的呈现动画类，触发泡泡向上浮动消散动画
+    // 标题在顶栏里，专注时只做一次「暗下去」的呼吸，不位移也不隐藏 ——
+    // 顶栏是固定导航，标题消失会在栏上留个空洞（原来是缸中央大海报时才适合消散）。
     appTitle.classList.remove("bubble-appear");
     appTitle.classList.add("bubble-dissolve");
-    
-    setTimeout(() => {
-      if (running) appTitle.style.visibility = "hidden";
-    }, 800);
 
     modeEl.textContent = "专注中"; 
     hintEl.textContent = "点击水面投喂，点击鱼儿加速";
     startBtn.style.display = "none"; 
-    endBtn.style.display = "inline-block";
+    // 圆形泡泡按钮靠 flex 把 ▶ / ■ 摆正；写成 inline-block 会让图标贴到顶边。
+    endBtn.style.display = "inline-flex";
 
     const loop = () => {
       if (!running) return;
       remaining = Math.max(0, Math.ceil(durationSeconds - (Date.now() - startedAt) / 1000));
       renderTime();
+      updateFocusProgress();
       if (remaining > 0) {
         timerFrame = setTimeout(loop, document.hidden ? 1000 : 250);
       } else {
@@ -4040,15 +4117,16 @@ function resetFocus(completed) {
     updateDevStatus();
     syncTimeStepButtons();
 
-    appTitle.style.visibility = "visible";
     appTitle.classList.remove("bubble-dissolve");
     void appTitle.offsetWidth;
     appTitle.classList.add("bubble-appear");
 
     modeEl.textContent = completed ? "专注完成" : "准备专注";
     hintEl.textContent = completed ? "棒极了！点击开始开启下次专注" : HINT_IDLE;
-    startBtn.style.display = "inline-block";
+    startBtn.style.display = "inline-flex";
     endBtn.style.display = "none";
+    // 结束专注后进度行要收起来：它只在专注中有意义。
+    focusProgressEl.hidden = true;
 
     // 专注结束后才把计时器恢复到下一次默认时长。
     remaining = minutes * 60;
@@ -4102,7 +4180,10 @@ function resetFocus(completed) {
 
   tank.addEventListener("pointerdown", (e) => {
     if (!running) return; 
-    if (e.target.closest(".timer, .modal, .audio-controls")) return;
+    // 点水面 = 投喂。但凡点到「界面控件」都不该掉饲料（dominik 2026-09-25 实测：
+    // 专注中点右上角的装点/我的/设置会同时丢下一粒饲料，因为顶栏就在 .tank 里面）。
+    // 这里一次性把交互层都排除掉：顶栏、抽屉、弹窗、计时器、音频控件，以及任何按钮/输入。
+    if (e.target.closest("button, a, input, select, textarea, .timer, .modal, .audio-controls, .v02-topbar, .v02-drawer, .v02-shop, .v02-event, .v02-receipt, .v02-focus-blocker")) return;
 
     const rect = tank.getBoundingClientRect();
     const px = e.clientX - rect.left;

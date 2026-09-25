@@ -1,11 +1,10 @@
-// 「今日专注 / 累计」状态条从右上角挪到计时器下面。
+// 「今日专注 / 累计」状态条的位置契约。
 //
-// 原因（dominik 2026-09-25）：放右上角，屏幕一长它就飘出视野；贴着计时器走才永远在视线中心附近。
-//
-// 这里最值得锁的不是"挪了位置"，而是**偏移量必须跟着计时器尺寸走**：
-// 状态条是绝对定位的，它的 top 是"计时器中心 + 计时器半高 + 间隙"。
-// 计时器尺寸在媒体查询里会变（260px/70vw → 230px/62vw），状态条的偏移必须同步变，
-// 否则小屏上会掉到缸底外面。这个测试从 CSS 里把两边的数字读出来自己算，不写死。
+// 历史：右上角 → 计时器正下方（2026-09-25 上午）→ **页面偏底部**（2026-09-25 下午，dominik：
+// 「中段只放计时器，这块看着碍事」）。所以现在锁的是：
+//   1) 贴底、居中、且**不能写 top** —— absolute 同时给 top 和 bottom 时 top 会赢，贴底会静默失效；
+//   2) 手机横屏下计时器按 vh 取尺寸、状态条贴底，两者各占一端不重叠；
+//   3) 层级/交互契约不变（在毛玻璃罩之上、不吃点击、无账号隐藏）。
 //
 // 运行：node test/focus-status-position.test.js
 import fs from "node:fs";
@@ -29,30 +28,26 @@ function chkTrue(name, condition) {
 }
 const compact = source.replace(/:\s+/g, ":").replace(/;\s+/g, ";").replace(/\s*\{\s*/g, "{").replace(/\s*\}\s*/g, "}");
 // 把 @media 块整体摘掉，只留基础规则。
-// 不摘的话 .v02-focus 会先匹配到 520px 断点里的那条覆盖规则（它在文件里排在前面）。
+// 不摘的话 .v02-focus 会先匹配到断点里的那条覆盖规则（它在文件里排在前面）。
 const baseSource = source.replace(/@media[^{]*\{(?:[^{}]|\{[^{}]*\})*\}/g, "");
 function ruleOf(src, selector) {
   const match = src.match(new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}"));
   return match ? match[1].replace(/:\s+/g, ":").replace(/;\s+/g, ";").trim() : "";
 }
 const rule = (selector) => ruleOf(baseSource, selector);
-// 从 `width:min(260px, 70vw)` 里把 260 和 70 抠出来。
-function timerSize(css) {
-  const match = css.match(/min\((\d+)px,\s*(\d+)vw\)/);
-  if (!match) throw new Error(`读不出计时器尺寸：${css}`);
-  return { px: Number(match[1]), vw: Number(match[2]) };
-}
 const MEDIA_520 = (source.match(/@media \(max-width:520px\)\s*\{([\s\S]*?)\n  \}/) || [])[1] || "";
 
-console.log("--- 1. 位置：从右上角挪到计时器下面 ---");
+console.log("--- 1. 位置：页面偏底部（中段只留计时器） ---");
 {
   const focus = rule(".v02-focus");
   chkTrue("水平居中", /left:50%/.test(focus) && /transform:translateX\(-50%\)/.test(focus));
-  chkTrue("纵向贴在计时器下方", /top:calc\(53% \+ min\(/.test(focus));
+  chkTrue("纵向贴底", /bottom:max\(\d+px,\d+\.?\d*vh\)/.test(focus));
+  // 🔴 同时写 top 和 bottom 时 top 会赢 —— 贴底就会失效，这条是防回退的关键。
+  chkTrue("没有残留的 top（有 top 会把贴底顶掉）", !/(^|[;{])top:/.test(focus));
   chkTrue("内容改为居中排列（原来是靠右）", /align-items:center/.test(focus));
-  // 反向：旧写法是钉在右上角。
+  // 反向：旧写法是钉在右上角 / 贴在计时器下面。
   chkTrue("旧的 right:18px 已消失", !/right:18px/.test(focus));
-  chkTrue("旧的 top:62px 已消失", !/top:62px/.test(focus));
+  chkTrue("旧贴计时器的 calc(53% + …) 已消失", !/53%/.test(focus));
   chkTrue("旧的 align-items:flex-end 已消失", !/align-items:flex-end/.test(focus));
 }
 {
@@ -63,25 +58,21 @@ console.log("--- 1. 位置：从右上角挪到计时器下面 ---");
   chkTrue("顶栏区块里确实没有它了", !topbar.includes("focusStatus"));
 }
 
-console.log("\n--- 2. 偏移量跟着计时器尺寸走 ---");
+console.log("\n--- 2. 手机横屏不打架 ---");
 {
-  const timer = timerSize(rule(".timer"));
-  chk("基准尺寸", [timer.px, timer.vw], [260, 70]);
-  // 半高：260/2 = 130，70vw/2 = 35vw
-  const expected = `${timer.px / 2}px,${timer.vw / 2}vw`;
-  chk("状态条用的半高与计时器一致", (rule(".v02-focus").match(/min\((\d+px,\d+vw)\)/) || [])[1], expected);
-  chkTrue("还留了间隙给 bubbleFloat 的浮动幅度",
-    /top:calc\(53% \+ min\(130px,35vw\) \+ \d+px\)/.test(compact));
-}
-{
-  // 媒体查询里计时器会缩小，状态条必须跟着缩 —— 这条不写死，直接从两处 CSS 里读出来比。
-  const smallTimer = timerSize((MEDIA_520.match(/\.timer\{([^}]*)\}/) || [])[1] || "");
-  chk("小屏计时器尺寸", [smallTimer.px, smallTimer.vw], [230, 62]);
-  const smallFocus = (MEDIA_520.match(/\.v02-focus\{([^}]*)\}/) || [])[1] || "";
-  chkTrue("小屏上状态条的偏移同步缩小",
-    smallFocus.includes(`min(${smallTimer.px / 2}px,${smallTimer.vw / 2}vw)`));
-  chkTrue("小屏规则写在 520px 断点里（和计时器同一条断点）",
-    /@media \(max-width:520px\)/.test(source) && /\.v02-focus\{top:calc\(/.test(MEDIA_520.replace(/\s+/g, "").replace(/:\s+/g, ":")));
+  // 横屏下 vw 很大、vh 很小：计时器必须按 vh 取尺寸，否则会撑出屏幕；
+  // 状态条贴底后两者各占一端，不会再叠在一起。
+  const landscape = (source.match(/@media \(orientation: landscape\) and \(max-height: 560px\)\s*\{([\s\S]*?)\n  \}/) || [])[1] || "";
+  chkTrue("有手机横屏断点", landscape.length > 0);
+  const landTimer = (landscape.match(/\.timer\{([^}]*)\}/) || [])[1] || "";
+  chkTrue("横屏计时器按视口高度取尺寸（vh，不是 vw）", /min\(\d+px,\d+vh\)/.test(landTimer));
+  chkTrue("横屏计时器不超过视口一半高（上下还留得下顶栏和状态条）",
+    Number((landTimer.match(/min\(\d+px,(\d+)vh\)/) || [])[1] || 100) <= 60);
+  const landFocus = (landscape.match(/\.v02-focus\{([^}]*)\}/) || [])[1] || "";
+  chkTrue("横屏状态条也贴底（且不写 top）", /bottom:\d+px/.test(landFocus) && !/(^|[;{])top:/.test(landFocus));
+  // 520px 断点里不该再留着「跟着计时器偏移」的旧规则。
+  chkTrue("520px 断点里没有残留的 .v02-focus 偏移规则", !/\.v02-focus\{/.test(MEDIA_520));
+  chkTrue("520px 断点仍然在（小屏计时器尺寸照旧）", /@media \(max-width:520px\)/.test(source) && /min\(230px,62vw\)/.test(MEDIA_520));
 }
 
 console.log("\n--- 3. 层级与交互契约没变 ---");

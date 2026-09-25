@@ -109,15 +109,18 @@ test("空列表也能渲染（不炸）", () => {
     { id: "give-bubbles", name: "意外的礼物", handler: "give-bubbles", eventType: "online", probability: 0.03, checkIntervalSeconds: 60, cooldownMinutes: 30, maxPerDay: 3, enabled: true, published: true, dirty: false }
   ];
 });
-test("离线事件的概率口径标成「每小时离线」，不显示检测间隔秒数", () => {
-  adminApi.renderEventList(); // 先渲染一次在线事件，确认在线那行是秒数
-  assert.ok(main.innerHTML.includes("/ 60s"), "在线事件应显示检测间隔");
+test("列表用一句人话描述触发时机（在线含秒数，离线不含）", () => {
+  // 2026-09-25 可读化改造：原来的机器口径「0.03 / 60s」「每小时离线」
+  // 换成 describeEventRule 生成的一句话，在线/离线的口径区分保留。
+  adminApi.renderEventList(); // 先渲染一次在线事件，确认在线那行有秒数
+  assert.ok(main.innerHTML.includes("每 60 秒检测一次"), "在线事件应显示检测间隔");
+  assert.ok(!main.innerHTML.includes("每小时离线"), "旧的机器口径不该再出现");
   adminApi.state.events = [
     { id: "welcome-back", name: "久别重逢", handler: "give-bubbles", eventType: "offline", probability: 0.3, checkIntervalSeconds: 60, cooldownMinutes: 480, maxPerDay: 1, enabled: true, published: true, dirty: false }
   ];
   adminApi.renderEventList();
-  assert.ok(main.innerHTML.includes("每小时离线"), "离线事件的概率口径没标出来");
-  assert.ok(!main.innerHTML.includes("/ 60s"), "离线事件不该显示检测间隔秒数");
+  assert.ok(main.innerHTML.includes("玩家下次打开鱼缸时"), "离线事件的口径没标出来");
+  assert.ok(!main.innerHTML.includes("每 60 秒检测一次"), "离线事件不该显示检测间隔秒数");
   adminApi.state.events = [
     { id: "give-bubbles", name: "意外的礼物", handler: "give-bubbles", eventType: "online", probability: 0.03, checkIntervalSeconds: 60, cooldownMinutes: 30, maxPerDay: 3, enabled: true, published: true, dirty: false }
   ];
