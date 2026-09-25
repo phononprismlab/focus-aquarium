@@ -67,12 +67,42 @@
     pointer-events: none !important;
   }
 
+  /* 景深层：背景图从 .tank 的 background 上挪到这一层，单独加模糊。
+     以前背景和鱼/草/沙贴在同一张画布上，细节全挤在一个平面里，没有纵深；
+     现在背景退后一层并轻微虚化，前面的鱼就"浮"起来了。
+     scale(1.05) 是必须的：blur 会让四边透出底色，不放大就会露出一圈白边。
+     背景值由 renderAquarium 写 inline style（inline 胜过这里的 background-size）。 */
+  .tank-bg {
+    position: absolute; inset: 0; z-index: 0;
+    background: linear-gradient(to bottom, #8bcbd9 0%, #9dd4dc 66%, #a9d6ce 100%);
+    background-size: cover;
+    background-position: center;
+    filter: blur(3px);
+    transform: scale(1.05);
+    pointer-events: none;
+  }
+
   .water-glow {
     position: absolute; inset: 0; z-index: 0;
     background:
       radial-gradient(ellipse at 50% 18%, rgba(255,255,255,.16), transparent 42%),
       linear-gradient(to bottom, transparent 65%, rgba(83,142,130,.10));
   }
+
+  /* 未专注时的毛玻璃罩。z-index 50 是算过的：压住鱼(5)/气泡(4)/水草(3)/沙(2)/背景(0)，
+     但让开海报标题(100)与计时器(1000) —— 该清楚的是字，该朦胧的是缸。
+     pointer-events:none：罩子不抢"点水面投喂""点鱼加速"的手势。 */
+  .tank-frost {
+    position: absolute; inset: 0; z-index: 50;
+    background: rgba(214,240,245,0.20);
+    backdrop-filter: blur(3px) saturate(1.04);
+    -webkit-backdrop-filter: blur(3px) saturate(1.04);
+    opacity: 0;
+    transition: opacity .5s ease;
+    pointer-events: none;
+  }
+  /* 只有正在专注时才揭开毛玻璃 —— 想看清自己的鱼缸，就去开计时。 */
+  body:not(.focus-running) .tank-frost { opacity: 1; }
 
   /* ===== 环境气泡（原型 ui-prototype-v10.html 保留项）=====
      纯装饰：不进状态、不参与存档，只是让水看起来是活的。
@@ -351,6 +381,8 @@
   @media (max-width:520px) {
     .poster-title{top:max(60px,4.5%);font-size:clamp(21px,7vw,31px);letter-spacing:.12em;padding-left:.12em}
     .timer{width:min(230px,62vw);height:min(230px,62vw)}
+    /* 计时器在小屏缩到 62vw，状态条的跟随偏移必须同步缩，否则会掉到缸底外面。 */
+    .v02-focus{top:calc(53% + min(115px,31vw) + 20px)}
   }
 
 
@@ -475,8 +507,11 @@
   backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
   font-family:var(--font-ui);color:var(--text-on-water);
 }
-/* 专注聚合状态条：只读展示「今日 / 累计」，不暴露逐条明细。挂在右上角下方，最小侵入。 */
-.v02-focus{position:absolute;right:18px;top:62px;z-index:1000;display:flex;flex-direction:column;align-items:flex-end;gap:3px;padding:8px 13px;border:1px solid var(--shell-border);background:var(--shell-bg);box-shadow:var(--shell-edge),var(--shell-shadow);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-radius:var(--radius-lg);color:var(--text-on-water);font-family:var(--font-ui);line-height:1.4;pointer-events:none;}
+/* 专注聚合状态条：只读展示「今日 / 累计」，不暴露逐条明细。
+   位置从右上角挪到计时器正下方（dominik 2026-09-25）：屏幕一长，右上角那块就飘到
+   视野之外，而这里永远跟着计时器走。计时器是 top:53% + 自身高度的一半，所以用
+   min(130px,35vw) 复刻它的半高（260/2 与 70vw/2），再留 22px 给 bubbleFloat 的浮动幅度。 */
+.v02-focus{position:absolute;left:50%;transform:translateX(-50%);top:calc(53% + min(130px,35vw) + 22px);z-index:1000;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 13px;border:1px solid var(--shell-border);background:var(--shell-bg);box-shadow:var(--shell-edge),var(--shell-shadow);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-radius:var(--radius-lg);color:var(--text-on-water);font-family:var(--font-ui);line-height:1.4;pointer-events:none;}
 .v02-focus[hidden]{display:none;}
 .v02-focus .focus-today{font-size:12px;letter-spacing:.04em;font-weight:700;}
 .v02-focus .focus-total{font-size:11px;letter-spacing:.04em;opacity:.85;}
@@ -674,6 +709,18 @@
 .v02-mine-save:disabled{opacity:.5;cursor:not-allowed;}
 .v02-mine-stat{font-family:var(--font-num);font-size:12px;color:var(--text-on-water);font-variant-numeric:tabular-nums;line-height:1.9;}
 .v02-mine-stat strong{font-weight:700;color:var(--yellow);}
+/* 鱼缸大事记：最近 10 次随机事件，玩家能回看事件到底把鱼缸改成了什么样。
+   纯本地数据（localStorage），不依赖账号 —— 所以没有"没登录就隐藏"这一层。 */
+.v02-log{margin-top:var(--space-md);border-top:1px solid var(--shell-border);padding-top:var(--space-sm);}
+.v02-log-title{font-family:var(--font-ui);font-size:13px;font-weight:700;letter-spacing:.06em;color:var(--text-on-water);}
+.v02-log-sub{font-family:var(--font-ui);font-size:10px;letter-spacing:.04em;color:var(--text-on-water-dim);margin-top:2px;}
+.v02-log-list{list-style:none;margin:var(--space-sm) 0 0;padding:0;display:flex;flex-direction:column;gap:7px;max-height:230px;overflow-y:auto;scrollbar-width:thin;}
+.v02-log-item{padding:7px 9px;border:1px solid var(--shell-border);border-radius:var(--radius-sm);background:rgba(10,132,255,0.12);}
+.v02-log-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;}
+.v02-log-name{font-family:var(--font-ui);font-size:12px;font-weight:700;color:var(--text-on-water);}
+.v02-log-time{font-family:var(--font-num);font-size:10px;color:var(--text-on-water-dim);font-variant-numeric:tabular-nums;white-space:nowrap;}
+.v02-log-delta{font-family:var(--font-num);font-size:11px;color:var(--yellow);margin-top:3px;line-height:1.6;}
+.v02-log-empty{font-family:var(--font-ui);font-size:11px;color:var(--text-on-water-dim);line-height:1.7;padding:7px 2px;}
 /* 这一分类没有商品时的空态（后台清空了该类，或配置没拉到）。 */
 .v02-empty{grid-column:1/-1;padding:34px 18px;text-align:center;font-size:13px;line-height:1.8;color:var(--text-on-water-dim);background:rgba(10,132,255,0.10);border-radius:var(--radius-md);border:1px dashed var(--shell-border)}
 .v02-item-tip{font-size:11px;color:var(--coral-red);margin-top:6px}
@@ -876,13 +923,18 @@
 .v02-preview-bg.coral{background:linear-gradient(180deg,#b6d9df 0%,#7caeb1 56%,#e4a36e 100%)!important}
 
 /* ===== DEV 测试工具 ===== */
+/* 🔴 默认隐藏：面板里有「+10000 泡泡」「切换会员」，而泡泡是客户端权威、会真实推进云存档，
+   所以线上任何玩家都不该看到它。只有 URL 带 ?dev=1 时 body 才会挂上 dev-on。
+   这里用 display 而不是 display:none + class，是为了不给「点了但没反应」留中间态。 */
 .dev-toggle{
+  display:none;
   position:fixed;right:18px;bottom:18px;z-index:3500;
   border:1px solid rgba(70,105,108,.35);background:rgba(255,255,255,.92);
   color:#48686b;border-radius:10px;padding:8px 11px;font:700 11px/1 inherit;
   cursor:pointer;box-shadow:0 5px 16px rgba(25,55,60,.16);
   transition:right .28s cubic-bezier(.16,1,.3,1);
 }
+body.dev-on .dev-toggle{display:block}
 /* 商店抽屉打开时把 DEV 按钮挤到抽屉左侧，避免挡"保存鱼缸"。
    DOM 顺序：#shopModal 在 .dev-toggle 之前，是同一层兄弟，~ 选择器可用。 */
 .v02-drawer.show ~ .dev-toggle{right:calc(min(440px,92vw) + 18px)}
@@ -892,7 +944,9 @@
   border-radius:12px;padding:14px;box-shadow:0 16px 42px rgba(20,50,55,.25);
   display:none;font-family:inherit;
 }
-.dev-panel.show{display:block}
+/* 面板同样只在 dev-on 下才可能显示；.show 由按钮切换。 */
+body.dev-on .dev-panel.show{display:block}
+body:not(.dev-on) .dev-panel{display:none!important}
 .dev-title{font-weight:800;font-size:14px;margin-bottom:4px}
 .dev-sub{font-size:10px;color:#809092;margin-bottom:12px}
 .dev-status{background:#f3f5f2;border-radius:8px;padding:9px;margin-bottom:10px;font-size:11px;line-height:1.7}
@@ -909,26 +963,71 @@
   .dev-panel{right:10px;bottom:50px;width:calc(100vw - 44px)}
 }
 
-/* ===== v0.2 购买小票弹窗 ===== */
-.v02-receipt{position:fixed;inset:0;z-index:3200;display:none;align-items:center;justify-content:center;background:rgba(22,46,50,.28);padding:20px;}
-.v02-receipt.show{display:flex;}
-.v02-receipt-card{
-  width:min(330px,calc(100vw - 36px));
-  background:#fffdf7;
-  color:#34484b;
-  padding:24px 22px 20px;
-  border-radius:4px;
-  box-shadow:0 18px 55px rgba(20,50,55,.28);
-  position:relative;
-  clip-path:polygon(0 0,100% 0,100% 97%,97% 100%,94% 97%,91% 100%,88% 97%,85% 100%,82% 97%,79% 100%,76% 97%,73% 100%,70% 97%,67% 100%,64% 97%,61% 100%,58% 97%,55% 100%,52% 97%,49% 100%,46% 97%,43% 100%,40% 97%,37% 100%,34% 97%,31% 100%,28% 97%,25% 100%,22% 97%,19% 100%,16% 97%,13% 100%,10% 97%,7% 100%,4% 97%,0 100%);
+/* ===== v0.2 小票纸（购买小票 / 事件小票共用同一张纸）=====
+   两处都是"小票"，样式就必须是同一张纸：同一个锯齿轮廓、同一个抬头、同一排条码。
+   差异只允许留在中间那段内容里（明细行 vs 事件叙事）。
+
+   三个不能随手改的实现决定：
+   1. 上下锯齿用 clip-path 一次裁出来（65 个点、每边 16 齿、齿深 8px）。
+      不用伪元素叠三角：那样每条边都要多两个节点，还得逐条调宽度和偏移。
+   2. 阴影挂在外面那层 .v02-paper-shadow 上，用 filter:drop-shadow ——
+      clip-path 会把同一元素上的 box-shadow 一起裁掉（纸还在、阴影没了）。
+      filter 的绘制顺序在 clip-path 之前，所以阴影只能由父层承担。
+   3. .v02-paper 是 flex 列 + min-height，条码 margin-top:auto 顶到底：
+      内容少的票（比如"无法保存"）也有票该有的长度，内容多的票自然撑长。 */
+:root{
+  --paper-bg:#fffdf7;
+  --paper-ink:#34484b;
+  --paper-ink-dim:#809092;
+  --paper-rule:#c9d1cf;
+  --paper-edge:#2f4a4e;
+  --paper-notch:polygon(0% 8px,3.125% 0,6.25% 8px,9.375% 0,12.5% 8px,15.625% 0,18.75% 8px,21.875% 0,25% 8px,28.125% 0,31.25% 8px,34.375% 0,37.5% 8px,40.625% 0,43.75% 8px,46.875% 0,50% 8px,53.125% 0,56.25% 8px,59.375% 0,62.5% 8px,65.625% 0,68.75% 8px,71.875% 0,75% 8px,78.125% 0,81.25% 8px,84.375% 0,87.5% 8px,90.625% 0,93.75% 8px,96.875% 0,100% 8px,96.875% 100%,93.75% calc(100% - 8px),90.625% 100%,87.5% calc(100% - 8px),84.375% 100%,81.25% calc(100% - 8px),78.125% 100%,75% calc(100% - 8px),71.875% 100%,68.75% calc(100% - 8px),65.625% 100%,62.5% calc(100% - 8px),59.375% 100%,56.25% calc(100% - 8px),53.125% 100%,50% calc(100% - 8px),46.875% 100%,43.75% calc(100% - 8px),40.625% 100%,37.5% calc(100% - 8px),34.375% 100%,31.25% calc(100% - 8px),28.125% 100%,25% calc(100% - 8px),21.875% 100%,18.75% calc(100% - 8px),15.625% 100%,12.5% calc(100% - 8px),9.375% 100%,6.25% calc(100% - 8px),3.125% 100%,0% calc(100% - 8px));
 }
-.v02-receipt-card::before{content:"";position:absolute;left:22px;right:22px;top:14px;border-top:1px dashed #b9c5c3;}
-.v02-receipt-head{text-align:center;font-weight:800;font-size:18px;letter-spacing:.16em;padding-top:8px;}
-.v02-receipt-sub{text-align:center;font-size:11px;color:#809092;margin-top:5px;}
-.v02-receipt-line{border-top:1px dashed #c9d1cf;margin:15px 0 12px;}
-.v02-receipt-row{display:flex;justify-content:space-between;gap:16px;font-size:13px;line-height:1.8;}
+.v02-receipt{position:fixed;inset:0;z-index:3200;display:none;align-items:center;justify-content:center;background:rgba(22,46,50,.28);padding:20px;overflow:auto;}
+.v02-receipt.show{display:flex;}
+.v02-event{position:fixed;inset:0;z-index:3300;display:none;align-items:center;justify-content:center;background:rgba(22,46,50,.28);padding:20px;overflow:auto;}
+.v02-event.show{display:flex;}
+/* margin:auto 是给 overflow:auto 用的：靠 align-items:center 居中的话，
+   票比屏幕高时顶端会被切掉且滚不上去，margin:auto 才能既居中又可滚。 */
+.v02-paper-shadow{position:relative;max-width:100%;margin:auto;filter:drop-shadow(0 20px 44px rgba(20,50,55,.34));}
+.v02-paper{
+  position:relative;
+  /* 两侧各留 18px 给贴纸（贴纸骑在纸边上，最远伸到 -18px）——
+     不留的话贴纸会把弹窗的 overflow:auto 撑出横向滚动条。 */
+  width:min(348px,calc(100vw - 76px));
+  min-height:min(430px,74vh);
+  display:flex;flex-direction:column;
+  background:var(--paper-bg);
+  color:var(--paper-ink);
+  padding:34px 24px 30px;
+  clip-path:var(--paper-notch);
+  font-family:var(--font-ui);
+}
+/* 贴纸：故意骑在纸的轮廓外面 —— 父层没有被 clip-path 裁，所以能露出来。
+   做成"白底圆片"而不是一个裸 emoji：裸 emoji 落在花花的背景上就是几个脏点，
+   加了白底和投影才像一张贴上去的贴纸。
+   横向最多伸出 18px，纸的内边距是 24px，所以再怎么样也压不到正文。 */
+.v02-paper-sticker{position:absolute;width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;line-height:1;background:#fffdf7;box-shadow:0 3px 9px rgba(20,50,55,.30),inset 0 0 0 1px rgba(47,74,78,.10);pointer-events:none;}
+.v02-paper-sticker.s1{left:-18px;top:24px;transform:rotate(-16deg)}
+.v02-paper-sticker.s2{right:-18px;top:74px;transform:rotate(13deg)}
+.v02-paper-sticker.s3{left:-18px;bottom:112px;transform:rotate(10deg)}
+.v02-paper-sticker.s4{right:-18px;bottom:44px;transform:rotate(-12deg)}
+/* 抬头：店标 + 店名 + 英文名，三行居中。 */
+.v02-paper-logo{display:flex;flex-direction:column;align-items:center;gap:3px;text-align:center;}
+.v02-paper-mark{font-size:23px;line-height:1;filter:drop-shadow(0 2px 3px rgba(20,50,55,.18));}
+.v02-paper-brand{font-size:15px;font-weight:800;letter-spacing:.30em;padding-left:.30em;color:var(--paper-edge);}
+.v02-paper-brand-en{font-size:8px;letter-spacing:.34em;padding-left:.34em;color:var(--paper-ink-dim);}
+.v02-paper-meta{text-align:center;font-size:10px;letter-spacing:.08em;color:var(--paper-ink-dim);margin-top:9px;font-variant-numeric:tabular-nums;}
+.v02-paper-line{border-top:1px dashed var(--paper-rule);margin:14px 0 12px;}
+/* 底部条码：svg 用负边距撑到纸的左右留白之外，多抢 24px 宽度 —— 条码越宽越好扫。 */
+.v02-paper-barcode{margin:auto 0 0;padding-top:16px;border-top:1px dashed var(--paper-rule);display:flex;flex-direction:column;align-items:center;gap:6px;}
+.v02-paper-barcode svg{display:block;width:calc(100% + 24px);margin:0 -12px;height:52px;shape-rendering:crispEdges;}
+.v02-paper-barcode-cap{font-size:8px;letter-spacing:.16em;color:var(--paper-ink-dim);font-variant-numeric:tabular-nums;}
+/* 购买小票正文 */
+.v02-receipt-head{text-align:center;font-weight:800;font-size:17px;letter-spacing:.16em;padding-left:.16em;margin-bottom:12px;}
+.v02-receipt-row{display:flex;justify-content:space-between;gap:16px;font-size:13px;line-height:1.85;}
 .v02-receipt-row.total{font-weight:800;font-size:15px;margin-top:4px;}
-.v02-receipt-note{text-align:center;font-size:11px;color:#7a898a;margin-top:12px;}
+.v02-receipt-note{text-align:center;font-size:11px;color:#7a898a;margin-top:12px;line-height:1.7;}
 .v02-receipt-adjust,
 .v02-receipt-close{
   width:100%;
@@ -952,25 +1051,17 @@
   background:#5a8588;
 }
 
-
-/* ===== 随机事件提示（F10 / F12）===== */
-/* 视觉沿用「小票纸」这一套：后台配的叙事文案直接显示，不做二次加工。 */
-.v02-event{position:fixed;inset:0;z-index:3300;display:none;align-items:center;justify-content:center;background:rgba(22,46,50,.28);padding:20px;}
-.v02-event.show{display:flex;}
-.v02-event-card{
-  width:min(330px,calc(100vw - 36px));
-  background:#fffdf7;
-  color:#34484b;
-  padding:26px 22px 20px;
-  border-radius:4px;
-  box-shadow:0 18px 55px rgba(20,50,55,.28);
-  position:relative;
-  text-align:center;
-}
-.v02-event-card::before{content:"";position:absolute;left:22px;right:22px;top:14px;border-top:1px dashed #b9c5c3;}
-.v02-event-kicker{font-size:11px;letter-spacing:.2em;color:#809092;padding-top:4px;}
-.v02-event-title{font-weight:800;font-size:18px;letter-spacing:.08em;margin-top:8px;}
-.v02-event-text{font-size:13px;line-height:1.9;color:#4a5f62;margin-top:14px;padding-top:14px;border-top:1px dashed #c9d1cf;}
+/* ===== 随机事件小票（F10 / F12）=====
+   纸和购买小票完全共用（.v02-paper），这里只写中间那段叙事 + 影响。 */
+.v02-event-card{text-align:center;}
+.v02-event-kicker{font-size:10px;letter-spacing:.22em;color:var(--paper-ink-dim);text-align:center;}
+.v02-event-title{font-weight:800;font-size:18px;letter-spacing:.08em;margin-top:7px;text-align:center;}
+.v02-event-text{font-size:13px;line-height:1.9;color:#4a5f62;margin-top:14px;padding-top:14px;border-top:1px dashed var(--paper-rule);text-align:center;}
+/* 事件对鱼缸做了什么，用两枚小标签说清 —— 叙事文案里不一定带数字。 */
+.v02-event-impact{display:flex;flex-wrap:wrap;justify-content:center;gap:7px;margin-top:14px;}
+.v02-event-impact[hidden]{display:none;}
+.v02-event-impact span{font-size:11px;font-weight:700;letter-spacing:.04em;padding:4px 10px;border-radius:999px;background:rgba(90,133,136,.14);color:#3f6a6d;font-variant-numeric:tabular-nums;}
+.v02-event-impact span.loss{background:rgba(216,92,92,.14);color:#a4453f;}
 .v02-event-actions{display:flex;gap:10px;margin-top:18px;}
 .v02-event-actions button{flex:1;height:40px;border:0;border-radius:10px;padding:0 12px;color:#fff;cursor:pointer;font-family:inherit;font-weight:700;}
 .v02-event-actions button[hidden]{display:none;}
@@ -1095,6 +1186,7 @@
 
 <div class="app">
 <main class="tank" id="tank">
+  <div class="tank-bg" id="tankBg" aria-hidden="true"></div>
   <div class="water-glow"></div>
   <div class="bubbles" id="bubbles" aria-hidden="true"></div>
   <div class="v02-topbar">
@@ -1105,12 +1197,6 @@
       <button type="button" class="v02-top-entry" id="settingsOpenBtn" data-drawer="settingsDrawer">设置</button>
     </nav>
   </div>
-  <div class="v02-focus" id="focusStatus" hidden aria-live="polite">
-    <div class="focus-today" id="focusToday">今日专注 0 次 · 0 分钟</div>
-    <div class="focus-total" id="focusTotal">累计 0 次 · 0 分钟</div>
-  </div>
-
-
   <!-- 音频控件已收进「设置」抽屉（见 #settingsDrawer），顶栏只留泡泡数 + 三个入口 -->
 
     <!-- 纯白清晰海报标题 -->
@@ -1135,12 +1221,21 @@
       <button class="start" id="start">开始专注</button>
       <button class="end" id="end">结束专注</button>
     </section>
+    <!-- 专注聚合状态条：贴在计时器下面。放这里而不是右上角，是因为右上角会随着
+         屏幕变长飘出视野，而它跟着计时器走，任何屏幕比例下都在视线中心附近。 -->
+    <div class="v02-focus" id="focusStatus" hidden aria-live="polite">
+      <div class="focus-today" id="focusToday">今日专注 0 次 · 0 分钟</div>
+      <div class="focus-total" id="focusTotal">累计 0 次 · 0 分钟</div>
+    </div>
     <section class="completion-flash" id="completionFlash" aria-live="polite" aria-hidden="true">
       <div class="completion-main">专注完成</div>
       <div class="completion-reward" id="completionReward">本次专注获得了 0 泡泡 🫧</div>
       <div class="completion-sub">这段时间，已经属于你自己了。</div>
       <button class="completion-confirm" id="completionConfirm">确认</button>
     </section>
+    <!-- 未专注时的毛玻璃罩：盖住鱼/草/沙/背景，但让开标题与计时器。
+         开计时加 body.focus-running，罩子淡出 —— 看清鱼缸是专注的奖励。 -->
+    <div class="tank-frost" aria-hidden="true"></div>
   </main>
 </div>
 
@@ -1214,6 +1309,11 @@
           <div class="account-note" id="syncRedeemMsg"></div>
         </div>
       </div>
+      <div class="v02-log" id="eventLogBlock">
+        <div class="v02-log-title">鱼缸大事记</div>
+        <div class="v02-log-sub">最近 10 次发生在你鱼缸里的事</div>
+        <ol class="v02-log-list" id="eventLogList"></ol>
+      </div>
     </div>
   </div>
 </aside>
@@ -1260,29 +1360,56 @@
 </div>
 
 <div class="v02-receipt" id="purchaseReceipt" aria-hidden="true">
-  <div class="v02-receipt-card" role="dialog" aria-modal="true" aria-labelledby="receiptTitle">
-    <div class="v02-receipt-head" id="receiptTitle">购买成功</div>
-    <div class="v02-receipt-sub">鱼儿乐水族馆 · 购买凭证</div>
-    <div class="v02-receipt-line"></div>
-    <div id="receiptRows"></div>
-    <div class="v02-receipt-line"></div>
-    <div class="v02-receipt-row total" id="receiptPaidRow"><span>支付</span><span id="receiptPaid"></span></div>
-    <div class="v02-receipt-row total" id="receiptRefundRow" style="display:none"><span>返还</span><span id="receiptRefund"></span></div>
-    <div class="v02-receipt-row" id="receiptBalanceRow" style="display:none"><span>剩余泡泡</span><span id="receiptBalance"></span></div>
-    <div class="v02-receipt-note" id="receiptNote"></div>
-    <button type="button" class="v02-receipt-adjust" id="receiptAdjustBtn">返回调整</button>
-    <button type="button" class="v02-receipt-close" id="receiptCloseBtn">收好小票</button>
+  <div class="v02-paper-shadow">
+    <span class="v02-paper-sticker s1" aria-hidden="true">🐠</span>
+    <span class="v02-paper-sticker s2" aria-hidden="true">🫧</span>
+    <span class="v02-paper-sticker s3" aria-hidden="true">🌿</span>
+    <span class="v02-paper-sticker s4" aria-hidden="true">✦</span>
+    <div class="v02-paper v02-receipt-card" role="dialog" aria-modal="true" aria-labelledby="receiptTitle">
+      <div class="v02-paper-logo">
+        <span class="v02-paper-mark" aria-hidden="true">🐠</span>
+        <span class="v02-paper-brand">鱼儿乐水族馆</span>
+        <span class="v02-paper-brand-en">FOCUS AQUARIUM</span>
+      </div>
+      <div class="v02-paper-meta" id="receiptTime"></div>
+      <div class="v02-paper-line"></div>
+      <div class="v02-receipt-head" id="receiptTitle">购买成功</div>
+      <div id="receiptRows"></div>
+      <div class="v02-paper-line"></div>
+      <div class="v02-receipt-row total" id="receiptPaidRow"><span>支付</span><span id="receiptPaid"></span></div>
+      <div class="v02-receipt-row total" id="receiptRefundRow" style="display:none"><span>返还</span><span id="receiptRefund"></span></div>
+      <div class="v02-receipt-row" id="receiptBalanceRow" style="display:none"><span>剩余泡泡</span><span id="receiptBalance"></span></div>
+      <div class="v02-receipt-note" id="receiptNote"></div>
+      <button type="button" class="v02-receipt-adjust" id="receiptAdjustBtn">返回调整</button>
+      <button type="button" class="v02-receipt-close" id="receiptCloseBtn">收好小票</button>
+      <div class="v02-paper-barcode" id="receiptBarcode"></div>
+    </div>
   </div>
 </div>
 
 <div class="v02-event" id="eventModal" aria-hidden="true">
-  <div class="v02-event-card" role="dialog" aria-modal="true" aria-labelledby="eventModalTitle">
-    <div class="v02-event-kicker">鱼缸里发生了点事</div>
-    <div class="v02-event-title" id="eventModalTitle"></div>
-    <div class="v02-event-text" id="eventModalText"></div>
-    <div class="v02-event-actions">
-      <button type="button" class="v02-event-close" id="eventModalClose">知道了</button>
-      <button type="button" class="v02-event-shop" id="eventModalShop" hidden>去商店</button>
+  <div class="v02-paper-shadow">
+    <span class="v02-paper-sticker s1" aria-hidden="true">🐠</span>
+    <span class="v02-paper-sticker s2" aria-hidden="true">🫧</span>
+    <span class="v02-paper-sticker s3" aria-hidden="true">🌿</span>
+    <span class="v02-paper-sticker s4" aria-hidden="true">✦</span>
+    <div class="v02-paper v02-event-card" role="dialog" aria-modal="true" aria-labelledby="eventModalTitle">
+      <div class="v02-paper-logo">
+        <span class="v02-paper-mark" aria-hidden="true">🐠</span>
+        <span class="v02-paper-brand">鱼儿乐水族馆</span>
+        <span class="v02-paper-brand-en">FOCUS AQUARIUM</span>
+      </div>
+      <div class="v02-paper-meta" id="eventModalTime"></div>
+      <div class="v02-paper-line"></div>
+      <div class="v02-event-kicker">鱼缸里发生了点事</div>
+      <div class="v02-event-title" id="eventModalTitle"></div>
+      <div class="v02-event-text" id="eventModalText"></div>
+      <div class="v02-event-impact" id="eventModalImpact" hidden></div>
+      <div class="v02-event-actions">
+        <button type="button" class="v02-event-close" id="eventModalClose">知道了</button>
+        <button type="button" class="v02-event-shop" id="eventModalShop" hidden>去商店</button>
+      </div>
+      <div class="v02-paper-barcode" id="eventBarcode"></div>
     </div>
   </div>
 </div>
@@ -1593,11 +1720,20 @@
         };
       });
   }
-  // 商品列表排序：现阶段按 id 排序（localeCompare 自动处理 fish001/fish002 这种纯字母数字）。
-  // 新品置前、置顶等规则以后单独立项，不混在这一条里。
+  // 商品列表排序：v1.0 按类型排（顺序跟商店标签栏一致），同类型内按 id。
+  // 以前一律按 id 排，结果是 fish / decoration / background / sand / sound 混着出现，
+  // 玩家想"看看有哪些背景"得在整张网格里翻。
+  // 新规则（新品置前、置顶、限时）以后单独立项，不混在这一条里。
   // 没有 id 的商品视为异常数据，排在末尾，便于人工排查。
+  const SHOP_CATEGORY_ORDER = ["fish", "decorations", "backgrounds", "sands", "sounds"];
   function sortShopItems(items){
     return items.slice().sort((a, b) => {
+      const ao = SHOP_CATEGORY_ORDER.indexOf(a && a.category);
+      const bo = SHOP_CATEGORY_ORDER.indexOf(b && b.category);
+      // 分类不在白名单里（后台新加了类型但这里还没登记）一律沉到最后，不要挤在鱼前面。
+      const aRank = ao < 0 ? SHOP_CATEGORY_ORDER.length : ao;
+      const bRank = bo < 0 ? SHOP_CATEGORY_ORDER.length : bo;
+      if(aRank !== bRank) return aRank - bRank;
       const aid = a && a.id;
       const bid = b && b.id;
       if(!aid && !bid) return 0;
@@ -1658,6 +1794,10 @@
     // 装饰件按 class 渲染，图片走独立的 images 列表（可多层：后景 + 前景）。
     const fit = field === "css" ? "cover" : "contain";
     visual.images = itemImagePaths(item).map(path => cssFromImagePath(path, fit)).filter(Boolean);
+    // image   = 可直接当 CSS background 用的值（url("…") center / cover no-repeat）
+    // imageUrl = **裸地址**，给 <img src> 用。两者不能混用：把 image 塞进 src 会被浏览器
+    //           当相对路径请求（实测 404 /url(%22https://…），图直接裂掉。
+    visual.imageUrl = itemImagePaths(item)[0] || "";
     visual.image = visual.images[0] || "";
     if(override && field) visual[field] = override;
     else if(field === "css" && visual.image){
@@ -1667,6 +1807,19 @@
       visual[field] = visual.image;
     }
     return visual;
+  }
+  // 商店卡片上那张 <img> 的 src。
+  // ⚠️ 这里必须是**裸地址**：以前直接取 visualForItem(...).image，那是 CSS 值
+  //    （url("…") center / cover no-repeat），浏览器把它当相对路径去请求 →
+  //    4 次 404（/url(%22https://…）→ onerror 把 <img> 删掉 → 卡片一片空白。
+  //    鱼缸那边用 .css 所以没这个毛病，只有商店卡片踩了。
+  function shopPreviewSrc(item){
+    if(!item) return "";
+    const preview = typeof item.previewImage === "string" ? item.previewImage.trim() : "";
+    if(preview) return preview;
+    // 鱼不套用：鱼的 resourcePath 是按插槽拼的（body/tail/fin/shadow），抽第一张可能只是条尾巴。
+    if(item.category === "fish") return "";
+    return visualForItem(item.category, item.id).imageUrl || "";
   }
   // ===== Tags（F9）=====
   // 统一成字符串数组：兼容后台早期可能存的逗号分隔字符串与新的数组格式。
@@ -2111,8 +2264,13 @@
 
   function renderBubbles(){ document.getElementById("bubbleDisplay").textContent=`🫧 ${PlayerData.bubbles}`; }
   function renderAquarium(data){
-    const tankEl=tank;
-    tankEl.style.background=visualForItem("backgrounds", data.background).css;
+    // 背景画在独立的 .tank-bg 层上（那一层带 blur，负责景深），不再直接铺在 .tank 上 ——
+    // 铺在 .tank 上就没法只模糊背景：一模糊连鱼一起糊。
+    // 找不到这一层时退回旧行为：宁可没有景深，也不能让背景整个消失。
+    const backgroundCss=visualForItem("backgrounds", data.background).css;
+    const tankBgEl=document.getElementById("tankBg");
+    if(tankBgEl) tankBgEl.style.background=backgroundCss;
+    else tank.style.background=backgroundCss;
     const sandEl=document.getElementById("sand");
     sandEl.style.background=visualForItem("sands", data.sand).css;
     document.querySelectorAll(".plant").forEach(p=>{
@@ -2463,6 +2621,9 @@
     results.forEach(result => {
       applyEventEffect(result.effect);
       markEventTriggered(result.config.id, now);
+      // 离开期间发生的事件同样进大事记：玩家回来才看得到的那几条，最需要被记住。
+      result.at = now;
+      recordEventLog(result, now);
       pendingEventResults.push(result);
     });
     if(results.length){ saveEventRuntime(); flushPendingEvents(); }
@@ -2499,6 +2660,62 @@
     }
     saveGame();
   }
+
+  // ===== 鱼缸大事记：最近 10 次随机事件 =====
+  // 小票关掉就没了，玩家记不住"刚才那次到底扣了什么"。这里留一份滚动记录，
+  // 在「我的」抽屉里能回看 —— 事件对鱼缸做了什么，是看得见的。
+  // 只存本地：事件本来就是本地检测的，没有服务端对应物，不值得为它加一张表。
+  const EVENT_LOG_KEY = "fishtank_event_log_v1";
+  const EVENT_LOG_LIMIT = 10;
+  let eventLog = readEventLog();
+
+  function readEventLog(){
+    try{
+      const parsed = JSON.parse(localStorage.getItem(EVENT_LOG_KEY) || "null");
+      if(!Array.isArray(parsed)) return [];
+      return parsed.filter(entry => entry && typeof entry === "object").slice(0, EVENT_LOG_LIMIT);
+    }catch(_){ return []; }
+  }
+  function saveEventLog(){
+    try{ localStorage.setItem(EVENT_LOG_KEY, JSON.stringify(eventLog)); }catch(_){ /* 隐私模式：记录只在本次会话内可见，不影响主流程 */ }
+  }
+  // 只留玩家看得懂的三样：什么时候、发生了什么、鱼缸被改成了什么样。
+  // effect 的原始结构（handler 名、tag 匹配过程、instanceId）不进记录 —— 那是内部实现。
+  function eventLogEntry(result, now){
+    const config = (result && result.config) || {};
+    const effect = (result && result.effect) || {};
+    return {
+      at: now,
+      name: config.name || "鱼缸里发生了点事",
+      bubbles: Math.max(0, Math.floor(Number(effect.bubbles) || 0)),
+      lost: Array.isArray(effect.lost) ? effect.lost.map(entry => (entry && entry.name) || "").filter(Boolean) : []
+    };
+  }
+  function recordEventLog(result, now){
+    eventLog.unshift(eventLogEntry(result, now));
+    eventLog = eventLog.slice(0, EVENT_LOG_LIMIT);
+    saveEventLog();
+    renderEventLog();
+  }
+  function renderEventLog(){
+    const list = document.getElementById("eventLogList");
+    if(!list) return;
+    if(!eventLog.length){
+      list.innerHTML = '<li class="v02-log-empty">还没有记录 —— 随机事件会在你专注的时候发生。</li>';
+      return;
+    }
+    list.innerHTML = eventLog.map(entry => {
+      const delta = [];
+      if(entry.bubbles > 0) delta.push(`🫧 +${entry.bubbles}`);
+      if(entry.lost && entry.lost.length) delta.push(`失去 ${entry.lost.length} 条 · ${entry.lost.join("、")}`);
+      return '<li class="v02-log-item">'
+        + `<div class="v02-log-head"><span class="v02-log-name">${escapeHtml(entry.name)}</span>`
+        + `<span class="v02-log-time">${formatReceiptStamp(entry.at)}</span></div>`
+        + `<div class="v02-log-delta">${escapeHtml(delta.length ? delta.join("　") : "鱼缸没有变化")}</div>`
+        + '</li>';
+    }).join("");
+  }
+
   // 有别的弹窗开着时先不弹事件提示，排队等它关掉 —— 避免两层遮罩叠在一起。
   function eventOverlayBusy(){
     return ["shopModal", "mineDrawer", "settingsDrawer", "purchaseReceipt", "completionFlash", "focusShopBlocker", "modal", "eventModal"].some(id => {
@@ -2506,11 +2723,29 @@
       return Boolean(el && el.classList.contains("show"));
     });
   }
+  // 事件到底动了什么，用小标签直说 —— 后台写的叙事文案不一定带数字。
+  function renderEventImpact(effect){
+    const box = document.getElementById("eventModalImpact");
+    if(!box) return;
+    const chips = [];
+    const bubbles = Math.max(0, Math.floor(Number((effect || {}).bubbles) || 0));
+    if(bubbles > 0) chips.push(`<span>🫧 +${bubbles}</span>`);
+    const lost = Array.isArray((effect || {}).lost) ? effect.lost.filter(entry => entry && entry.name) : [];
+    if(lost.length) chips.push(`<span class="loss">失去 ${lost.length} 条 · ${escapeHtml(lost.map(entry => entry.name).join("、"))}</span>`);
+    box.innerHTML = chips.join("");
+    box.hidden = chips.length === 0;
+  }
   function presentEventResult(result){
     const modal = document.getElementById("eventModal");
     if(!modal) return;
     document.getElementById("eventModalTitle").textContent = result.config.name || "鱼缸里发生了点事";
     document.getElementById("eventModalText").textContent = result.effect.message || "";
+    // 票面上的时间用事件真正发生的时刻（checkEvents 记下的），不是弹窗弹出的时刻 ——
+    // 前面排着别的弹窗时，这两个时间能差上好一会儿。
+    const timeEl = document.getElementById("eventModalTime");
+    if(timeEl) timeEl.textContent = `发生时间 ${formatReceiptStamp(result.at || Date.now())}`;
+    renderEventImpact(result.effect);
+    renderBarcode(document.getElementById("eventBarcode"), RECEIPT_BARCODE_TEXT);
     // fish-escape 要给挽回入口（S6）：文案说「可以再买回来」，那就得让玩家当下就能去买。
     const shopButton = document.getElementById("eventModalShop");
     shopButton.hidden = !(result.effect.lost && result.effect.lost.length);
@@ -2542,6 +2777,9 @@
     results.forEach(result => {
       applyEventEffect(result.effect);
       markEventTriggered(result.config.id, now);
+      // 事件发生的真实时刻，给票面时间和大事记用（弹窗可能排在别的遮罩后面）。
+      result.at = now;
+      recordEventLog(result, now);
       pendingEventResults.push(result);
     });
     saveEventRuntime();
@@ -2662,7 +2900,87 @@
   function setShopMessage(t){
     // 预览等非购买状态不再显示在商店底部，保留函数兼容现有调用。
   }
+
+  // ===== 小票纸公共件：时间戳 + Code128 条形码 =====
+  // 购买小票和事件小票共用这两样，所以放在两边的渲染函数之外 —— 放进去就得改两遍。
+  function formatReceiptStamp(ts){
+    const d = new Date(Number(ts) || Date.now());
+    const pad = value => String(value).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  // 条码内容固定是这句英文致谢（dominik 2026-09-25 定：扫出来就是这句话）。
+  // 必须全 ASCII —— 码集 B 只收 32–126 的可打印字符，中文进不去。
+  const RECEIPT_BARCODE_TEXT = "Thank you for visiting Yuerle Aquarium";
+  // Code128 码集 B 的 107 个符号图案：0–102 是数据符，103/104/105 是起始符，106 是终止符。
+  // 每个图案 6 位数字 = [条,空,条,空,条,空] 的宽度，合计 11 个模块（终止符 7 位、13 个模块）。
+  // 这份表逐位对齐过 jsbarcode 的编码器，对照用例在 api/test/barcode.test.js。
+  const CODE128_PATTERNS = [
+    "212222","222122","222221","121223","121322","131222","122213","122312","132212","221213",
+    "221312","231212","112232","122132","122231","113222","123122","123221","223211","221132",
+    "221231","213212","223112","312131","311222","321122","321221","312212","322112","322211",
+    "212123","212321","232121","111323","131123","131321","112313","132113","132311","211313",
+    "231113","231311","112133","112331","132131","113123","113321","133121","313121","211331",
+    "231131","213113","213311","213131","311123","311321","331121","312113","312311","332111",
+    "314111","221411","431111","111224","111422","121124","121421","141122","141221","112214",
+    "112412","122114","122411","142112","142211","241211","221114","413111","241112","134111",
+    "111242","121142","121241","114212","124112","124211","411212","421112","421211","212141",
+    "214121","412121","111143","111341","131141","114113","114311","411113","411311","113141",
+    "114131","311141","411131","211412","211214","211232","2331112"
+  ];
+  // 把一段文本编成 0/1 模块序列。固定用码集 B，不做码集 C 的数字压缩 ——
+  // 小票上这串是固定英文，压缩省下的宽度不值得多一条分支和一个坑。
+  function code128Modules(text){
+    const clean = String(text == null ? "" : text).replace(/[^\x20-\x7e]/g, "");
+    const codes = [104];                                   // 104 = 码集 B 起始符
+    for(let i=0;i<clean.length;i++) codes.push(clean.charCodeAt(i) - 32);
+    let sum = 104;                                         // 起始符按权重 1 计入校验和
+    for(let i=1;i<codes.length;i++) sum += codes[i] * i;    // 数据符按位置加权
+    codes.push(sum % 103);                                 // 校验符
+    codes.push(106);                                       // 终止符
+    const modules = [];
+    codes.forEach((code, index) => {
+      const pattern = index === codes.length - 1 ? CODE128_PATTERNS[106] : CODE128_PATTERNS[code];
+      let bar = true;
+      for(const digit of pattern){
+        const width = Number(digit);
+        for(let i=0;i<width;i++) modules.push(bar ? 1 : 0);
+        bar = !bar;
+      }
+    });
+    return modules;
+  }
+  // 画成一排竖条。preserveAspectRatio="none" 是故意的：横向拉伸不改变条宽之间的比例，
+  // 换来的是"条码永远占满小票宽度"—— 条码越宽越好扫。
+  // shape-rendering:crispEdges 写在 CSS 里，压掉抗锯齿；边缘一糊就扫不出来了。
+  function renderBarcode(el, text){
+    if(!el) return;
+    // 全是非 ASCII（比如只传了中文）或只剩空白时不留一个"只剩起止符"的空条码 ——
+    // 那东西扫不出任何内容，挂在小票上只会让人以为坏了。
+    const clean = String(text == null ? "" : text).replace(/[^\x20-\x7e]/g, "");
+    if(!clean.trim()){ el.innerHTML = ""; return; }
+    const modules = code128Modules(clean);
+    const height = 52, quiet = 10;                         // quiet = 两侧静区，扫码器靠它找边界
+    const width = modules.length + quiet * 2;
+    let bars = "", index = 0;
+    while(index < modules.length){
+      if(!modules[index]){ index++; continue; }
+      let run = 1;
+      while(index + run < modules.length && modules[index + run]) run++;
+      bars += `<rect x="${index + quiet}" y="0" width="${run}" height="${height}"/>`;
+      index += run;
+    }
+    el.innerHTML =
+      `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="条形码" focusable="false">`
+      + `<g fill="#2f4a4e">${bars}</g></svg>`
+      + `<div class="v02-paper-barcode-cap">${escapeHtml(String(text))}</div>`;
+  }
+
   function showPurchaseReceipt(title, rows, paid, note, options={}){
+    // 失败的小票不该写"购买时间"—— 那一次并没有买成。
+    const failed = String(title || "").startsWith("无法");
+    const timeEl = document.getElementById("receiptTime");
+    if(timeEl) timeEl.textContent = `${failed ? "小票时间" : "购买时间"} ${formatReceiptStamp(Date.now())}`;
+    renderBarcode(document.getElementById("receiptBarcode"), RECEIPT_BARCODE_TEXT);
     const modal=document.getElementById("purchaseReceipt");
     const rowsEl=document.getElementById("receiptRows");
     rowsEl.innerHTML="";
@@ -2690,7 +3008,7 @@
     const adjustBtn=document.getElementById("receiptAdjustBtn");
     const closeBtn=document.getElementById("receiptCloseBtn");
     if(adjustBtn && closeBtn){
-      const failed=String(title||"").startsWith("无法");
+      // failed 在函数开头就算好了（票面时间要用同一个判断），这里直接复用。
       adjustBtn.style.display=failed?"block":"none";
       closeBtn.style.display=failed?"none":"block";
     }
@@ -2755,7 +3073,7 @@
       // 后台只上传了资源图、没单独填预览图时，商店卡片以前是一片空白 —— 用那张资源图顶上。
       // 鱼不套用：鱼的 resourcePath 是按插槽拼的（body/tail/fin/shadow），
       // 抽第一张可能只是条尾巴，卡片上显示反而不如 emoji 清楚。
-      const previewSrc=item.previewImage||(item.category==="fish"?"":visualForItem(item.category,item.id).image);
+      const previewSrc=shopPreviewSrc(item);
       if(previewSrc){
         preview+=`<img class="v02-preview-img" src="${escapeHtml(previewSrc)}" alt="${escapeHtml(item.name)}" loading="lazy" decoding="async" onerror="this.remove()">`;
       }
@@ -2832,6 +3150,8 @@
     markTopEntry(id);
     const el = document.getElementById(id);
     if(el){ el.classList.add("show"); el.setAttribute("aria-hidden", "false"); }
+    // 大事记是纯本地数据，每次打开「我的」重画一遍，保证和刚发生的事件同步。
+    if(id === "mineDrawer") renderEventLog();
   }
   // 「我的」资料卡。昵称是玩家唯一能写的档案字段（PUT /api/game/me）；
   // 其余（注册时间 / 累计专注 / 鱼数）只读。数据来自 GET /api/game/me ——
@@ -3044,6 +3364,12 @@
 
   let minutes = 25, remaining = minutes * 60, running = false, startedAt = 0, durationSeconds = minutes * 60, sessionIsMember = false, timerFrame = 0;
 
+  // 未专注时鱼缸罩一层毛玻璃（.tank-frost），专注时才揭开 —— 想看清自己的鱼缸就去开计时。
+  // 只有一个出口：任何改 running 的地方都要跟着调它，否则罩子会跟计时器状态对不上。
+  function syncFocusRunningClass(){
+    document.body.classList.toggle("focus-running", running);
+  }
+
   // ===== DEV 测试工具 =====
   function updateDevStatus(){
     const el=document.getElementById("devStatus");
@@ -3182,22 +3508,34 @@
   document.getElementById("purchaseReceipt").addEventListener("click",e=>{
     if(e.target.id==="purchaseReceipt") closePurchaseReceipt();
   });
-  document.getElementById("devToggle").addEventListener("click",()=>{
+  // ===== DEV 测试工具开关 =====
+  // 只有 URL 带 ?dev=1 才启用（认 ?dev=1、?dev=1&x=2；?dev=0 / 不带参数都算关）。
+  // 两道闸：CSS 默认隐藏按钮 + 下面 devOnly() 把处理器本身也关掉 ——
+  // 否则玩家在控制台里 document.getElementById("devAdd10000").click() 一样能刷泡泡。
+  function devModeEnabled(search){
+    try{ return new URLSearchParams(search).get("dev") === "1"; }
+    catch(_){ return false; }
+  }
+  const DEV_ENABLED = devModeEnabled(location.search);
+  if(DEV_ENABLED) document.body.classList.add("dev-on");
+  // 非 dev 模式下把处理器变成空函数，点了什么都不会发生。
+  const devOnly = fn => (...args) => { if(DEV_ENABLED) fn(...args); };
+  document.getElementById("devToggle").addEventListener("click",devOnly(()=>{
     const panel=document.getElementById("devPanel");
     panel.classList.toggle("show");
     panel.setAttribute("aria-hidden",panel.classList.contains("show")?"false":"true");
     updateDevStatus();
-  });
-  document.getElementById("devAdd100").addEventListener("click",()=>devAddBubbles(100));
-  document.getElementById("devAdd1000").addEventListener("click",()=>devAddBubbles(1000));
-  document.getElementById("devAdd10000").addEventListener("click",()=>devAddBubbles(10000));
-  document.getElementById("devReduceFocus").addEventListener("click",devReduceFocus);
-  document.getElementById("devCompleteFocus").addEventListener("click",devCompleteFocus);
-  document.getElementById("devMember").addEventListener("click",devToggleMember);
-  document.getElementById("devResetBubble").addEventListener("click",devResetBubbles);
-  document.getElementById("devClearInventory").addEventListener("click",devClearInventory);
-  document.getElementById("devResetSave").addEventListener("click",devResetAll);
-  updateDevStatus();
+  }));
+  document.getElementById("devAdd100").addEventListener("click",devOnly(()=>devAddBubbles(100)));
+  document.getElementById("devAdd1000").addEventListener("click",devOnly(()=>devAddBubbles(1000)));
+  document.getElementById("devAdd10000").addEventListener("click",devOnly(()=>devAddBubbles(10000)));
+  document.getElementById("devReduceFocus").addEventListener("click",devOnly(devReduceFocus));
+  document.getElementById("devCompleteFocus").addEventListener("click",devOnly(devCompleteFocus));
+  document.getElementById("devMember").addEventListener("click",devOnly(devToggleMember));
+  document.getElementById("devResetBubble").addEventListener("click",devOnly(devResetBubbles));
+  document.getElementById("devClearInventory").addEventListener("click",devOnly(devClearInventory));
+  document.getElementById("devResetSave").addEventListener("click",devOnly(devResetAll));
+  if(DEV_ENABLED) updateDevStatus();
 
   function focusRewardMinutes(mins,isMember){
     const wholeMinutes=Math.max(0,Math.floor(Number(mins)||0));
@@ -3627,6 +3965,8 @@ function categoryScale(key){
     btn.addEventListener("click", (e) => { if (e.detail === 0) stepFocusMinutes(delta); });
   });
   syncTimeStepButtons();
+  // 显式对一次初始状态：默认（未专注）就是毛玻璃罩着，别指望 CSS 的 :not() 兜住所有入口。
+  syncFocusRunningClass();
 
   startBtn.onclick = () => {
     unlockAudio(); ensureAudio(); playStartSound();
@@ -3634,6 +3974,7 @@ function categoryScale(key){
     running = true; 
     startedAt = Date.now(); 
     durationSeconds = minutes * 60;
+    syncFocusRunningClass();
     updateDevStatus();
     syncTimeStepButtons();
     // 按文档：会员状态以点击“开始专注”瞬间为准。
@@ -3695,6 +4036,7 @@ function resetFocus(completed) {
       clearTimeout(timerFrame);
       timerFrame = 0;
     }
+    syncFocusRunningClass();
     updateDevStatus();
     syncTimeStepButtons();
 

@@ -469,18 +469,47 @@ async function getPublishedFocusConfig() {
   return record.publishedData || record.data;
 }
 
+// 会员标记一律以**服务端存档**为准。
+//
+// 以前是直接采信客户端 body 里的 isMember（focus-sessions.start(req.body)），
+// 而前端本来就把它当可写字段用（DEV 面板有「切换会员」，存档推送里也带着它）——
+// 于是谎报一次 isMember 就能拿到会员档奖励：线上梯度 25min 是 1/2，
+// 同样 25 分钟，25 泡泡变 50 泡泡，直接翻倍。
+//
+// 云存档那条路一直是服务端权威（player-store.js 的 mergeSave 会把客户端的 isMember 丢掉），
+// 只有专注结算这条路漏了。V1.0 不卖会员，所以这里正常返回 false；
+// 未登录 / 存档层不可用一律按非会员，绝不因为查不到就放行。
+async function resolveServerMembership(auth) {
+  if (!auth || auth.error) return false;
+  try {
+    const store = await getPlayerStore();
+    const stored = await store.getSave(auth.uid);
+    const player = stored && stored.data && stored.data.PlayerData;
+    return Boolean(player && player.isMember === true);
+  } catch (error) {
+    console.warn(`读取会员标记失败，按非会员结算：${error.message}`);
+    return false;
+  }
+}
+
 app.post("/api/game/focus/start", async (req, res) => {
   try {
     const focusConfig = await getPublishedFocusConfig();
     if (!focusConfig) return res.status(503).json({ error: "专注配置不可用" });
     const errorMessage = validateStartRequest(req.body, focusConfig);
     if (errorMessage) return res.status(400).json({ error: errorMessage });
-    const session = focusSessions.start(req.body);
+
+    // ⚠️ 只取 plannedMinutes；isMember 由服务端自己查（见上面的 resolveServerMembership）。
+    const auth = readRequestUid(req);
+    const isMember = await resolveServerMembership(auth);
+    const session = focusSessions.start({
+      plannedMinutes: (req.body || {}).plannedMinutes,
+      isMember
+    });
 
     // 会话同时在 focus_records 里落一行（未结算）。
     // ⚠️ **登录不是专注的前提** —— 未登录、离线都照常能专注，只是这条记录不进服务端统计。
     //    写库失败也只记日志：专注是核心动作，不能被数据库抖动挡住。
-    const auth = readRequestUid(req);
     if (!auth.error) {
       try {
         await (await getPlayerStore()).addFocusRecord({

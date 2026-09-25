@@ -53,7 +53,9 @@ const consts = [
   extractConst(source, "BUILTIN_AUDIO_CATEGORIES"),
   extractConst(source, "AUDIO_DEFAULTS"),
   extractConst(source, "audioStorageKey"),
-  extractConst(source, "audioVolumes")
+  extractConst(source, "audioVolumes"),
+  // sortShopItems 会按类型分组，分组顺序来自这个常量（排序规则本身的测试在 shop-sort.test.js）。
+  extractConst(source, "SHOP_CATEGORY_ORDER")
 ].join("\n");
 const funcs = ["audioCategoryKeys", "ambientCategoryKey", "resourceBasename", "itemResourcePaths", "serverSoundItems", "sortShopItems"]
   .map(name => extractFunction(source, name))
@@ -151,9 +153,10 @@ sandbox = buildSandbox(null, []);
 chk("无音频配置时返回空数组", sandbox.serverSoundItems(), []);
 chk("无音频配置时 ambient 仍取 bgm", sandbox.ambientCategoryKey(), "bgm");
 
-console.log("\n--- 商品列表排序（按 id）---");
+console.log("\n--- 商品列表排序（同类型内按 id）---");
 // 锁的 bug：之前 CloudBase RDB 默认顺序没保证，用户改一条商品后它会飘到末尾。
-// 现在前后端都走 sortShopItems，按 id 排序。"新品置前"等规则以后另开分支。
+// 现在前后端都走 sortShopItems。下面这些 fixture 都没带 category，走的是"同类型内按 id"那一段；
+// 类型分组的完整规则（顺序 = 标签栏顺序、认不出的类型沉底）在 shop-sort.test.js。
 chk("按 id 排序", sandbox.sortShopItems([
   { id: "fish003" }, { id: "fish001" }, { id: "fish002" }
 ]).map(item => item.id), ["fish001", "fish002", "fish003"]);

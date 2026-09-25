@@ -159,7 +159,7 @@ chk("空闲态：两个按钮可用", runSync({ running: false }), [false, false
 chk("专注中：两个按钮都禁用", runSync({ running: true }), [true, true]);
 chk("时长锁死（min=max）：都禁用", runSync({ min: 30, max: 30 }), [true, true]);
 chkTrue("初始化就同步一次", /syncTimeStepButtons\(\);\n/.test(source));
-chkTrue("点开始专注时同步（否则专注中还能改时长）", /durationSeconds = minutes \* 60;\n    updateDevStatus\(\);\n    syncTimeStepButtons\(\);/.test(source));
+chkTrue("点开始专注时同步（否则专注中还能改时长）", /durationSeconds = minutes \* 60;\n(?:.*\n)*?    updateDevStatus\(\);\n    syncTimeStepButtons\(\);/.test(source));
 chkTrue("专注结束时同步（否则再也改不回来）", /updateDevStatus\(\);\n    syncTimeStepButtons\(\);\n\n    appTitle\.style\.visibility/.test(source));
 
 // 触屏手感：不加这些手机上会有 300ms 延迟和长按选中。

@@ -21,7 +21,19 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const apiDir = path.join(here, "..");
-const PORT = 4293;
+
+// 端口不能写死。这条测试的思路是"先自己占住一个端口，再让 server.js 去撞它"，
+// 一旦本机正好有别的进程在用同一个号（上一次没退干净的 server.js、并行跑的测试进程），
+// blocker 自己就绑不上，测试会报一个和被测逻辑毫无关系的假失败。
+// 改成向系统要一个空闲端口，测试结果只反映被测行为。
+async function holdFreePort() {
+  const server = net.createServer(() => {});
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "0.0.0.0", resolve);
+  });
+  return { server, port: server.address().port };
+}
 
 let pass = 0;
 let fail = 0;
@@ -35,8 +47,7 @@ function chkTrue(name, condition, detail = "") {
   }
 }
 
-const blocker = net.createServer(() => {});
-await new Promise(resolve => blocker.listen(PORT, "0.0.0.0", resolve));
+const { server: blocker, port: PORT } = await holdFreePort();
 console.log(`     已占住 ${PORT}，制造 EADDRINUSE`);
 
 const child = spawn(process.execPath, ["server.js"], {
@@ -81,11 +92,11 @@ blocker.close();
 // 就是为了兼容"服务端口被固定成 80 且改不了"的情况。
 // 因此必须保证：一个端口被占，另一个端口仍然正常提供服务，进程不能退出。
 console.log("\n----- 场景 2：主端口被占，额外端口仍可用 -----");
-const BLOCKED = 4294;
-const FALLBACK = 4295;
-
-const blocker2 = net.createServer(() => {});
-await new Promise(resolve => blocker2.listen(BLOCKED, "0.0.0.0", resolve));
+const { server: blocker2, port: BLOCKED } = await holdFreePort();
+// FALLBACK 必须是空着的（要留给子进程真的绑上），所以借一个端口号立刻还回去。
+const probe = await holdFreePort();
+const FALLBACK = probe.port;
+await new Promise(resolve => probe.server.close(resolve));
 
 const child2 = spawn(process.execPath, ["server.js"], {
   cwd: apiDir,
