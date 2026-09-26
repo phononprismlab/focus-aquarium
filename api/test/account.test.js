@@ -48,7 +48,7 @@ const toBase64 = obj => Buffer.from(JSON.stringify(obj), "utf8").toString("base6
 const account = await import("../account.js");
 const {
   parseCredentials, generateUid, normalizeUid, issueTicket, accountStatus,
-  checkRateLimit, resetRateLimit, resetAccountCache,
+  checkRateLimit, resetRateLimit, resetAccountCache, clientIpFromHeaders,
   GENERATED_UID_PATTERN, CLIENT_UID_PATTERN, CLOUDBASE_UID_PATTERN, CREDENTIALS_ENV, RATE_LIMIT
 } = account;
 
@@ -221,6 +221,30 @@ console.log("\n--- 5. 限流：接口不能变成随便领凭证的水龙头 ---
   chkTrue("resetRateLimit 清空后恢复", checkRateLimit("1.2.3.4").allowed === true);
 }
 
+// ===== 5b. 真实客户端 IP 提取（T2-6 限流 key 修正的根）=====
+// ⚠️ 这是 T2-6 的核心回归：之前直接拿 req.ip 做限流 key，而本服务不设 trust proxy，
+//    req.ip 是网关内网地址（探针实测 10.15.254.142），导致所有用户共用一个桶 = 等于没限。
+//    修正后必须能从网关透传头里取到真实客户端 IP，并据此区分不同用户。
+console.log("\n--- 5b. 真实客户端 IP：按网关透传头取，不再用不可信的 req.ip ---");
+{
+  // Envoy 权威外部地址优先（客户端无法伪造）
+  chk("x-envoy-external-address 优先", clientIpFromHeaders({ "x-envoy-external-address": "1.1.1.1", "x-forwarded-for": "2.2.2.2" }), "1.1.1.1");
+  // XFF 多跳取最左（原始客户端）
+  chk("XFF 多跳取最左一跳", clientIpFromHeaders({ "x-forwarded-for": "9.9.9.9, 10.0.0.1, 10.0.0.2" }), "9.9.9.9");
+  // 没有 envoy 头时退回 XFF
+  chk("无 envoy 头时取 XFF", clientIpFromHeaders({ "x-forwarded-for": "5.5.5.5" }), "5.5.5.5");
+  // 没有 XFF 时退回 X-Real-IP
+  chk("无 XFF 时取 X-Real-IP", clientIpFromHeaders({ "x-real-ip": "6.6.6.6" }), "6.6.6.6");
+  // 什么头都没有 → 兜底
+  chk("无头时回兜底", clientIpFromHeaders({}, "10.0.0.9"), "10.0.0.9");
+  chkTrue("无头且无兜底 → unknown", clientIpFromHeaders({}) === "unknown");
+  // 空值不污染结果（回退到次优先级头）
+  chkTrue("空 XFF 不污染（回退到 X-Real-IP）", clientIpFromHeaders({ "x-forwarded-for": "   ", "x-real-ip": "7.7.7.7" }) === "7.7.7.7");
+  // 关键回归：不同 envoy 外部地址必须被区分（限流不会串桶）
+  chkTrue("不同 envoy 外部地址必须被区分",
+    clientIpFromHeaders({ "x-envoy-external-address": "1.1.1.1" }) !== clientIpFromHeaders({ "x-envoy-external-address": "2.2.2.2" }));
+}
+
 // ===== 6–9. HTTP 层 =====
 // ⚠️ 端口必须每次随机：上一轮若有服务没被 kill（测试崩掉时 finally 跑不到），
 //    它会一直占着端口，新 spawn 的实例绑不上，健康检查就会连到**旧的**服务上，
@@ -251,10 +275,10 @@ const startServer = async (extraEnv, port) => {
   server.kill();
   throw new Error(`服务没能在 10s 内起来（port ${port}）`);
 };
-const postTicket = async (base, body) => {
+const postTicket = async (base, body, extraHeaders = {}) => {
   const res = await fetch(`${base}/api/account/ticket`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...extraHeaders },
     body: JSON.stringify(body)
   });
   return { status: res.status, body: await res.json().catch(() => ({})) };
@@ -354,6 +378,27 @@ console.log("\n--- 9. HTTP：限流生效（阈值调小后第 N+1 次被拦） 
     chk("第 4 次起被拦", statuses.slice(3), [429, 429]);
     const last = await postTicket(base, {});
     chkTrue("429 文案给出重试秒数", /请 \d+ 秒后再试/.test(last.body.error || ""), last.body.error);
+  } finally { server.kill(); }
+}
+
+console.log("\n--- 10. HTTP：限流按真实客户端 IP 区分（不同 XFF 不共享桶）---");
+{
+  // 阈值调成 2，空 body（key = ip:<clientIp>）。连续打同一 XFF 应共享一个桶；
+  // 换一个 XFF 必须立即恢复，证明 key 用的是真实客户端 IP，而非网关内网地址。
+  const { server, base } = await startServer({
+    [CREDENTIALS_ENV]: toBase64(makeCredentials()),
+    ACCOUNT_TICKET_RATE_LIMIT: "2"
+  }, takePort());
+  try {
+    const sameIp = [];
+    for (let i = 0; i < 3; i++) sameIp.push((await postTicket(base, {}, { "x-forwarded-for": "11.11.11.11" })).status);
+    chk("同一 XFF：前 2 次放行", sameIp.slice(0, 2), [200, 200]);
+    chk("同一 XFF：第 3 次被拦", sameIp[2], 429);
+
+    const otherIp = (await postTicket(base, {}, { "x-forwarded-for": "22.22.22.22" })).status;
+    chk("不同 XFF：仍放行（桶独立）", otherIp, 200);
+    // 反向再打一次第一个 XFF，应继续保持被拦（它的桶已耗尽，不随别人的桶恢复）。
+    chk("原 XFF 桶仍满", (await postTicket(base, {}, { "x-forwarded-for": "11.11.11.11" })).status, 429);
   } finally { server.kill(); }
 }
 

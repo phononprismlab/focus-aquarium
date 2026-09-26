@@ -175,14 +175,47 @@ export function accountStatus() {
   };
 }
 
+// ===== 真实客户端 IP 提取（纯函数，可单测）=====
+//
+// 为什么不能直接用 req.ip：本服务**故意不设 trust proxy**（见 server.js 诊断探针注释），
+// 所以 Express 的 req.ip 取的是直连本进程的那一跳——云托管 Envoy 入口的内网地址
+// （探针实测 10.15.254.142），不是真实用户。若拿它做限流 key，所有用户会落到同一个桶。
+//
+// 真实客户端 IP 在网关透传的头里（探针实测）：
+//   x-envoy-external-address  ← Envoy 权威外部地址，客户端无法伪造，最可信
+//   x-forwarded-for            ← 标准 XFF，最左一跳是原始客户端（多代理时每跳往右追加）
+//   x-real-ip                 ← 部分网关直接给单值
+// 优先级从高到低：envoy 外部地址 > XFF 首跳 > X-Real-IP > 兜底（调用方给的 socket 地址）。
+// 调它时把 req.socket.remoteAddress（或 req.ip）作为 fallback 传进来即可；拿不到任何头就回 "unknown"。
+export function clientIpFromHeaders(headers, fallback = "unknown") {
+  const h = headers || {};
+  const firstHop = raw => {
+    if (typeof raw !== "string") return "";
+    const v = raw.trim();
+    if (!v) return "";
+    // XFF / Real-IP 可能是逗号分隔的多跳，取第一段（最左 = 原始客户端）。
+    // 不剥端口：XFF 通常只含 IP；且剥离会破坏 IPv6（如 2001:db8::1 的尾段）。
+    return v.split(",")[0].trim();
+  };
+  const envoy = firstHop(h["x-envoy-external-address"]);
+  if (envoy) return envoy;
+  const xff = firstHop(h["x-forwarded-for"]);
+  if (xff) return xff;
+  const realIp = firstHop(h["x-real-ip"]);
+  if (realIp) return realIp;
+  return typeof fallback === "string" && fallback ? fallback : "unknown";
+}
+
 // ===== 限流 =====
 // 票据等于登录凭证，接口不能变成"随便领"的水龙头。
+// 限流 key 现在按「真实客户端 IP（见 clientIpFromHeaders，从 x-envoy-external-address /
+// XFF / X-Real-IP 取，不再用不可信的 req.ip）」或 uid 计，正常用户不会误撞同一桶。
 // 这里是单实例内存计数：云托管多实例时不共享，所以只作为"挡住明显滥用"的一层，
 // 真正的账号滥用防护靠后面的用户表与审计，不在最小闭环范围内。
 const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
-// ⚠️ 阈值刻意放宽到 300/5 分钟：服务没有配置 trust proxy，云托管入口之后 req.ip
-//    很可能是同一个入口 IP —— 按真实客户端计数的假设不成立，卡太紧会误伤正常用户。
-//    所以这里只挡"明显在刷"的行为，真正的账号滥用防护靠后面的用户表与审计（账号方案 v2）。
+// ⚠️ 阈值刻意放宽到 300/5 分钟：这是单实例兜底层，只挡"明显在刷"的行为；
+//    真正的账号滥用防护靠后面的用户表与审计（账号方案 v2）。云托管多实例下本计数不共享，
+//    跨实例的强约束不在最小闭环范围内。
 const RATE_LIMIT_MAX = Math.max(1, Number(process.env.ACCOUNT_TICKET_RATE_LIMIT || 300));
 const hits = new Map();
 

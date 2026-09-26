@@ -12,7 +12,7 @@ import { createFocusSessionStore } from "./focus-session.js";
 import { validateAudioConfig } from "./audio-config.js";
 import { validateEventConfig } from "./event-config.js";
 import { resolveAdminApiKey, checkProductionConfig, warnWeakAdminKey } from "./runtime-guard.js";
-import { accountStatus, issueTicket, normalizeUid, checkRateLimit, resetAccountCache, resetRateLimit, RATE_LIMIT } from "./account.js";
+import { accountStatus, issueTicket, normalizeUid, checkRateLimit, resetAccountCache, resetRateLimit, RATE_LIMIT, clientIpFromHeaders } from "./account.js";
 import { readRequestUid, issueSessionToken, verifySessionToken, sessionSecretStatus } from "./session-token.js";
 import { issueSyncCode, verifySyncCode } from "./sync-code.js";
 import { createPlayerStore, mergeSaveForWrite, planPurchase, planSettlement, normalizeBubbles, normalizeNickname, ARCHIVE_VERSION } from "./player-store.js";
@@ -462,7 +462,11 @@ for (const type of types) {
 //    ③ 按 IP 限流。跨设备的身份迁移靠同步码（v2），不是靠猜 uid。
 app.post("/api/account/ticket", async (req, res) => {
   // 先限流再做别的：凭证解析失败也要算进配额，否则可以拿错误请求刷。
-  const limiter = checkRateLimit(req.ip || "unknown");
+  // 限流 key：带 uid 时按 uid 计（同一账号一把锁），否则按真实客户端 IP 计
+  // （见 clientIpFromHeaders；本服务不设 trust proxy，req.ip 是网关内网地址，不可信）。
+  const bodyUid = (req.body && typeof req.body.uid === "string" && req.body.uid) || null;
+  const rlKey = bodyUid ? `u:${bodyUid}` : `ip:${clientIpFromHeaders(req.headers, (req.socket && req.socket.remoteAddress) || req.ip)}`;
+  const limiter = checkRateLimit(rlKey);
   if (!limiter.allowed) {
     return res.status(429).json({
       error: `请求过于频繁，请 ${limiter.retryAfterSeconds} 秒后再试`
@@ -552,7 +556,8 @@ app.post("/api/account/ticket", async (req, res) => {
 // 兑换成功 = 拿到该 uid 的会话令牌，之后与正常登录完全一样（不再需要走
 // CloudBase 自定义登录：uid 和令牌服务端都直接给了，省掉 965KB 的 SDK）。
 app.post("/api/account/sync/redeem", async (req, res) => {
-  const limiter = checkRateLimit(req.ip || "unknown");
+  // 兑换是开放预鉴权接口，没有 uid，按真实客户端 IP 限（见 clientIpFromHeaders）。
+  const limiter = checkRateLimit(`ip:${clientIpFromHeaders(req.headers, (req.socket && req.socket.remoteAddress) || req.ip)}`);
   if (!limiter.allowed) {
     return res.status(429).json({ error: `请求过于频繁，请 ${limiter.retryAfterSeconds} 秒后再试` });
   }
