@@ -256,11 +256,13 @@ app.get("/api/ready", async (req, res) => {
 // 腾讯云 1243/77197 都只有端口与实例配置），所以只能让容器自己把看到的东西吐出来。
 //
 // 关键点：注册时**不设 trust proxy**，否则 req.ip 已经被 Express 改写，看不到原始头。
-// 两道门禁固定住它：① 非 production 才注册 ② 还要显式设 FISHTANK_DIAG=1。
-// 也就是说生产环境永远不注册 —— 不需要记得删也能保证线上没有这个口子。
+// 门禁：**只有显式设了 FISHTANK_DIAG=1 才注册**。这个变量只有部署者能在云托管环境变量里
+// 设置，外部请求无法触发，所以线上默认没有口子；需要诊断网关头时临时打开、读完再关。
+// （原先是双门禁「非 production 才注册」，但云托管跑的就是 production，导致部署后读不到——
+//  为 T2-6 限流修复采集真实透传头，改为单门禁。）
 const INSTANCE_ID = `${os.hostname()}-${process.pid}`;
 const BOOT_AT = Date.now();
-if (process.env.NODE_ENV !== "production" && process.env.FISHTANK_DIAG === "1") {
+if (process.env.FISHTANK_DIAG === "1") {
   app.get("/api/debug/req", (req, res) => {
     // 把所有可能与「客户端来源」有关的头一次性列出来，别让下次还要为漏了某个头再部署一次。
     const related = {};

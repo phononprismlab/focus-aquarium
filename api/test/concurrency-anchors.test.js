@@ -141,11 +141,13 @@ chkTrue("🔴 哨兵值约定：claim 写非 0，settle 用 > 0 判已结算（�
   /Number\(row\.settled_at\)\s*>\s*0\)\s*return\s*\{\s*\.\.\.row,\s*alreadySettled:\s*true\s*\}/.test(storeSrc));
 
 // ===== 9. 诊断探针的门禁 =====
-console.log("\n--- 9. 诊断探针：生产环境永不注册 ---");
-chkTrue('双门禁：NODE_ENV !== "production" && FISHTANK_DIAG === "1"',
-  /process\.env\.NODE_ENV\s*!==\s*"production"\s*&&\s*process\.env\.FISHTANK_DIAG\s*===\s*"1"/.test(serverSrc));
+console.log("\n--- 9. 诊断探针：单门禁（FISHTANK_DIAG=1 才注册）---");
+chkTrue('单门禁：仅靠 FISHTANK_DIAG === "1"（云托管是 production，双门禁会导致部署后读不到）',
+  /if\s*\(process\.env\.FISHTANK_DIAG\s*===\s*"1"\)/.test(serverSrc));
 chkTrue("探针回显 instanceId（用来验证多实例）", /instanceId:\s*INSTANCE_ID/.test(serverSrc));
 chkTrue("探针回显 trust proxy 与 XFF", /trustProxy:\s*app\.get\("trust proxy"\)/.test(serverSrc));
+chkTrue("门禁已去掉 NODE_ENV 那道（否则云托管 production 下读不到）",
+  !/NODE_ENV\s*!==\s*"production"\s*&&\s*process\.env\.FISHTANK_DIAG/.test(serverSrc));
 
 console.log("\n----");
 console.log(`concurrency-anchors.test: PASS=${pass} FAIL=${fail}`);
