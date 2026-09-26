@@ -212,9 +212,18 @@ console.log("\n--- 9. 图标按钮可识别 ---");
     /class="config-notice-close" id="configNoticeClose" aria-label="关闭提示" title="关闭提示"/.test(source));
   chkTrue("静音按钮有 title", /id="audioToggle" aria-label="静音" title="静音 \/ 取消静音"/.test(source));
   chkTrue("音频设置按钮有 title", /id="audioSettingsToggle" aria-label="音频设置" title="音频设置"/.test(source));
-  chkTrue("商店加减数量按钮有名字（否则读屏只念「加号」）",
-    /data-minus="\$\{item\.id\}" aria-label="减少一条\$\{item\.name\}" title="减少一条"/.test(source)
-    && /data-plus="\$\{item\.id\}" aria-label="增加一条\$\{item\.name\}" title="增加一条"/.test(source));
+  // 商品名来自后台配置，插进 HTML（含属性）前必须转义 —— 所以这里是 escapeHtml(item.name)，
+  // 断言同时锁住两件事：按钮有可识别的名字 + 名字是转义过的（不能直接插 ${item.name}）。
+  const minusBtnRe = /data-minus="\$\{item\.id\}" aria-label="减少一条\$\{escapeHtml\(item\.name\)\}" title="减少一条"/;
+  const plusBtnRe = /data-plus="\$\{item\.id\}" aria-label="增加一条\$\{escapeHtml\(item\.name\)\}" title="增加一条"/;
+  chkTrue("商店加减数量按钮有名字（否则读屏只念「加号」）", minusBtnRe.test(source) && plusBtnRe.test(source));
+  chkTrue("按钮名字里的商品名是转义过的（后台配置不能直接插进属性）",
+    minusBtnRe.test(source) && plusBtnRe.test(source)
+    && !/aria-label="(?:减少|增加)一条\$\{item\.name\}"/.test(source));
+  chkTrue("商店卡片正文的商品名 / 描述也是转义过的",
+    /class="v02-item-name-text">\$\{escapeHtml\(item\.name\)\}</.test(source)
+    && /class="v02-description">\$\{escapeHtml\(item\.description\|\|""\)\}</.test(source));
+  chkTrue("结算小票里的商品名也是转义过的", /\$\{escapeHtml\(row\.name\)\}/.test(source));
   chkTrue("时长 −/+ 按钮本来就有（回归确认没被覆盖掉）",
     /id="timeMinus" aria-label="减少专注时长" title="减少 5 分钟"/.test(source)
     && /id="timePlus" aria-label="增加专注时长" title="增加 5 分钟"/.test(source));

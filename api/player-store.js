@@ -89,6 +89,20 @@ export const SINGLE_SLOT_FIELDS = {
 export const MAX_BUBBLE_GAIN_PER_PUSH = 2000;
 export const MAX_BUBBLES = 1_000_000_000;
 
+// ===== 首次同步的上限（首 push 服务端没有基线，但不能因此就成了无底洞）=====
+// 首次同步时服务端确实只能以玩家本地存档为准（进度只存在于他的浏览器里），
+// 但「一个新账号能有多少东西」是有常识范围的，所以首 push 也要按这个范围归一：
+//
+//   · 泡泡：一次 25 分钟专注给 25 个，玩一天几百个；离线攒上两周也到不了 5000。
+//     ⚠️ 这只是把「一次请求能写进来多少」变成**有界**（以前是 1e9 直接进），
+//     防不住玩家慢慢攒 —— 泡泡终究是客户端权威，真正的收紧见文件头那段欠账说明。
+//   · 库存：鱼的 maxInventory 是 50，其余四个分类都是单选槽位（买一件就够用）。
+//     所以分别钳到 50 / 1。**不能一刀清零** —— 纯本地模式下玩家真的离线买过东西，
+//     清零会把他的真实进度抹掉。
+export const FIRST_PUSH_MAX_BUBBLES = 5000;
+export const FIRST_PUSH_MAX_FISH_PER_ITEM = 50;
+export const FIRST_PUSH_MAX_SINGLE_SLOT = 1;
+
 const isPlainObject = value => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
 // 泡泡一律取整、非负、有上限。任何一步失败都回落到 0 而不是 NaN ——
@@ -117,6 +131,28 @@ export function normalizeInventory(value) {
 
 export function defaultPlayer({ bubbles = 0, inventory = {} } = {}) {
   return { bubbles: normalizeBubbles(bubbles), isMember: false, inventory: normalizeInventory(inventory) };
+}
+
+// 首次同步的库存归一：先走一遍通用清洗，再按分类钳到常识上限。
+// 返回 { inventory, problems } —— problems 只进日志与单测，不下发给玩家。
+export function normalizeInventoryForFirstPush(value) {
+  const source = normalizeInventory(value);
+  const problems = [];
+  const result = {};
+  for (const category of INVENTORY_CATEGORIES) {
+    const cap = category === "fish" ? FIRST_PUSH_MAX_FISH_PER_ITEM : FIRST_PUSH_MAX_SINGLE_SLOT;
+    const clean = {};
+    for (const [id, count] of Object.entries(source[category])) {
+      if (count > cap) {
+        problems.push(`首次同步库存 ${category}/${id} 超过上限（${count} → ${cap}），已钳制`);
+        clean[id] = cap;
+      } else {
+        clean[id] = count;
+      }
+    }
+    result[category] = clean;
+  }
+  return { inventory: result, problems };
 }
 
 // 音量等偏好：0–100 的整数，未知键丢弃（配置分类可能已经改了，旧的键不该一直堆在存档里）。
@@ -192,10 +228,15 @@ export function mergeSaveForWrite(stored, incoming, { saveVersion = "" } = {}) {
     // 首次同步：服务端还没有基线，只能以玩家的本地存档为准。
     // 这不是「信任客户端」的问题 —— 玩家的进度确实只存在于他的浏览器里，
     // 服务端没有任何依据可以核对。若强行从 0 开始，等于把历史进度抹掉。
-    player = defaultPlayer({
-      bubbles: normalizeBubbles(incomingPlayer.bubbles),
-      inventory: incomingPlayer.inventory
-    });
+    // 但「以本地为准」不等于「来者不拒」：泡泡与库存都按上面的常识范围归一。
+    const { inventory, problems: inventoryProblems } = normalizeInventoryForFirstPush(incomingPlayer.inventory);
+    const submittedBubbles = normalizeBubbles(incomingPlayer.bubbles);
+    const bubbles = Math.min(submittedBubbles, FIRST_PUSH_MAX_BUBBLES);
+    if (submittedBubbles > bubbles) {
+      problems.push(`首次同步泡泡超过新账号上限（提交 ${submittedBubbles} → ${FIRST_PUSH_MAX_BUBBLES}），已截断`);
+    }
+    problems.push(...inventoryProblems);
+    player = defaultPlayer({ bubbles, inventory });
   } else {
     // 已有存档：库存与会员标记以服务端为准，泡泡接受客户端的（带增长上限）。
     const serverPlayer = stored.PlayerData;
@@ -343,14 +384,18 @@ export function planSettlement({ save, target, items }) {
       }
     }
 
-    nextInventory[category][item.id] = Math.max(0, owned + buy - sell);
+    // 🔴 退款只能按「实际持有」结算：sell 有时是按**鱼缸条数**算的（撤下鱼），
+    // 而缸内条数可能因首次同步注入等原因大于库存 —— 那时直接按 sell 退钱会凭空造泡泡。
+    // 真正能卖掉的至多是本轮可用的量（原有 + 本次买入），超出的部分没有东西可退。
+    const realSell = Math.min(sell, owned + buy);
+    nextInventory[category][item.id] = Math.max(0, owned + buy - realSell);
     if (buy > 0) {
       paid += buy * price;
       rows.push({ itemId: item.id, name: item.name || item.id, qty: buy, price: buy * price });
     }
-    if (sell > 0) {
-      refund += sell * price;
-      rows.push({ itemId: item.id, name: `${item.name || item.id}返还`, qty: sell, price: -sell * price });
+    if (realSell > 0) {
+      refund += realSell * price;
+      rows.push({ itemId: item.id, name: `${item.name || item.id}返还`, qty: realSell, price: -realSell * price });
     }
   };
 
@@ -477,6 +522,12 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
   return {
     driver: "memory",
 
+    // readiness 探针用：内存实现没有外部依赖，永远算通。
+    // 返回结构刻意与云实现一致，探针那边不用分支判断。
+    async ping() {
+      return { ok: true, driver: "memory" };
+    },
+
     async ensureUser(uid, { cohort = "public", at = now() } = {}) {
       const existing = users.get(uid);
       if (existing) {
@@ -553,7 +604,15 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
     },
 
     // 写入存档。data 是已经合并好的完整存档对象（调用方必须先过 mergeSaveForWrite）。
-    async putSave(uid, data, { saveVersion = "", clientTs = 0, at = now() } = {}) {
+    // 内存实现同样支持乐观锁，语义与云实现一致（否则单测覆盖不到真机的行为）。
+    async putSave(uid, data, { saveVersion = "", clientTs = 0, at = now(), expectUpdatedAt = null } = {}) {
+      const current = saves.get(uid);
+      if (expectUpdatedAt !== null) {
+        const currentVersion = current ? Number(current.updated_at) || 0 : 0;
+        if (currentVersion !== Number(expectUpdatedAt)) {
+          return { conflict: true, currentUpdatedAt: currentVersion };
+        }
+      }
       const row = { user_id: uid, data: JSON.parse(JSON.stringify(data)), save_version: saveVersion, client_ts: clientTs, updated_at: at };
       saves.set(uid, row);
       return { ...row, data: JSON.parse(JSON.stringify(row.data)) };
@@ -567,9 +626,27 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
     async settleFocusRecord(id, { countedMinutes, reward, natural, settledAt = now() }) {
       const row = focusRecords.get(id);
       if (!row) return null;
-      if (row.settled_at) return { ...row, alreadySettled: true };
+      // ⚠️ 注意：这里**不能**因为 settled_at 非 0 就提前返回 alreadySettled ——
+      // claimFocusSession 已经把它置成哨兵值了，真正的写入还在后面。
+      const wasSettled = row.settled_at && row.settled_at > 0;
+      if (wasSettled) return { ...row, alreadySettled: true };
       Object.assign(row, { counted_minutes: countedMinutes, reward, natural, settled_at: settledAt });
       return { ...row, alreadySettled: false };
+    },
+
+    // ===== 专注会话持久层（跨实例 / 跨重启结算用）=====
+    // 内存实现里这三件事本来就成立 —— 它天然是"共享"的，因为整台机器只有一份。
+    // 接口与云实现保持一致，focus-session.js 不用分支判断。
+    async findFocusSession(id) {
+      return focusRecords.get(id) || null;
+    },
+
+    async claimFocusSession(id) {
+      const row = focusRecords.get(id);
+      if (!row) return false;
+      if (row.settled_at) return false;
+      row.settled_at = -1; // 哨兵：非 0 即"已被认领"，稍后由 settleFocusRecord 写真实值
+      return true;
     },
 
     async stats(uid) {
@@ -694,6 +771,14 @@ export function createCloudbasePlayerStore(db, { now = () => Date.now() } = {}) 
   return {
     driver: "cloudbase",
 
+    // readiness 探针用：真的打一次数据库，但只取一行的一个字段（不扫表、不写）。
+    // 「进程活着」和「数据库连得上」是两件事 —— /api/health 只回答前者，
+    // 这个 ping 才是判断「现在能不能接客」的依据。
+    async ping() {
+      await db.from(TABLE_SAVES).select("user_id").limit(1).throwOnError();
+      return { ok: true, driver: "cloudbase" };
+    },
+
     async ensureUser(uid, { cohort = "public", at = now() } = {}) {
       const existing = await selectOne(TABLE_USERS, "user_id", uid);
       if (existing) {
@@ -800,7 +885,12 @@ export function createCloudbasePlayerStore(db, { now = () => Date.now() } = {}) 
       return { ...row, data };
     },
 
-    async putSave(uid, data, { saveVersion = "", clientTs = 0, at = now() } = {}) {
+    // 写存档。
+    // expectUpdatedAt：乐观锁。传了「读到的 updated_at」后，更新会额外带上这个条件，
+    // 条件不满足（别人先写过了）就返回 { conflict: true } 而不是覆盖 —— 这一点很关键，
+    // 因为「读-算-写」跨了多次网络往返，中间任何一次别人写入都会被这次覆盖掉（丢更新）。
+    // 不传则保持原语义（无条件写），供确实不需要并发保护的场景使用。
+    async putSave(uid, data, { saveVersion = "", clientTs = 0, at = now(), expectUpdatedAt = null } = {}) {
       const existing = await selectOne(TABLE_SAVES, "user_id", uid);
       const row = {
         user_id: uid,
@@ -810,13 +900,26 @@ export function createCloudbasePlayerStore(db, { now = () => Date.now() } = {}) 
         updated_at: at
       };
       if (existing) {
-        await db.from(TABLE_SAVES).update(row).eq("user_id", uid).throwOnError();
+        // ⚠️ 这里特意**不做**「先读-再比-再写」的应用层校验：那样两次往返之间还有窗口。
+        //    把旧值直接写在 WHERE 条件里，让数据库自己保证「读到的还没被改过」。
+        let query = db.from(TABLE_SAVES).update(row).eq("user_id", uid);
+        if (expectUpdatedAt !== null) query = query.eq("updated_at", expectUpdatedAt);
+        await query.throwOnError();
+        // 条件不满足时 update 不报错、只是影响 0 行，所以必须回读一次确认到底写没写。
+        if (expectUpdatedAt !== null) {
+          const after = await selectOne(TABLE_SAVES, "user_id", uid);
+          const currentVersion = after ? Number(after.updated_at) || 0 : 0;
+          // 我写成功的判据是「版本号已经变成我这次要写的值」。
+          if (currentVersion !== Number(at)) return { conflict: true, currentUpdatedAt: currentVersion };
+        }
       } else {
         try {
           await db.from(TABLE_SAVES).insert([row], { defaultToNull: false }).throwOnError();
         } catch (error) {
           const again = await selectOne(TABLE_SAVES, "user_id", uid);
+          // 插入撞主键 = 别人抢先建了这行 → 交给冲突重试逻辑，别在这里覆盖。
           if (!again) throw error;
+          if (expectUpdatedAt !== null) return { conflict: true, currentUpdatedAt: Number(again.updated_at) || 0 };
           await db.from(TABLE_SAVES).update(row).eq("user_id", uid).throwOnError();
         }
       }
@@ -849,6 +952,29 @@ export function createCloudbasePlayerStore(db, { now = () => Date.now() } = {}) 
         settled_at: settledAt
       }).eq("id", id).throwOnError();
       return { ...row, counted_minutes: countedMinutes, reward, natural, settled_at: settledAt, alreadySettled: false };
+    },
+
+    // ===== 专注会话持久层（跨实例 / 跨重启结算用）=====
+    // 会话本来就落在 focus_records 里（start 时写的未结算行），所以这里不需要新表。
+    async findFocusSession(id) {
+      return selectOne(TABLE_FOCUS_RECORDS, "id", id);
+    },
+
+    // 🔴 抢占会话：把 settled_at 从 0 改成非 0，条件写在 WHERE 里。
+    //    云开发 RDB 的 update 不回传影响行数（实测拿不到 count），所以抢完必须回读确认 ——
+    //    「update 不报错」和「真的改到了」是两件事。
+    //    返回 false = 这行不存在，或已经被别的实例/请求抢走了（防重放的关键一步）。
+    async claimFocusSession(id) {
+      const row = await selectOne(TABLE_FOCUS_RECORDS, "id", id);
+      if (!row) return false;
+      if (Number(row.settled_at) > 0) return false;
+      // 哨兵值用当前时间：非 0 即"已认领"。随后 settleFocusRecord 会写真正的 settled_at。
+      const claimedAt = now();
+      await db.from(TABLE_FOCUS_RECORDS).update({ settled_at: claimedAt })
+        .eq("id", id).eq("settled_at", 0).throwOnError();
+      const after = await selectOne(TABLE_FOCUS_RECORDS, "id", id);
+      // 成功判据是「我写进去的那个值现在就在库里」—— 被抢走的话它是别人的值。
+      return Boolean(after && Number(after.settled_at) === claimedAt);
     },
 
     async stats(uid) {

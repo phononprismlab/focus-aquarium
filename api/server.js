@@ -219,6 +219,74 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+// ===== readiness 探针 =====
+// /api/health 回答的是「这个进程还活着吗」，永远立刻 200，绝不碰数据层 ——
+// 那是给容器编排判断「实例要不要重启」用的，被数据层拖住就会被误判成部署失败。
+// 这一条回答的是另一个问题：**现在能不能接客**。所以它是唯一会真的打一次数据库的探针：
+// 数据层初始化成功 + 真能查到库 → 200；否则 503（网关据此不把流量打过来）。
+// ⚠️ 探针自己必须有超时：DB 卡住时不能让请求永远挂着，超时按「没准备好」处理。
+const READY_PROBE_TIMEOUT_MS = 3000;
+// 给任意 Promise 套一个超时。超时后原 Promise 仍然在跑（不打断），只是探针不等它了。
+function withTimeout(promise, ms, message) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${message}（超过 ${ms}ms）`)), ms);
+    Promise.resolve(promise).then(resolve, reject).finally(() => clearTimeout(timer));
+  });
+}
+app.get("/api/ready", async (req, res) => {
+  const checks = { repository: repositoryStatus, playerStore: playerStoreStatus, database: { ok: false } };
+  if (repositoryStatus !== "failed" && playerStoreStatus !== "failed") {
+    try {
+      const store = await withTimeout(getPlayerStore(), READY_PROBE_TIMEOUT_MS, "数据层初始化未完成");
+      checks.database = await withTimeout(store.ping(), READY_PROBE_TIMEOUT_MS, "数据库探测超时");
+    } catch (error) {
+      checks.database = { ok: false, error: String((error && error.message) || error) };
+    }
+  } else {
+    checks.database = { ok: false, error: "数据层初始化失败，见启动日志" };
+  }
+  const ready = checks.repository === "ok" && checks.playerStore === "ok" && checks.database.ok === true;
+  res.status(ready ? 200 : 503).json({ ready, ...checks });
+});
+
+// ===== 网关诊断探针（临时，验证完删）=====
+// 目的：搞清云托管网关到底把哪些请求头传给了容器，以及请求是否真被路由到不同实例。
+// 为什么必须实测：官方文档只写了端口/规格/副本数/扩缩容条件，**没有**任何关于
+// X-Forwarded-For / X-Real-IP 透传规则的说明（docs.cloudbase.net 的「服务设置」与
+// 腾讯云 1243/77197 都只有端口与实例配置），所以只能让容器自己把看到的东西吐出来。
+//
+// 关键点：注册时**不设 trust proxy**，否则 req.ip 已经被 Express 改写，看不到原始头。
+// 两道门禁固定住它：① 非 production 才注册 ② 还要显式设 FISHTANK_DIAG=1。
+// 也就是说生产环境永远不注册 —— 不需要记得删也能保证线上没有这个口子。
+const INSTANCE_ID = `${os.hostname()}-${process.pid}`;
+const BOOT_AT = Date.now();
+if (process.env.NODE_ENV !== "production" && process.env.FISHTANK_DIAG === "1") {
+  app.get("/api/debug/req", (req, res) => {
+    // 把所有可能与「客户端来源」有关的头一次性列出来，别让下次还要为漏了某个头再部署一次。
+    const related = {};
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (/^(x-|forward|real|client|via|x-real|x-forward)/.test(key)) related[key] = value;
+    }
+    res.json({
+      // 这两个是 Express / Node 层对「谁在跟我说话」的看法。
+      // remoteAddress = 直连本进程的那一跳（网关）；真实客户端 IP 若拿得到，只能在 xff 里。
+      ip: req.ip,
+      socketRemoteAddress: (req.socket && req.socket.remoteAddress) || "",
+      // 三大候选头，逐个原样回显。
+      xff: req.headers["x-forwarded-for"] || "",
+      xRealIp: req.headers["x-real-ip"] || "",
+      forwarded: req.headers["forwarded"] || "",
+      related,
+      // trust proxy 没设 → 这里应该是 false。若显示别的值说明有人动过。
+      trustProxy: app.get("trust proxy"),
+      // 实例标识：连打多次若这个值在变，就说明请求被路由到了不同实例（= 多实例确实在发生）。
+      instanceId: INSTANCE_ID,
+      bootAt: BOOT_AT,
+      uptimeMs: Math.round(process.uptime() * 1000)
+    });
+  });
+}
+
 // CloudBase authentication diagnostic — only available in non-production.
 if (process.env.NODE_ENV !== "production") {
   app.get("/api/debug/cloudbase-auth", async (req, res) => {
@@ -521,9 +589,24 @@ app.post("/api/account/sync/redeem", async (req, res) => {
 
 // ===== 专注会话与奖励结算 =====
 // 服务端记录开始时间，结算时用自己记录的时间推算实际专注时长，
-// 客户端无法凭空声明时长。会话存在内存里，进程重启即失效 —— 这是可接受的：
-// 结算失败时客户端会回落到本地计算，保证离线也能玩。
-const focusSessions = createFocusSessionStore();
+// 客户端无法凭空声明时长。
+//
+// 🔴 会话必须持久化：云托管是按流量自动扩缩容的，start 与 complete 之间隔着 20+ 分钟，
+//    这段时间里请求完全可能落到不同实例上；进程重启（发版 / 缩容 / 冷启动）也会清空内存。
+//    两种情况的表现都是 complete 查不到会话 → 404「专注会话不存在或已过期」→ 玩家白专注。
+//    所以把 focus_records 当会话库用（start 时本来就已经写了那一行），
+//    内存 Map 只作为「数据库暂时不可用」时的兜底。
+const focusSessions = createFocusSessionStore({
+  persistence: {
+    findSession: async id => (await getPlayerStore()).findFocusSession(id),
+    consumeSession: async id => (await getPlayerStore()).claimFocusSession(id),
+    settleSession: async (id, patch) => (await getPlayerStore()).settleFocusRecord(id, patch)
+  },
+  onPersistError: (stage, error) => {
+    // 持久层出错不能让专注失败 —— 回退内存路径照常发奖，只是并发保护弱一些。
+    console.warn(`专注会话${stage}读写失败（已回退内存路径，不影响专注）：${error && error.message ? error.message : error}`);
+  }
+});
 
 async function getPublishedFocusConfig() {
   const published = await (await getRepository()).list("focus", true);
@@ -565,9 +648,12 @@ app.post("/api/game/focus/start", async (req, res) => {
     // ⚠️ 只取 plannedMinutes；isMember 由服务端自己查（见上面的 resolveServerMembership）。
     const auth = readRequestUid(req);
     const isMember = await resolveServerMembership(auth);
+    // uid 一并记进会话：结算时要校验发起人，否则拿到 sessionId 的人可以替别人结算。
+    // 未登录也能专注（设计意图），那种会话 uid 为空串，结算时不校验归属。
     const session = focusSessions.start({
       plannedMinutes: (req.body || {}).plannedMinutes,
-      isMember
+      isMember,
+      uid: auth.error ? null : auth.uid
     });
 
     // 会话同时在 focus_records 里落一行（未结算）。
@@ -603,28 +689,25 @@ app.post("/api/game/focus/complete", async (req, res) => {
     if (!sessionId || typeof sessionId !== "string") return res.status(400).json({ error: "缺少 sessionId" });
     const focusConfig = await getPublishedFocusConfig();
     if (!focusConfig) return res.status(503).json({ error: "专注配置不可用" });
-    const settlement = focusSessions.settle(sessionId, focusConfig);
-    if (!settlement) return res.status(404).json({ error: "专注会话不存在或已过期" });
-
-    // 结算结果写回 focus_records，供后台统计与 /api/game/me 的累计时长使用。
-    // ⚠️ 这里**不写存档泡泡**：V1.0 泡泡是客户端权威（见 player-store.js 的说明），
-    //    前端自己落地奖励并随后 push 存档；两边都加会变成双倍奖励。
     const auth = readRequestUid(req);
+    // 会话归属校验在 settle 内部做（库里有 user_id）。未登录请求传 uid=null，
+    // 对未登录会话不校验；若会话本身绑了账号而请求者不是他，settle 会返回归属错误。
+    const settlement = await focusSessions.settle(sessionId, focusConfig, {
+      uid: auth.error ? null : auth.uid
+    });
+    if (!settlement) return res.status(404).json({ error: "专注会话不存在或已过期" });
+    if (settlement.error) return res.status(403).json({ error: settlement.error, code: settlement.code });
+
+    // ⚠️ 结算结果**不再在这里写库** —— settle 内部已经通过 persistence.settleSession
+    //    把 counted_minutes / reward / natural 落到 focus_records 了（而且那一步用的是
+    //    抢到会话的那次 CAS，重复写会把"已结算"的标记又冲一遍）。
+    // ⚠️ 这里也**不写存档泡泡**：V1.0 泡泡是客户端权威（见 player-store.js 的说明），
+    //    前端自己落地奖励并随后 push 存档；两边都加会变成双倍奖励。
     if (!auth.error) {
-      try {
-        const settled = await (await getPlayerStore()).settleFocusRecord(sessionId, {
-          countedMinutes: settlement.countedMinutes,
-          reward: settlement.reward,
-          natural: settlement.naturalCompletion
-        });
-        // 防重放：同一会话重复结算不重复埋点（alreadySettled = 这次没真正落账）。
-        if (settled && settled.alreadySettled === false) {
-          (await getPlayerStore()).addTrackingEvent({ userId: auth.uid, event: "focus_complete", at: Date.now() })
-            .catch(error => console.warn(`埋点 focus_complete 写入失败：${error.message}`));
-        }
-      } catch (error) {
-        console.warn(`专注结算落库失败（不影响奖励发放）：${error.message}`);
-      }
+      // 埋点：完成专注。fire-and-forget —— settle 只在真正抢到会话时才会走到这里，
+      // 所以不需要再判重复；失败只记日志，绝不影响已下发的奖励。
+      (await getPlayerStore()).addTrackingEvent({ userId: auth.uid, event: "focus_complete", at: Date.now() })
+        .catch(error => console.warn(`埋点 focus_complete 写入失败：${error.message}`));
     }
 
     res.json({ data: settlement });
@@ -688,26 +771,89 @@ app.get("/api/game/save", async (req, res) => {
 });
 
 // 推存档。字段分权在 mergeSaveForWrite 里，这里只负责取服务端现值再交给它合并。
+// ===== 存档写入的并发保护（乐观锁 + 服务端内部重试）=====
+// 三条写路径（推存档 / 单件购买 / 批量结算）都是同一个形状：
+//     读存档(getSave) → 纯函数算新存档(plan*) → 写回(putSave)
+// 这中间隔着两三次网络往返。同一用户并发两个请求（连点保存、双设备）会各自读到同一份旧存档、
+// 各算各的、后写的把先写的整包覆盖 —— 表现是「买了两次只到手一件」「鱼缸布置莫名其妙回退」。
+//
+// 修法：读的时候把 updated_at 一起带出来当版本号，写回时当作前置条件（见 putSave 的
+// expectUpdatedAt）。写不进去就说明别人先改了 —— 这时候**不能**把冲突抛给前端：
+//   ① 前端把 409 当成「云端还没有存档」并静默回落本地（index.html 里就是这么判的），
+//      抛出去等于让玩家以为保存成功；
+//   ② 冲突本来就是服务端自己的并发问题，重试一次就能收敛。
+// 所以这里做「重读 → 重算 → 重写」的有限次重试，对前端完全透明。
+const SAVE_WRITE_MAX_ATTEMPTS = 3;
+
+// 执行一次「读-算-写」，冲突时自动重试。
+// plan 是纯函数（mergeSaveForWrite / planPurchase / planSettlement 都是），
+// 所以重试时重新算一遍是安全的 —— 不会出现「算了一半的状态」被复用。
+//
+// 返回 { row, stored, plan } —— 没有 stored 时（首次同步 / 云端还没存档）返回 { row: null, stored: null }。
+async function writeSaveWithRetry(store, uid, { plan, onMissing = null, clientTs = null } = {}) {
+  for (let attempt = 1; attempt <= SAVE_WRITE_MAX_ATTEMPTS; attempt++) {
+    const stored = await store.getSave(uid);
+    if (!stored || !stored.data) {
+      // 没有可算的基线 —— 交给调用方决定是「首次写入」还是「报 409 让前端先同步」。
+      if (onMissing) return onMissing(stored);
+      return { row: null, stored: null, plan: null };
+    }
+    const planned = plan(stored.data);
+    // plan 自己判定失败（余额不足、配置问题…）→ 原样交回调用方处理，不重试。
+    if (planned && planned.error) return { row: null, stored, plan: planned, failed: true };
+
+    const row = await store.putSave(uid, planned.save, {
+      saveVersion: planned.save && planned.save.saveVersion,
+      clientTs: clientTs === null ? Date.now() : clientTs,
+      expectUpdatedAt: Number(stored.updated_at) || 0
+    });
+    if (row && row.conflict) {
+      // 别人在这两次往返之间写过 —— 重来一遍（重新读最新的，重新算）。
+      if (attempt < SAVE_WRITE_MAX_ATTEMPTS) continue;
+      return { row: null, stored, plan: planned, exhausted: true };
+    }
+    return { row, stored, plan: planned };
+  }
+  return { row: null, stored: null, plan: null, exhausted: true };
+}
+
 app.put("/api/game/save", async (req, res) => {
   const identity = await requireIdentity(req, res);
   if (!identity) return;
   try {
-    const stored = await identity.store.getSave(identity.uid);
-    const merged = mergeSaveForWrite(stored ? stored.data : null, req.body, {
-      saveVersion: String((req.body && req.body.saveVersion) || "")
-    });
     const clientTs = Number(req.body && req.body.clientTs);
-    const row = await identity.store.putSave(identity.uid, merged.save, {
-      saveVersion: merged.save.saveVersion,
-      clientTs: Number.isFinite(clientTs) ? clientTs : Date.now()
+    // 推存档有个特殊之处：**首次同步**（云端还没存档）也要允许写入，
+    // 所以 plan 里要能拿到「stored 为 null」这个信息（mergeSaveForWrite 认 null = 首推）。
+    const result = await writeSaveWithRetry(identity.store, identity.uid, {
+      clientTs: Number.isFinite(clientTs) ? clientTs : Date.now(),
+      plan: stored => mergeSaveForWrite(stored, req.body, {
+        saveVersion: String((req.body && req.body.saveVersion) || "")
+      }),
+      onMissing: async () => {
+        const merged = mergeSaveForWrite(null, req.body, {
+          saveVersion: String((req.body && req.body.saveVersion) || "")
+        });
+        const row = await identity.store.putSave(identity.uid, merged.save, {
+          saveVersion: merged.save.saveVersion,
+          clientTs: Number.isFinite(clientTs) ? clientTs : Date.now(),
+          expectUpdatedAt: 0 // 只允许「确实还不存在」时插入
+        });
+        return { row: row && row.conflict ? null : row, stored: null, plan: merged, exhausted: Boolean(row && row.conflict) };
+      }
     });
+
+    if (!result.row) {
+      // 重试用尽仍冲突：这条路径理论上极罕见（同一用户 3 次都被抢），
+      // 但也不能默默丢弃 —— 告诉玩家「稍后再试」，别让他以为存上了。
+      return res.status(503).json({ error: "存档正在被另一个设备修改，请稍后再试一次" });
+    }
     res.json({
       data: {
-        save: row.data,
-        updatedAt: row.updated_at,
+        save: result.row.data,
+        updatedAt: result.row.updated_at,
         // 服务端丢弃/修正了什么。不展示给玩家，只用于对账与排查。
-        adjustments: merged.problems,
-        firstPush: merged.firstPush
+        adjustments: result.plan.problems,
+        firstPush: result.plan.firstPush
       }
     });
   } catch (error) { sendError(res, error); }
@@ -732,24 +878,32 @@ app.post("/api/game/shop/buy", async (req, res) => {
       return res.status(403).json({ error: `「${item.name || itemId}」需要会员，当前版本暂未开放` });
     }
 
-    const stored = await identity.store.getSave(identity.uid);
-    if (!stored || !stored.data) {
+    const category = String(item.category || "");
+    // 🔴 并发保护：读→算→写之间可能被别人插入（同一用户连点两次购买）。
+    //    重试时会把**最新**的存档重新读出来重算，所以第二次点会正确地再扣一次钱、
+    //    再 +1 件，而不是把第一次的结果覆盖掉。
+    const result = await writeSaveWithRetry(identity.store, identity.uid, {
+      plan: save => {
+        const ownedCount = Number((((save.PlayerData || {}).inventory || {})[category] || {})[itemId] || 0);
+        return planPurchase({ save, item, ownedCount });
+      }
+    });
+    if (!result.row && !result.failed && !result.stored) {
+      // 没有云存档（前端要先同步一次）。这个 409 是**前端契约**的一部分，不能改码。
       return res.status(409).json({ error: "还没有云存档，请先让本地存档同步一次再购买" });
     }
-
-    const category = String(item.category || "");
-    const ownedCount = Number((((stored.data.PlayerData || {}).inventory || {})[category] || {})[itemId] || 0);
-    const plan = planPurchase({ save: stored.data, item, ownedCount });
-    if (plan.error) {
-      // 402 = 「泡泡不够」，前端据此把提示做成「还差 N」而不是通用错误。
-      const status = plan.code === "INSUFFICIENT" ? 402 : 400;
-      return res.status(status).json({ error: plan.error, code: plan.code, short: plan.short || 0 });
+    if (!result.row) {
+      if (result.failed) {
+        const plan = result.plan;
+        // 402 = 「泡泡不够」，前端据此把提示做成「还差 N」而不是通用错误。
+        const status = plan.code === "INSUFFICIENT" ? 402 : 400;
+        return res.status(status).json({ error: plan.error, code: plan.code, short: plan.short || 0 });
+      }
+      // 罕见：重试用尽仍被并发抢走。
+      return res.status(503).json({ error: "正在被另一个设备修改，请稍后再试一次" });
     }
-
-    const row = await identity.store.putSave(identity.uid, plan.save, {
-      saveVersion: plan.save.saveVersion,
-      clientTs: Date.now()
-    });
+    const plan = result.plan;
+    const row = result.row;
     // 埋点：购买成功（单件直购路径）。免费商品也算一次取得，paid 记在 detail 里。
     identity.store.addTrackingEvent({ userId: identity.uid, event: "purchase", detail: JSON.stringify({ itemId, paid: plan.paid }), at: Date.now() })
       .catch(error => console.warn(`埋点 purchase 写入失败：${error.message}`));
@@ -772,28 +926,34 @@ app.post("/api/game/shop/settle", async (req, res) => {
     const published = await (await getRepository()).list("decorations", true);
     const items = new Map(published.map(record => [record.id, record.publishedData || record.data]));
 
-    const stored = await identity.store.getSave(identity.uid);
-    if (!stored || !stored.data) {
+    // 🔴 并发保护：结算是「拿目标鱼缸和**上一次的鱼缸**算差额」，对基线极其敏感 ——
+    //    两条并发结算如果都基于同一份旧存档算，后者会把前者的结果整包覆盖（买的鱼没了）。
+    //    所以这里用乐观锁 + 重试：重试时会读最新的存档重新算差额。
+    const result = await writeSaveWithRetry(identity.store, identity.uid, {
+      plan: save => planSettlement({ save, target: req.body, items })
+    });
+    if (!result.row && !result.failed && !result.stored) {
+      // 没有云存档（前端要先同步一次）。这个 409 是**前端契约**的一部分，不能改码。
       return res.status(409).json({ error: "还没有云存档，请先让本地存档同步一次再保存鱼缸" });
     }
-
-    const plan = planSettlement({ save: stored.data, target: req.body, items });
-    if (plan.error) {
-      // 402 = 「泡泡不够」，前端据此显示「还差 N」；其余是配置/上限问题，按 400 处理。
-      const status = plan.code === "INSUFFICIENT" ? 402 : 400;
-      return res.status(status).json({
-        error: plan.error,
-        code: plan.code,
-        short: plan.short || 0,
-        paid: plan.paid || 0,
-        refund: plan.refund || 0
-      });
+    if (!result.row) {
+      if (result.failed) {
+        const plan = result.plan;
+        // 402 = 「泡泡不够」，前端据此显示「还差 N」；其余是配置/上限问题，按 400 处理。
+        const status = plan.code === "INSUFFICIENT" ? 402 : 400;
+        return res.status(status).json({
+          error: plan.error,
+          code: plan.code,
+          short: plan.short || 0,
+          paid: plan.paid || 0,
+          refund: plan.refund || 0
+        });
+      }
+      // 罕见：重试用尽仍被并发抢走。
+      return res.status(503).json({ error: "正在被另一个设备修改，请稍后再试一次" });
     }
-
-    const row = await identity.store.putSave(identity.uid, plan.save, {
-      saveVersion: plan.save.saveVersion,
-      clientTs: Date.now()
-    });
+    const plan = result.plan;
+    const row = result.row;
     // 埋点：购买成功（批量结算路径）。paid=0 的保存（只撤下/免费）不算购买。
     if (plan.paid > 0) {
       identity.store.addTrackingEvent({ userId: identity.uid, event: "purchase", detail: JSON.stringify({ paid: plan.paid, rows: (plan.rows || []).length }), at: Date.now() })

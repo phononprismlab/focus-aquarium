@@ -55,7 +55,8 @@ function withEnv(env, fn) {
 
 const { issueSessionToken, verifySessionToken, sessionSecretStatus, resetSessionSecretCache } =
   await import("../session-token.js");
-const { mergeSaveForWrite, planPurchase, planSettlement, MAX_BUBBLE_GAIN_PER_PUSH } =
+const { mergeSaveForWrite, planPurchase, planSettlement, MAX_BUBBLE_GAIN_PER_PUSH,
+  FIRST_PUSH_MAX_BUBBLES, FIRST_PUSH_MAX_FISH_PER_ITEM, FIRST_PUSH_MAX_SINGLE_SLOT } =
   await import("../player-store.js");
 
 // ===== 1. 令牌密钥的来源 =====
@@ -129,6 +130,28 @@ const baseSave = () => ({
   chk("首次推送：接受客户端的泡泡（本地才是他的真实进度）", first.save.PlayerData.bubbles, 100);
   chk("首次推送：接受客户端的库存", first.save.PlayerData.inventory.fish.fish001, 3);
   chk("首次推送标记 firstPush", first.firstPush, true);
+}
+// 🔴 T3-9 回归：首次同步以前是「来者不拒」—— 1e9 泡泡和任意大的库存都能一次写进来。
+// 现在按常识范围归一：泡泡封顶、鱼每种封顶 50、单选类封顶 1。
+{
+  const first = mergeSaveForWrite(null, {
+    PlayerData: { bubbles: 999999999, inventory: { fish: { fish001: 9999 }, decorations: { decoration001: 7 }, backgrounds: {}, sands: {}, sounds: {} } },
+    AquariumData: { fish: [] }
+  });
+  chk("首同步泡泡被封顶（不再是 1e9）", first.save.PlayerData.bubbles, FIRST_PUSH_MAX_BUBBLES);
+  chk("首同步每种鱼钳到 50", first.save.PlayerData.inventory.fish.fish001, FIRST_PUSH_MAX_FISH_PER_ITEM);
+  chk("首同步单选类钳到 1", first.save.PlayerData.inventory.decorations.decoration001, FIRST_PUSH_MAX_SINGLE_SLOT);
+  chkTrue("泡泡截断有记录", first.problems.some(p => p.includes("泡泡")), first.problems.join(" / "));
+  chkTrue("库存钳制有记录", first.problems.some(p => p.includes("库存")), first.problems.join(" / "));
+}
+{
+  // 正常范围内的首次同步不受影响 —— 别把离线玩家的真实进度也一起砍了。
+  const first = mergeSaveForWrite(null, {
+    PlayerData: { bubbles: 1200, inventory: { fish: { fish001: 3 }, decorations: {}, backgrounds: { background001: 1 }, sands: {}, sounds: {} } },
+    AquariumData: { fish: [] }
+  });
+  chk("首同步：范围内的泡泡原样保留", first.save.PlayerData.bubbles, 1200);
+  chk("首同步：范围内的库存原样保留", first.save.PlayerData.inventory.fish.fish001, 3);
 }
 {
   const stored = baseSave();
@@ -525,6 +548,15 @@ const fishEntries = (id, n) => Array.from({ length: n }, (_, i) => ({ itemId: id
   chkTrue("收据里有「返还」行", plan.rows.some(r => r.name.includes("返还")), JSON.stringify(plan.rows));
 }
 {
+  // 🔴 T1-4 回归：撤下量是按**鱼缸条数**算的，而缸内条数可能大于库存（首次同步可注入）。
+  // 直接按 sell 退钱会凭空造泡泡 —— 退款必须按「实际持有」封顶。
+  const save = saveWith({ fish: { fish001: 1 }, aqua: { fish: fishEntries("fish001", 3) } });
+  const plan = planSettlement({ save, target: { fish: [] }, items: ITEMS });
+  chk("缸内 3 条但只拥有 1 条 → 只退 1 条的钱", plan.refund, 30);
+  chk("库存归零（不变成负数）", plan.save.PlayerData.inventory.fish.fish001, 0);
+  chk("泡泡只 +30 不是 +90（不再凭空造泡泡）", plan.save.PlayerData.bubbles, 130);
+}
+{
   const plan = planSettlement({ save: saveWith(), target: { fish: [], background: "background001" }, items: ITEMS });
   chk("买下没拥有的背景 → 30", plan.paid, 30);
   chk("库存里有它了", plan.save.PlayerData.inventory.backgrounds.background001, 1);
@@ -625,6 +657,99 @@ const fishEntries = (id, n) => Array.from({ length: n }, (_, i) => ({ itemId: id
     });
     chk("余额不足 → 402", poor.status, 402);
     chk("错误码 INSUFFICIENT", poor.body.code, "INSUFFICIENT");
+  } finally { server.kill(); }
+}
+
+// ===== 12. HTTP：并发写保护（T2-5 回归）=====
+// 🔴 病灶：三条写路径原先都是「读 → 算 → 无条件写」。
+//    同一账号有两个设备（或连点两次）时，两次请求会读到同一份旧存档、
+//    各自算出结果、后者把前者整包覆盖 —— 玩家会丢泡泡、丢刚买的鱼，
+//    而且**服务端和客户端都不会报错**，只是数据悄悄少了一截。
+//
+// 修法：putSave 带 expectUpdatedAt（乐观锁），版本不符 → 服务端内部重试
+//      （重试时会重新读最新存档重新算，plan 都是纯函数所以安全）。
+//
+// 实测：两条并发 shop/buy 都真实生效（扣两次钱、库存 +2），而不是后者覆盖前者。
+console.log("\n--- 12. HTTP：并发写不丢更新（T2-5）---");
+{
+  const { server, base } = await startServer({}, takePort());
+  try {
+    const account = await newAccount(base);
+    // fish002 price=35 / maxInventory=50；给足泡泡，避免被余额不足提前拦掉。
+    const rich = saveWith({ bubbles: 500, fish: { fish001: 3 } });
+    await call(base, "PUT", "/api/game/save", { token: account.token, body: rich });
+
+    // —— 并发两连购：必须两笔都落地 ——
+    const [a, b] = await Promise.all([
+      call(base, "POST", "/api/game/shop/buy", { token: account.token, body: { itemId: "fish002" } }),
+      call(base, "POST", "/api/game/shop/buy", { token: account.token, body: { itemId: "fish002" } })
+    ]);
+    chk("两条并发购买都成功（没有一条被静默吞掉）", [a.status, b.status], [200, 200]);
+
+    const afterBuy = await call(base, "GET", "/api/game/save", { token: account.token });
+    chk("库存 +2（不是 +1）", afterBuy.body.data?.save?.PlayerData?.inventory?.fish?.fish002, 2);
+    chk("泡泡 -70（不是 -35）", afterBuy.body.data?.save?.PlayerData?.bubbles, 430);
+
+    // —— 版本冲突时服务端内部重试，对前端完全透明 ——
+    //    writeSaveWithRetry 会重新读库、重新算 plan；前端只会看到 200。
+    const [c, d, e] = await Promise.all([
+      call(base, "POST", "/api/game/shop/buy", { token: account.token, body: { itemId: "fish002" } }),
+      call(base, "POST", "/api/game/shop/buy", { token: account.token, body: { itemId: "fish002" } }),
+      call(base, "POST", "/api/game/shop/buy", { token: account.token, body: { itemId: "fish002" } })
+    ]);
+    chk("三条并发也不丢（全部 200）", [c.status, d.status, e.status], [200, 200, 200]);
+    const afterTriple = await call(base, "GET", "/api/game/save", { token: account.token });
+    chk("库存累加到 5", afterTriple.body.data?.save?.PlayerData?.inventory?.fish?.fish002, 5);
+    chk("泡泡按 5 笔累扣 = 500 - 175", afterTriple.body.data?.save?.PlayerData?.bubbles, 325);
+
+    // —— 乐观锁不能把「余额不足」这类业务失败也拿去重试 ——
+    //    plan 自己判定失败 → 立即返回 402，不消耗重试次数。
+    const poorSave = saveWith({ bubbles: 10, fish: { fish001: 3 } });
+    await call(base, "PUT", "/api/game/save", { token: account.token, body: poorSave });
+    const poor = await call(base, "POST", "/api/game/shop/buy", { token: account.token, body: { itemId: "fish002" } });
+    chk("余额不足照旧 402（不被当成冲突重试）", poor.status, 402);
+    chk("错误码 INSUFFICIENT", poor.body.code, "INSUFFICIENT");
+    chk("还差多少照旧算清", poor.body.short, 25);
+
+    // —— 并发结算也不许丢：目标鱼缸是同一个，最终态必须收敛 ——
+    const settleAccount = await newAccount(base);
+    await call(base, "PUT", "/api/game/save", { token: settleAccount.token, body: baseSave() });
+    const target = { fish: [...fishEntries("fish001", 1), ...fishEntries("fish002", 1)], decoration: "", background: "background001", sand: "", ambientSound: "" };
+    const [s1, s2] = await Promise.all([
+      call(base, "POST", "/api/game/shop/settle", { token: settleAccount.token, body: target }),
+      call(base, "POST", "/api/game/shop/settle", { token: settleAccount.token, body: target })
+    ]);
+    chkTrue("两条并发结算都没炸（200/503 之内）", [s1.status, s2.status].every(s => s === 200 || s === 503), JSON.stringify([s1.status, s2.status]));
+    const afterSettle = await call(base, "GET", "/api/game/save", { token: settleAccount.token });
+    chk("鱼缸最终收敛到目标态（不会剩下半套）", afterSettle.body.data?.save?.AquariumData?.fish?.length, 2);
+    chk("只买了一条 fish002（结算按差额算，不是按次数）", afterSettle.body.data?.save?.PlayerData?.inventory?.fish?.fish002, 1);
+    chk("泡泡只扣一次 35", afterSettle.body.data?.save?.PlayerData?.bubbles, 65);
+  } finally { server.kill(); }
+}
+
+console.log("\n--- 13. HTTP：没有云存档时的 409 契约（T2-5 加固后必须保留）---");
+{
+  // 🔴 index.html 把 409 当「云端没存档」→ 静默回落到本地。
+  //    加了乐观锁之后，这条语义最容易被顺手改掉 —— 一旦变成别的码，
+  //    前端会把「云端没存档」当成普通错误弹给玩家。必须锁住。
+  const { server, base } = await startServer({}, takePort());
+  try {
+    const account = await newAccount(base);
+
+    const buy = await call(base, "POST", "/api/game/shop/buy", { token: account.token, body: { itemId: "decoration001" } });
+    chk("没同步过就购买 → 409", buy.status, 409);
+    chkTrue("409 说清要先同步", (buy.body.error || "").includes("先"), buy.body.error);
+
+    const settle = await call(base, "POST", "/api/game/shop/settle", {
+      token: account.token,
+      body: { fish: [], decoration: "", background: "", sand: "", ambientSound: "" }
+    });
+    chk("没同步过就结算 → 409", settle.status, 409);
+
+    // 同步一次之后，同样的调用必须恢复正常 —— 证明 409 只跟「有没有存档」有关。
+    await call(base, "PUT", "/api/game/save", { token: account.token, body: baseSave() });
+    const retry = await call(base, "POST", "/api/game/shop/buy", { token: account.token, body: { itemId: "decoration001" } });
+    chk("同步之后再买 → 200", retry.status, 200);
   } finally { server.kill(); }
 }
 

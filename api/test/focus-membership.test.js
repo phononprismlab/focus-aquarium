@@ -90,9 +90,14 @@ console.log("\n--- 3. 静态锚：focus/start 不再把 body 直接交给会话 
   chkTrue("旧写法 focusSessions.start(req.body) 已不存在",
     !/focusSessions\.start\(\s*req\.body\s*\)/.test(serverSource));
   chkTrue("改为显式传 plannedMinutes + isMember",
-    /focusSessions\.start\(\{\s*plannedMinutes:[\s\S]{0,80}isMember\s*\}\)/.test(serverSource));
+    /focusSessions\.start\(\{\s*plannedMinutes:[\s\S]{0,200}isMember\s*[,}]/.test(serverSource));
   chkTrue("isMember 来自 resolveServerMembership(auth)",
-    /const isMember = await resolveServerMembership\(auth\);\s*\n\s*const session = focusSessions\.start\(/.test(serverSource));
+    /const isMember = await resolveServerMembership\(auth\);/.test(serverSource));
+  // 会话必须绑发起人：拿到 sessionId 的人不能替别人结算（跨实例后会话进了库，这个更要紧）。
+  chkTrue("start 时把 uid 一起记进会话",
+    /focusSessions\.start\(\{[\s\S]{0,300}uid:[\s\S]{0,80}\}/.test(serverSource));
+  chkTrue("结算时把请求者 uid 传给 settle 做归属校验",
+    /focusSessions\.settle\(sessionId, focusConfig, \{\s*uid:/.test(serverSource));
   // 反向：isMember 不能又从 body 里冒出来。
   chkTrue("源码里没有把 body.isMember 交给会话的地方",
     !/isMember:\s*(req\.body|body)\.isMember/.test(serverSource));

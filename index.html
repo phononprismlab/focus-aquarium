@@ -1613,9 +1613,18 @@ body:not(.dev-on) .dev-panel{display:none!important}
     // 也能让加载成功的部分正常生效，而不是整批作废。
     // 包一层 Promise.resolve()：fetch 万一同步抛错也能被接住，
     // 否则用户会看到浏览器原始的 "Failed to fetch" 而不是能看懂的中文提示。
-    const safeFetch = path => Promise.resolve()
-      .then(() => fetch(`${API_BASE}${path}`, { cache:"no-store" }))
-      .catch(() => null);
+    // 只 catch 失败是不够的：接口「挂住」（既不返回也不报错）时这个 Promise 永远 pending，
+    // Promise.all 就永远不 resolve —— 首屏一直转圈、商店点不开，而且没有任何提示。
+    // 所以再加一道超时：超时按失败处理，走下面的 .catch → null，降级提示照常生效。
+    const CONFIG_FETCH_TIMEOUT_MS = 8000;
+    const safeFetch = path => {
+      const controller = typeof AbortController === "function" ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), CONFIG_FETCH_TIMEOUT_MS) : null;
+      return Promise.resolve()
+        .then(() => fetch(`${API_BASE}${path}`, { cache:"no-store", signal: controller ? controller.signal : undefined }))
+        .catch(() => null)
+        .finally(() => { if (timer) clearTimeout(timer); });
+    };
     const [decorationsResponse, fishResponse, focusResponse, audioResponse, eventsResponse] = await Promise.all([
       safeFetch("/game/decorations"),
       safeFetch("/game/fish"),
@@ -2391,13 +2400,35 @@ body:not(.dev-on) .dev-panel{display:none!important}
   function fishReactsToFeed(fish){ return !(fish && fish.feedReaction === false); }
 
   // ===== 动画模块（F3）=====
-  // 后台上传的动画代码在玩家端逐帧执行。⚠️ 这是**稳定性**边界，不是安全沙箱：
-  // new Function 仍可能通过 this / constructor 链绕到全局。真正的安全依赖后台密钥保密。
-  // 这里能做的是：屏蔽常见全局名 + 严格模式 + 每次执行 try/catch + 出错只停用这一条鱼。
+  // 后台上传的动画代码在玩家端**逐帧同步执行**。这几层防护能做的是把逃逸面压到最小：
+  //   ① 常见全局名用同名参数遮蔽（写 window 拿到的是 undefined）
+  //   ② 编译前的源码黑名单：堵住「从函数内部重新摸到全局/新构造器」的通道
+  //   ③ 严格模式 + 每次执行 try/catch + 出错只停用这一条鱼
+  // ⚠️ 这不是真沙箱：代码仍在主线程、同一个 realm 里跑。真正的隔离（Worker / sandbox iframe）
+  //    只能异步通信，而动画是逐帧同步调用的 —— 那要把整个 rAF 动画循环搬进 Worker，
+  //    属于重写动画模块，成本远超这个模块本身。在那之前，后台密钥保密仍然是最关键的一环。
   const FISH_ANIM_SHADOWED = ["window","document","fetch","XMLHttpRequest","localStorage","sessionStorage","indexedDB","navigator","location","globalThis","self","top","parent","importScripts","Function"];
+  // 参数遮蔽挡不住属性访问：`(()=>{}).constructor` 照样能拿到 Function 构造器，
+  // `obj.__proto__.constructor` 能一路摸回全局。所以这些写法在编译前直接拒掉 ——
+  // 动画代码只需要算坐标，用不上其中任何一条。
+  const FISH_ANIM_FORBIDDEN = [
+    { pattern: /\bconstructor\b/, reason: "constructor（能绕出新的构造器）" },
+    { pattern: /__proto__|prototype/, reason: "原型链访问（能摸回全局对象）" },
+    { pattern: /\beval\b/, reason: "eval（间接 eval 在全局作用域执行）" },
+    { pattern: /\bimport\s*\(/, reason: "动态 import" },
+    { pattern: /\bimportScripts\b/, reason: "importScripts" },
+    { pattern: /\bnew\s+Function\b/, reason: "new Function（再造一个执行体）" }
+  ];
   function compileFishAnimation(code){
     const src = String(code || "").trim();
     if(!src) return null;
+    // 先剥掉注释再扫：注释里提到这些词不该让整段代码被拒。
+    const scan = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
+    const hit = FISH_ANIM_FORBIDDEN.find(rule => rule.pattern.test(scan));
+    if(hit){
+      console.warn(`鱼的动画代码含被禁写法（${hit.reason}），已回退内置行为`);
+      return null;
+    }
     try {
       const factory = new Function(...FISH_ANIM_SHADOWED, "fish", `"use strict";\n${src}`);
       return api => factory(...FISH_ANIM_SHADOWED.map(() => undefined), api);
@@ -3058,7 +3089,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
       const qtyText=`${unitPrice} ×${quantity}`;
       const memberMark=row.isMemberOnly?'<span class="v02-member-badge">★ 会员</span>':'';
       const displayPrice=Math.abs(Number(row.price)||0);
-      div.innerHTML=`<span>${memberMark}${row.name} ${qtyText}</span><span>${displayPrice} 🫧</span>`;
+      div.innerHTML=`<span>${memberMark}${escapeHtml(row.name)} ${qtyText}</span><span>${displayPrice} 🫧</span>`;
       rowsEl.appendChild(div);
     });
     document.getElementById("receiptTitle").textContent=title||"购买成功";
@@ -3161,13 +3192,13 @@ body:not(.dev-on) .dev-panel{display:none!important}
       let action="";
       if(item.category==="fish"){
         // 图标按钮（− / +）必须有可识别的名字：只有符号的话读屏软件只会念「减号」。
-        action=`<div class="v02-quantity"><button type="button" data-minus="${item.id}" aria-label="减少一条${item.name}" title="减少一条" ${previewCount<=0?'disabled':''}>−</button><span>${previewCount}</span><button type="button" data-plus="${item.id}" aria-label="增加一条${item.name}" title="增加一条" ${fishAtMax?'disabled':''}>+</button></div>`;
+        action=`<div class="v02-quantity"><button type="button" data-minus="${item.id}" aria-label="减少一条${escapeHtml(item.name)}" title="减少一条" ${previewCount<=0?'disabled':''}>−</button><span>${previewCount}</span><button type="button" data-plus="${item.id}" aria-label="增加一条${escapeHtml(item.name)}" title="增加一条" ${fishAtMax?'disabled':''}>+</button></div>`;
       }else{
         action=`<button type="button" class="v02-dress" data-preview-action="${item.id}" ${equipped?'disabled':''}>${equipped?'装扮中':'装扮'}</button>`;
       }
       d.innerHTML=preview+
-        `<div class="v02-item-name"><span class="v02-item-name-text">${item.name}</span>${item.isMemberOnly?'<span class="v02-member-badge">★ 会员</span>':''}</div>`+
-        `<div class="v02-item-meta"><span class="v02-description">${item.description||""}</span></div>`+
+        `<div class="v02-item-name"><span class="v02-item-name-text">${escapeHtml(item.name)}</span>${item.isMemberOnly?'<span class="v02-member-badge">★ 会员</span>':''}</div>`+
+        `<div class="v02-item-meta"><span class="v02-description">${escapeHtml(item.description||"")}</span></div>`+
         `<div class="v02-item-actions"><span class="v02-price">${item.price} 🫧</span><span class="v02-owned">已拥有 ${owned}</span>${action}</div>`+
         (fishAtMax?`<div class="v02-item-tip">已经养满啦，这个品种最多 ${item.maxInventory} 条。</div>`:"");
       grid.appendChild(d);
@@ -4169,14 +4200,10 @@ function resetFocus(completed) {
 
   let pellets = [];
 
-  fishStates.forEach(fish => {
-    fish.el.addEventListener("pointerdown", (e) => {
-      if (!running) return;
-      e.stopPropagation();
-      playFishStartleSound();
-      fish.burstSpeed = 6.0;
-    });
-  });
+  // 鱼的点击惊吓由 rebuildFishFromData 里的 el.onpointerdown 负责 —— 那个是属性赋值，
+  // 每次重建都会重新挂上，所以后来新买的鱼也能生效。
+  // 这里以前又用 addEventListener 绑了一遍（只覆盖初始化那批元素），
+  // 结果点一下鱼触发两次、惊吓音效播两遍 —— 已删除，只保留 rebuildFishFromData 那一处。
 
   tank.addEventListener("pointerdown", (e) => {
     if (!running) return; 

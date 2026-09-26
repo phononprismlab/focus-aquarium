@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const files = ["reward.test.js", "focus-session.test.js", "audio-categories.test.js", "shop-sound-items.test.js", "ambient-audio.test.js", "image-upload.test.js", "storage-pg.test.js", "cors.test.js", "health.test.js", "bind-failure.test.js", "runtime-guard.test.js", "admin-resolution.test.js",
+const files = ["reward.test.js", "focus-session.test.js", "audio-categories.test.js", "shop-sound-items.test.js", "ambient-audio.test.js", "image-upload.test.js", "storage-pg.test.js", "cors.test.js", "health.test.js", "ready.test.js", "bind-failure.test.js", "runtime-guard.test.js", "admin-resolution.test.js",
   "seed-migration.test.js",
   "fish-assembly.test.js",
   "fish-animation.test.js",
@@ -44,7 +44,9 @@ const files = ["reward.test.js", "focus-session.test.js", "audio-categories.test
   "player-tank-ui.test.js",
   "admin-pages-ux.test.js",
   "save-export.test.js",
-  "save-restore.test.js"];
+  "save-restore.test.js",
+  "concurrency-anchors.test.js",
+  "t25-e2e.test.js"];
 
 let failed = 0;
 for (const file of files) {
