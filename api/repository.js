@@ -134,10 +134,23 @@ const seed = {
       { id: "feed", name: "投喂饲料", category: "sfx", enabled: true, volume: 100, resourcePath: "" },
       { id: "fish-startle", name: "鱼儿受惊", category: "sfx", enabled: true, volume: 100, resourcePath: "" }
     ]
+  },
+  // 「关于」区块内容（设置抽屉里跳出来的用户协议 / 隐私政策 / 品牌故事 / 打赏 / 备案）。
+  // 做成后台可配置：玩家端拉 /api/game/about 的已发布版本渲染，后台改完点发布才生效。
+  // 单例配置（和 focus / audio 同构）：整段是一个对象，5 个固定 section。
+  //   title    弹窗标题（后台可改）
+  //   bodyHtml 正文（允许 HTML；后台自己填，风险自负）
+  //   imageUrl 仅 tip 用：打赏二维码图片地址，玩家端自动拼 <img>
+  about: {
+    terms:  { title: "用户协议", bodyHtml: "<p>用户协议内容待补充。上线前由 dominik 填写正式条款。</p>" },
+    privacy:{ title: "隐私政策", bodyHtml: "<p>隐私政策内容待补充。上线前由 dominik 填写（需说明账号信息、存档数据的收集与用途）。</p>" },
+    story:  { title: "品牌故事", bodyHtml: "<p>品牌故事内容待补充。</p><p>这是鱼儿乐水族馆的由来 —— 爸妈以前开过水族馆，店没了鱼也少了，想把那些鱼「留在网上」。</p>" },
+    tip:    { title: "打赏支持", bodyHtml: "<p>如果鱼儿乐水族馆让你感到放松，欢迎请我喝杯咖啡。</p>", imageUrl: "" },
+    filing: { title: "备案信息", bodyHtml: "<p>备案号：待补充（ICP 备案通过后填「沪ICP备XXXXXX号」及公安联网备案号）。</p>" }
   }
 };
 
-const singletonTypes = new Set(["focus", "audio"]);
+const singletonTypes = new Set(["focus", "audio", "about"]);
 const idForType = (type, data) => type === "fish" ? data.fishid : singletonTypes.has(type) ? type : data.id;
 
 function makeRecord(type, data, published = true) {

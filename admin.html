@@ -226,6 +226,7 @@
 				<button class="nav-item" data-module="fish"><span class="nav-icon">◉</span>水产装配</button>
 			<button class="nav-item" data-module="focus"><span class="nav-icon">◌</span>专注配置</button>
 			<button class="nav-item" data-module="audio"><span class="nav-icon">♪</span>音效管理</button>
+			<button class="nav-item" data-module="about"><span class="nav-icon">✎</span>关于内容</button>
 		<button class="nav-item" data-module="events"><span class="nav-icon">◇</span>事件设置</button>
 		<button class="nav-item" data-module="users"><span class="nav-icon">☷</span>玩家管理</button>
 			<button class="nav-item" data-module="payment"><span class="nav-icon">▣</span>付费配置 <span class="reserved">预留</span></button>
@@ -284,6 +285,7 @@
 			fish: (DEFAULT_DATA.fishAssembly || []).map(item => ({ ...item, published: true, dirty: false })),
 			focus: JSON.parse(JSON.stringify(DEFAULT_DATA.focusConfig || { minFocusDuration: 25, maxFocusDuration: 120, rewardTiers: [] })),
 			audio: JSON.parse(JSON.stringify(DEFAULT_AUDIO)),
+			about: null,
 			events: [],
 			users: [],
 			trackSummary: null
@@ -297,6 +299,10 @@
 		let audioPublished = true;
 		let audioDirty = false;
 		let audioPublishedData = null;
+		let aboutPublished = true;
+		let aboutDirty = false;
+		let aboutPublishedData = null;
+		let aboutGuardOn = false;
 		// 未保存离开拦截的开关：专注/音效页没有「返回列表」按钮，靠这个挡住误切页签。
 		let focusGuardOn = false;
 		let audioGuardOn = false;
@@ -444,12 +450,13 @@
 		}
 		async function loadAdminData() {
 			// 逐项接住失败：原来任何一项挂掉都会让整个后台打不开，也说不清是哪一项。
-			const [decorations, fish, focus, audio, events] = await Promise.allSettled([
+			const [decorations, fish, focus, audio, events, about] = await Promise.allSettled([
 				apiRequest("/admin/decorations"),
 				apiRequest("/admin/fish"),
 				apiRequest("/admin/focus"),
 				apiRequest("/admin/audio"),
-				apiRequest("/admin/events")
+				apiRequest("/admin/events"),
+				apiRequest("/admin/about")
 			]);
 			const failed = [];
 			const reasons = new Set();
@@ -476,6 +483,15 @@
 				}
 			} else {
 				showToast(`音效配置未能加载，已使用默认配置，其余功能不受影响`);
+			}
+			// 关于内容：单例配置。拉到就覆盖内置默认，拉不到就保留默认占位（renderAbout 内部也会兜底）。
+			const aboutData = about && about.status === "fulfilled" ? about.value : null;
+			if (aboutData && Array.isArray(aboutData.data) && aboutData.data[0] && aboutData.data[0].data) {
+				const aboutRecord = aboutData.data[0];
+				state.about = JSON.parse(JSON.stringify(aboutRecord.data));
+				aboutPublished = aboutRecord.published;
+				aboutDirty = !aboutPublished;
+				aboutPublishedData = aboutRecord.publishedData || null;
 			}
 			if (decorationsData) state.decorations = applyRecords(decorationsData.data || [], "decorations");
 			// 事件是后加的配置类型，老版本 API 没有它时不能把后台整个搞挂（与音效同样的处理）。
@@ -653,7 +669,7 @@
 		function renderModule() {
 			const renderers = {
 				decorations: renderDecorationList, fish: renderFishList, focus: renderFocus,
-				audio: renderAudio, events: renderEventList, users: renderUserList, payment: renderPlaceholder
+				audio: renderAudio, about: renderAbout, events: renderEventList, users: renderUserList, payment: renderPlaceholder
 			};
 			const renderer = renderers[state.module];
 			if (!renderer) return;
@@ -1236,6 +1252,75 @@
 			if (stripDiff) stripDiff.onclick = () => showDiffDialog(focusDraft(), "专注配置");
 			const stripPublish = document.getElementById("focusPublishNow");
 			if (stripPublish) stripPublish.onclick = runPublishFocus;
+		}
+		function aboutConfig() {
+			if (!state.about || typeof state.about !== "object") state.about = { terms: aboutSection(), privacy: aboutSection(), story: aboutSection(), tip: aboutSection(), filing: aboutSection() };
+			["terms", "privacy", "story", "tip", "filing"].forEach(k => { if (!state.about[k] || typeof state.about[k] !== "object") state.about[k] = aboutSection(); });
+			return state.about;
+		}
+		function aboutSection() { return { title: "", bodyHtml: "" }; }
+		const ABOUT_SECTIONS = [
+			{ key: "terms", label: "用户协议" },
+			{ key: "privacy", label: "隐私政策" },
+			{ key: "story", label: "品牌故事" },
+			{ key: "tip", label: "打赏支持", image: true },
+			{ key: "filing", label: "备案信息" }
+		];
+		function renderAbout() {
+			const about = aboutConfig();
+			setLeaveGuard(() => aboutGuardOn);
+			const publishButton = `<button class="button publish" id="publishAbout" ${aboutDirty ? "" : "disabled"}>${aboutDirty ? "待发布" : (aboutPublished ? "已发布" : "待发布")}</button>`;
+			const savedStrip = lastSaved && lastSaved.type === "about" && aboutDirty ? `<div class="saved-banner"><span class="grow"><b>已保存为草稿。</b>当前线上版本：${aboutPublishedData ? "发布中的旧版本" : "还没有发布过（全新配置）"}</span><button class="button secondary" id="aboutViewDiff">查看差异</button><button class="button publish" id="aboutPublishNow">发布</button></div>` : "";
+			const sections = ABOUT_SECTIONS.map(({ key, label, image }) => `
+				<div class="about-edit-section">
+					<h3 class="section-title">${label}</h3>
+					<div class="form-grid">
+						<div class="field"><label>${label}标题</label><input name="title_${key}" value="${esc(about[key].title || "")}"></div>
+						${image ? `<div class="field"><label>二维码图片地址（打赏用，可选）</label><input name="image_${key}" value="${esc(about[key].imageUrl || "")}" placeholder="https://.../qr.png"></div>` : ""}
+					</div>
+					<div class="field full"><label>${label}内容（支持 HTML）</label><textarea name="body_${key}" rows="5">${esc(about[key].bodyHtml || "")}</textarea></div>
+				</div>`).join("");
+			main.innerHTML = pageHeader("ABOUT CONTENT", "关于内容", "配置「设置 → 关于」里各条目的标题与内容。保存后形成草稿，发布后玩家端才会看到。", `${publishButton}<button class="button primary" id="saveAbout">保存配置</button>`) + savedStrip + `<section class="panel form-panel"><div class="form-body"><div class="form-error" id="formError" hidden></div>${sections}</div></section>`;
+			const markDirty = () => { aboutDirty = true; aboutPublished = false; aboutGuardOn = true; };
+			ABOUT_SECTIONS.forEach(({ key }) => {
+				document.querySelectorAll(`[name="title_${key}"], [name="body_${key}"], [name="image_${key}"]`).forEach(input => input.addEventListener("input", markDirty));
+			});
+			document.getElementById("saveAbout").onclick = async () => {
+				clearFormErrors(main);
+				const next = {};
+				ABOUT_SECTIONS.forEach(({ key }) => {
+					const entry = { title: document.querySelector(`[name="title_${key}"]`).value, bodyHtml: document.querySelector(`[name="body_${key}"]`).value };
+					const img = document.querySelector(`[name="image_${key}"]`);
+					if (img) entry.imageUrl = img.value.trim();
+					next[key] = entry;
+				});
+				try {
+					const response = await apiRequest("/admin/about/about", { method: "PUT", body: JSON.stringify(next) });
+					state.about = JSON.parse(JSON.stringify(response.data.data));
+					aboutPublished = response.data.published;
+					aboutDirty = !aboutPublished;
+					aboutPublishedData = response.data.publishedData || aboutPublishedData;
+					aboutGuardOn = false;
+					lastSaved = { type: "about", id: "about" };
+					showToast("已保存为草稿，等待发布");
+					renderAbout();
+				} catch (error) { showFormError(null, `保存失败：${error.message}`); }
+			};
+			const aboutDraft = () => ({ publishedData: aboutPublishedData, data: JSON.parse(JSON.stringify(aboutConfig())) });
+			const runPublish = async () => {
+				if (!await openPublishDialog(aboutDraft(), "关于内容")) return;
+				try {
+					const response = await apiRequest("/admin/about/about/publish", { method: "POST" });
+					if (response && response.data) aboutPublishedData = response.data.data || aboutPublishedData;
+					aboutDirty = false; aboutPublished = true; aboutGuardOn = false; lastSaved = null;
+					showToast("关于内容已发布", 2400, "success"); renderAbout();
+				} catch (error) { showFormError(null, `发布失败：${error.message}`); }
+			};
+			document.getElementById("publishAbout").onclick = runPublish;
+			const stripDiff = document.getElementById("aboutViewDiff");
+			if (stripDiff) stripDiff.onclick = () => showDiffDialog(aboutDraft(), "关于内容");
+			const stripPublish = document.getElementById("aboutPublishNow");
+			if (stripPublish) stripPublish.onclick = runPublish;
 		}
 		function tierTemplate(tier, index) { return `<div class="tier-row"><div class="field"><label>梯度编号</label><input value="${esc(tier.id)}"></div><div class="field"><label>结束时间（分钟）</label><input type="number" min="0" value="${tier.endMinute}"></div><div class="field"><label>普通用户泡泡 / 分钟</label><input type="number" min="0" value="${tier.normalBubblePerMinute}"></div><div class="field"><label>会员泡泡 / 分钟</label><input type="number" min="0" value="${tier.memberBubblePerMinute}"></div><button class="icon-button remove-tier" data-index="${index}" title="删除梯度">×</button></div>`; }
 		const audioCategoryLabel = key => state.audio?.categories?.[key]?.label || DEFAULT_AUDIO.categories[key]?.label || key;

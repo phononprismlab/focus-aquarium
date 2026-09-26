@@ -335,28 +335,30 @@
     margin-top: 10px; border: 0; border-radius: 50%;
     width: 54px; height: 54px; padding: 0;
     display: inline-flex; align-items: center; justify-content: center;
-    background: radial-gradient(circle at 32% 28%, rgba(255,255,255,.55) 0%, var(--screen-blue-500) 46%, var(--screen-blue-700) 100%);
-    color: #fff; font-size: 17px; line-height: 1; cursor: pointer;
-    box-shadow: 0 6px 16px rgba(10, 77, 184, .34), inset 0 1px 0 rgba(255,255,255,.55);
-    transition: transform .12s ease, box-shadow .2s ease;
+    /* 扁平化：透明底 + 重点色图标，去掉立体阴影/高光，跟周围页面一致 */
+    background: transparent;
+    color: var(--screen-blue-500);
+    font-size: 22px; line-height: 1; cursor: pointer;
+    box-shadow: none;
+    transition: transform .12s ease, background-color .15s ease;
     -webkit-tap-highlight-color: transparent;
   }
-  .start:hover, .end:hover { transform: scale(1.07); }
-  .start:active, .end:active { transform: scale(.94); }
-  /* 结束用更深的蓝（停止 = 收束），并加一圈内描边，和播放态一眼能分开。 */
+  .start:hover, .end:hover { background: rgba(10,132,255,0.08); transform: scale(1.05); }
+  .start:active, .end:active { background: rgba(10,132,255,0.16); transform: scale(0.96); }
   .end {
-    /* 未专注时必须藏起来：开始/结束是两个互斥的圆形泡泡按钮，同时露出来玩家会不知道点哪个。
+    /* 复用 .start 的扁平样式；未专注时必须藏起来（同时露出来玩家不知道点哪个）。
        专注中由 JS 写 inline display = inline-flex 打开（inline 优先级高于这条）。 */
     display: none;
-    background: radial-gradient(circle at 32% 28%, rgba(255,255,255,.45) 0%, var(--screen-blue-700) 46%, var(--screen-blue-900) 100%);
-    box-shadow: 0 6px 16px rgba(6, 41, 94, .40), inset 0 0 0 2px rgba(255,255,255,.35);
   }
-  .end-glyph { font-size: 13px; }
+  .start-glyph { font-size: 22px; }
+  /* 停止方块视觉密度大，单独略小一点保持与播放三角形的视觉重量平衡 */
+  .end-glyph { font-size: 18px; line-height: 0.9; }
   /* 专注进度行：只在专注中出现，说清「进行了多久 + 结束能拿多少泡泡」。 */
   .focus-progress {
     margin-bottom: 3px;
-    font-size: 11px; font-weight: 700; letter-spacing: .04em; line-height: 1.4;
-    color: var(--screen-blue-700);
+    font-size: 11px; font-weight: 600; letter-spacing: .04em; line-height: 1.4;
+    /* 顶栏 modeEl 已经写过「专注中」，这行只是补充进度/收益信息，不再用重点色 */
+    color: var(--text-on-water-dim);
     max-width: 92%;
     /* 这句话在计时器圆里放不下会折成两行。balance 让两行长度接近，
        否则会在「预计获得」中间断开，第二行只剩「得 25 泡泡」几个字。 */
@@ -372,6 +374,35 @@
   /* 旧青绿（#e1eeee / #5a8588）已统一换成规定的蓝：次级按钮用浅蓝底，主按钮用蓝 500。 */
   .continue { background: var(--screen-blue-50); color: var(--screen-blue-700); }
   .confirm { background: var(--screen-blue-500); color: white; }
+
+  /* ===== 「关于」区块（设置抽屉内）：合规入口 + 品牌/打赏导航 hub ===== */
+  .about-block { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--shell-border); }
+  .about-title { font-size: 12px; letter-spacing: .12em; color: var(--text-on-water-dim); margin-bottom: 8px; }
+  .about-list { display: flex; flex-direction: column; gap: 2px; }
+  .about-row {
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%; padding: 12px 6px; border: 0; border-radius: 10px;
+    background: transparent; color: var(--text-on-water);
+    font: 600 14px/1.4 var(--font-ui); text-align: left; cursor: pointer;
+    transition: background-color .15s ease;
+  }
+  .about-row:hover { background: rgba(10,132,255,0.10); }
+  .about-row:active { background: rgba(10,132,255,0.18); }
+  .about-row .chev { color: var(--text-on-water-dim); font-size: 13px; }
+  .about-note { font-size: 11px; color: var(--text-on-water-dim); margin-top: 10px; line-height: 1.6; }
+
+  /* ===== 通用信息弹窗（「关于」各条目共用）===== */
+  .info-card { text-align: left; max-width: min(460px, calc(100vw - 40px)); max-height: 82vh; overflow-y: auto; position: relative; }
+  .info-close { position: absolute; top: 12px; right: 14px; width: 30px; height: 30px; border: 0; border-radius: 50%; background: rgba(10,132,255,0.10); color: var(--text-on-water); font-size: 20px; line-height: 1; cursor: pointer; }
+  .info-close:hover { background: rgba(10,132,255,0.20); }
+  .info-title { font-size: 18px; font-weight: 800; margin-bottom: 12px; padding-right: 30px; }
+  .info-body { font-size: 14px; line-height: 1.75; color: #34484b; }
+  .info-body p { margin: 0 0 10px; }
+  .info-body h4 { margin: 16px 0 6px; font-size: 14px; }
+  .info-body img { display: block; max-width: 100%; margin: 14px auto; border-radius: 14px; }
+  .info-body .qr-hint { text-align: center; font-size: 12px; color: var(--paper-ink-dim); margin-top: -4px; }
+  .info-actions { margin-top: 18px; text-align: right; }
+  .info-ok { background: var(--screen-blue-500); color: #fff; border: 0; border-radius: 11px; padding: 10px 22px; font: 700 14px inherit; cursor: pointer; }
 
   .completion-flash {
     position:absolute; left:50%; top:53%; z-index:1100;
@@ -1047,7 +1078,8 @@ body:not(.dev-on) .dev-panel{display:none!important}
 .v02-receipt-close{
   width:100%;
   height:40px;
-  margin:16px auto 0;
+  /* 按钮下方加 20px，避免紧贴 barcode 上方那条 dashed 分隔线导致视觉锯齿 */
+  margin:16px auto 20px;
   border:0;
   border-radius:10px;
   padding:0 22px;
@@ -1077,7 +1109,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
 .v02-event-impact[hidden]{display:none;}
 .v02-event-impact span{font-size:11px;font-weight:700;letter-spacing:.04em;padding:4px 10px;border-radius:999px;background:rgba(10,132,255,.12);color:var(--screen-blue-700);font-variant-numeric:tabular-nums;}
 .v02-event-impact span.loss{background:rgba(216,92,92,.14);color:#a4453f;}
-.v02-event-actions{display:flex;gap:10px;margin-top:18px;}
+.v02-event-actions{display:flex;gap:10px;margin:18px 0 20px;}
 .v02-event-actions button{flex:1;height:40px;border:0;border-radius:10px;padding:0 12px;color:#fff;cursor:pointer;font-family:inherit;font-weight:700;}
 .v02-event-actions button[hidden]{display:none;}
 .v02-event-close{background:var(--screen-blue-500);}
@@ -1386,6 +1418,17 @@ body:not(.dev-on) .dev-panel{display:none!important}
       <!-- 滑块按后台配置的音效分类动态生成，分类可增删，这里不再写死 -->
       <div id="audioSliders"></div>
     </div>
+      <div class="about-block">
+        <div class="about-title">关于</div>
+        <div class="about-list">
+          <button type="button" class="about-row" id="about-terms"><span>用户协议</span><span class="chev">›</span></button>
+          <button type="button" class="about-row" id="about-privacy"><span>隐私政策</span><span class="chev">›</span></button>
+          <button type="button" class="about-row" id="about-story"><span>品牌故事</span><span class="chev">›</span></button>
+          <button type="button" class="about-row" id="about-tip"><span>打赏支持</span><span class="chev">›</span></button>
+          <button type="button" class="about-row" id="about-filing"><span>备案信息</span><span class="chev">›</span></button>
+        </div>
+        <div class="about-note">鱼儿乐水族馆 · 把爸妈水族馆里那些鱼，留在网上。</div>
+      </div>
   </div>
     </div>
   </div>
@@ -1485,6 +1528,15 @@ body:not(.dev-on) .dev-panel{display:none!important}
       <button class="continue" id="continue">继续专注</button>
       <button class="confirm" id="confirm">确定结束</button>
     </div>
+  </div>
+</div>
+
+<div class="modal" id="infoModal" aria-hidden="true">
+  <div class="modal-card info-card">
+    <button type="button" class="info-close" id="infoClose" aria-label="关闭">×</button>
+    <div class="info-title" id="infoTitle"></div>
+    <div class="info-body" id="infoBody"></div>
+    <div class="info-actions"><button type="button" class="info-ok" id="infoOk">知道了</button></div>
   </div>
 </div>
 
@@ -4015,7 +4067,8 @@ function categoryScale(key){
     timeEl.textContent = `${String(Math.floor(remaining / 60)).padStart(2, "0")}:${String(remaining % 60).padStart(2, "0")}`;
   }
 
-  // 专注中那行状态（dominik 2026-09-25）：「专注中 · 已进行 18 分钟，完成后预计获得 25 泡泡」。
+  // 专注中那行状态：「已进行 18 分钟，完成后预计获得 25 泡泡」。
+  // 顶栏 modeEl 已经写过「专注中」，这里不重复。
   // 预计奖励按**计划时长**算 —— 这才是「做完能拿多少」；提前结束会按实际分钟重算。
   function updateFocusProgress() {
     if (!focusProgressEl) return;
@@ -4023,7 +4076,8 @@ function categoryScale(key){
     const elapsedMinutes = Math.max(0, Math.floor((Date.now() - startedAt) / 60000));
     const planned = focusRewardMinutes(minutes, PlayerData.isMember === true);
     focusProgressEl.hidden = false;
-    focusProgressEl.textContent = `专注中 · 已进行 ${elapsedMinutes} 分钟，完成后预计获得 ${planned} 泡泡`;
+    /* 第二行不再重复「专注中」（顶栏 modeEl 已显示），也不再用重点色 */
+    focusProgressEl.textContent = `已进行 ${elapsedMinutes} 分钟，完成后预计获得 ${planned} 泡泡`;
   }
 
   // 改时长的唯一入口：滚轮和 −/+ 按钮都走这里，边界只写一遍。
@@ -4130,6 +4184,68 @@ function categoryScale(key){
     modal.classList.remove("show"); 
     resetFocus(false);
   };
+
+  // ===== 关于区块：通用信息弹窗 =====
+  const infoModal = document.getElementById("infoModal");
+  function showInfo(title, bodyHTML) {
+    document.getElementById("infoTitle").textContent = title;
+    document.getElementById("infoBody").innerHTML = bodyHTML;
+    infoModal.classList.add("show");
+    infoModal.setAttribute("aria-hidden", "false");
+  }
+  function hideInfo() {
+    infoModal.classList.remove("show");
+    infoModal.setAttribute("aria-hidden", "true");
+  }
+  document.getElementById("infoClose").onclick = hideInfo;
+  document.getElementById("infoOk").onclick = hideInfo;
+  // 点背景关闭（点卡片内部不关）
+  infoModal.addEventListener("click", (e) => { if (e.target === infoModal) hideInfo(); });
+
+  // 关于内容改由后台可配置：玩家端拉 /api/game/about 的已发布版本渲染。
+  // 拉取失败或后台未配置时回退到内置占位，保证界面始终可用（与后台 seed 默认值一致）。
+  const ABOUT_FALLBACK = {
+    terms:  { title: "用户协议", bodyHtml: "<p>用户协议内容待补充。上线前由 dominik 填写正式条款。</p>" },
+    privacy:{ title: "隐私政策", bodyHtml: "<p>隐私政策内容待补充。上线前由 dominik 填写（需说明账号信息、存档数据的收集与用途）。</p>" },
+    story:  { title: "品牌故事", bodyHtml: "<p>品牌故事内容待补充。</p><p>这是鱼儿乐水族馆的由来 —— 爸妈以前开过水族馆，店没了鱼也少了，想把那些鱼「留在网上」。</p>" },
+    tip:    { title: "打赏支持", bodyHtml: "<p>如果鱼儿乐水族馆让你感到放松，欢迎请我喝杯咖啡。</p>", imageUrl: "" },
+    filing: { title: "备案信息", bodyHtml: "<p>备案号：待补充（ICP 备案通过后填「沪ICP备XXXXXX号」及公安联网备案号）。</p>" }
+  };
+  const ABOUT_MAP = { "about-terms": "terms", "about-privacy": "privacy", "about-story": "story", "about-tip": "tip", "about-filing": "filing" };
+  let aboutConfigData = ABOUT_FALLBACK;
+
+  // tip 段若配了二维码地址，自动拼一个 <img>。
+  function aboutBodyHtml(entry) {
+    if (!entry) return "";
+    let html = entry.bodyHtml || "";
+    if (entry.imageUrl) {
+      const safe = String(entry.imageUrl).replace(/"/g, "&quot;").replace(/</g, "&lt;");
+      html += `<p><img src="${safe}" alt="二维码" style="max-width:200px"></p>`;
+    }
+    return html;
+  }
+  function wireAbout() {
+    Object.keys(ABOUT_MAP).forEach((btnId) => {
+      const btn = document.getElementById(btnId);
+      if (!btn) return;
+      const key = ABOUT_MAP[btnId];
+      const entry = aboutConfigData[key] || ABOUT_FALLBACK[key] || {};
+      btn.onclick = () => showInfo(entry.title || key, aboutBodyHtml(entry));
+    });
+  }
+  async function loadAboutConfig() {
+    try {
+      const res = await fetch(`${API_BASE}/game/about`, { cache: "no-store" });
+      if (res.ok) {
+        const json = await res.json();
+        const list = (json && json.data) || [];
+        const rec = list.find(r => r && r.id === "about");
+        if (rec && rec.data && typeof rec.data === "object") aboutConfigData = rec.data;
+      }
+    } catch (e) { /* 离线 / 接口异常：保留内置占位 */ }
+    wireAbout();
+  }
+  loadAboutConfig();
 
 function resetFocus(completed) {
     // 在重置 remaining 之前计算实际已专注时间。

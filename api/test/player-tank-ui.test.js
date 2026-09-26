@@ -95,8 +95,10 @@ console.log("\n--- 2. 圆形开始/结束按钮 + 配色 ---");
     /<button class="end" id="end" type="button" aria-label="结束专注" title="结束专注"><span class="end-glyph" aria-hidden="true">■<\/span>/.test(source));
   chkTrue("JS 切显示用 inline-flex（inline-block 会让图标贴顶）",
     /endBtn\.style\.display = "inline-flex"/.test(source) && /startBtn\.style\.display = "inline-flex"/.test(source));
-  chkTrue("结束态用更深的蓝（播放/停止一眼能分开）",
-    /\.end\{[^}]*var\(--screen-blue-700\)/.test(compact));
+  // 扁平化（09-26）：开始/结束按钮共一套样式，结束态不再单独用更深的蓝
+  // —— 视觉重量靠 glyph 区分（▶ 三角形 vs ■ 方块），配色统一不抢戏。
+  chkTrue("结束态复用开始态样式（不再单独定义 background 渐变）",
+    /\.end\s*\{[^}]*display\s*:\s*none/.test(compact));
   // 🔴 未专注时「结束」必须藏着：两个圆形泡泡同时露出来玩家不知道点哪个。
   //    基线是 .end{display:none}，重写圆形按钮时丢过一次，靠这条锁住。
   chkTrue("未专注时结束按钮默认隐藏（.end 基础规则 display:none）", /\.end\{[^}]*display:none/.test(compact));
@@ -110,8 +112,9 @@ console.log("\n--- 3. 专注中状态行 ---");
   chkTrue("计时器里有 focusProgress 行", /<div class="focus-progress" id="focusProgress" hidden aria-live="polite"><\/div>/.test(source));
   chkTrue("元素引用接上了", /const focusProgressEl = document\.getElementById\("focusProgress"\)/.test(source));
   const fn = extractFunction(source, "updateFocusProgress");
-  chkTrue("文案就是「专注中 · 已进行 N 分钟，完成后预计获得 M 泡泡」",
-    /`专注中 · 已进行 \$\{elapsedMinutes\} 分钟，完成后预计获得 \$\{planned\} 泡泡`/.test(fn));
+  // 第二行只写进度和收益，「专注中」留给顶栏 modeEl，避免上下两行重复。
+  chkTrue("文案就是「已进行 N 分钟，完成后预计获得 M 泡泡」",
+    /`已进行 \$\{elapsedMinutes\} 分钟，完成后预计获得 \$\{planned\} 泡泡`/.test(fn));
   chkTrue("已进行分钟数按 startedAt 实时算", /Math\.floor\(\(Date\.now\(\) - startedAt\) \/ 60000\)/.test(fn));
   chkTrue("预计奖励走 focusRewardMinutes（和结算同一个口径）",
     /focusRewardMinutes\(minutes, PlayerData\.isMember === true\)/.test(fn));

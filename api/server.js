@@ -112,8 +112,8 @@ if (productionConfigError) {
   process.exit(1);
 }
 
-const types = new Set(["decorations", "fish", "focus", "audio", "events"]);
-const singletonTypes = new Set(["focus", "audio"]);
+const types = new Set(["decorations", "fish", "focus", "audio", "events", "about"]);
+const singletonTypes = new Set(["focus", "audio", "about"]);
 const idFor = (type, data) => type === "fish" ? data.fishid : singletonTypes.has(type) ? type : data.id;
 const validate = (type, data) => {
   if (!data || typeof data !== "object") return "请求体必须是对象";

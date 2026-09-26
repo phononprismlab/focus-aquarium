@@ -46,6 +46,7 @@ const files = ["reward.test.js", "focus-session.test.js", "audio-categories.test
   "save-export.test.js",
   "save-restore.test.js",
   "concurrency-anchors.test.js",
+  "about-config.test.js",
   "t25-e2e.test.js"];
 
 let failed = 0;
