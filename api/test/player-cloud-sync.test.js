@@ -138,7 +138,9 @@ chkTrue("推送路径是 /game/save", /\/game\/save/.test(extractFunction(player
 chkTrue("debounce 会清掉上一次的定时器",
   /clearTimeout\(cloudPushTimer\)/.test(extractFunction(playerCode, "scheduleCloudPush")));
 chkTrue("云同步没开时直接不推送（纯本地模式）",
-  /if\(!CLOUD_SYNC_ENABLED\)\s*return;/.test(extractFunction(playerCode, "scheduleCloudPush")));
+  /if\(!CLOUD_SYNC_ENABLED\|\|maintenanceOn\)\s*return;/.test(extractFunction(playerCode, "scheduleCloudPush")));
+// 停机时写接口必回 503，再排队就是纯刷失败日志 —— 这条短路必须一直在。
+chkTrue("停机期间不排推送", /\|\|maintenanceOn\)/.test(extractFunction(playerCode, "scheduleCloudPush")));
 chkTrue("请求头统一走 cloudHeaders()",
   /headers:cloudHeaders\(\)/.test(extractFunction(playerCode, "pushCloudSave")));
 
@@ -150,6 +152,7 @@ chkTrue("请求头统一走 cloudHeaders()",
       "let ACCOUNT_TOKEN = \"tok\";",
       "let CLOUD_SYNC_ENABLED = true;",
       "let cloudPushTimer = 0;",
+      "let maintenanceOn = false;",
       "let pushes = 0;",
       "const timers = [];",
       "const setTimeout = (fn, ms) => { timers.push({ fn, ms, cancelled: false }); return timers.length; };",
@@ -163,7 +166,7 @@ chkTrue("请求头统一走 cloudHeaders()",
       "let lastPushedAt = 0;",
       "function pushCloudSave(){ pushes++; return Promise.resolve(true); }",
       extractFunction(playerCode, "scheduleCloudPush"),
-      "return { scheduleCloudPush, timers, count: () => pushes, fire: () => timers.forEach(t => { if (!t.cancelled) t.fn(); }) };"
+      "return { scheduleCloudPush, timers, count: () => pushes, fire: () => timers.forEach(t => { if (!t.cancelled) t.fn(); }), setMaintenance: v => { maintenanceOn = v; } };"
     ].join("\n");
     return new Function(code)();
   })();
@@ -174,6 +177,14 @@ chkTrue("请求头统一走 cloudHeaders()",
   chk("前 2 个定时器被取消", box.timers.slice(0, 2).map(t => t.cancelled), [true, true]);
   box.fire();
   chk("触发后只推送 1 次", box.count(), 1);
+  // 停机中：一次定时器都不该登记（否则维护窗口里每次存档都会撞一次 503）。
+  box.setMaintenance(true);
+  const before = box.timers.length;
+  box.scheduleCloudPush();
+  chk("停机中不再登记定时器", box.timers.length, before);
+  box.setMaintenance(false);
+  box.scheduleCloudPush();
+  chk("恢复后又能排推送", box.timers.length, before + 1);
 }
 
 // ============================================================
@@ -297,6 +308,10 @@ chkTrue("结算提交目标鱼缸（TempAquariumData）", /JSON\.stringify\(Temp
 chkTrue("收据用服务端返回的 rows", /payload\.rows/.test(onServerSrc));
 chkTrue("409/401/503 判定为「暂时用不了」→ 返回 false 让调用方降级",
   /response\.status===409\|\|response\.status===401\|\|response\.status===503/.test(onServerSrc));
+// 停机回的也是 503，但它是「闸门」不是「暂时用不了」—— 必须先判维护再走降级，
+// 否则玩家会在维护窗口里一次次看到「无法保存」却不知道发生了什么。
+chkTrue("503 先过维护闸门，再当「暂时用不了」",
+  /handleMaintenanceResponse\(response,failure\)[\s\S]{0,120}response\.status===409/.test(onServerSrc));
 chkTrue("402 是泡泡不够（单独文案）", /response\.status===402/.test(onServerSrc));
 chkTrue("结算成功后重绘并关闭商店", /renderBubbles\(\)[\s\S]{0,80}closeShop\(true\)/.test(onServerSrc));
 {
@@ -316,8 +331,10 @@ function makeSettleBox(fetchImpl) {
     'const TempAquariumData = { fish: [{ itemId: "fish002" }] };',
     'const PlayerData = { bubbles: 40, inventory: {} };',
     'const AquariumData = { fish: [] };',
-    "let applied = 0, receipts = [], closed = 0, persisted = 0, marked = 0, audio = 0;",
+    "let applied = 0, receipts = [], closed = 0, persisted = 0, marked = 0, audio = 0, maintenanceHits = 0;",
     "function cloudHeaders(){ return { \"Content-Type\": \"application/json\" }; }",
+    // 维护闸门桩：真实实现会弹维护页，这里只记命中次数（行为由 ops-config / 前端测试覆盖）。
+    "function handleMaintenanceResponse(response, body){ if(response && response.status===503 && body && body.maintenance===true){ maintenanceHits++; return true; } return false; }",
     "function applyCloudSave(){ applied++; return true; }",
     "function persistLocalSave(){ persisted++; }",
     "function renderBubbles(){}",
@@ -330,7 +347,7 @@ function makeSettleBox(fetchImpl) {
     "let fetchImpl = globalThis.__settleFetchImpl;",
     "const fetch = (url, options) => fetchImpl(url, options);",
     extractFunction(playerCode, "saveAquariumOnServer"),
-    "return { saveAquariumOnServer, receipts, state: () => ({ applied, persisted, closed, marked, audio }), setFetch: fn => { fetchImpl = fn; } };"
+    "return { saveAquariumOnServer, receipts, state: () => ({ applied, persisted, closed, marked, audio, maintenanceHits }), setFetch: fn => { fetchImpl = fn; } };"
   ].join("\n");
   return new Function(code)();
 }
@@ -377,6 +394,17 @@ function makeSettleBox(fetchImpl) {
 {
   const box = makeSettleBox(async () => { throw new Error("offline"); });
   chk("网络异常 → 返回 false（降级到本地）", await box.saveAquariumOnServer(), false);
+}
+// 停机：503 + maintenance:true → 走维护闸门，且不出「无法保存」收据（那是误导）
+{
+  const box = makeSettleBox(async () => ({
+    ok: false,
+    status: 503,
+    json: async () => ({ error: "维护中", maintenance: true, eta: "10 分钟后" })
+  }));
+  chk("停机 503 → 返回 false（不做本地结算）", await box.saveAquariumOnServer(), false);
+  chk("停机 503 → 命中维护闸门一次", box.state().maintenanceHits, 1);
+  chk("停机 503 → 不出收据（不是泡泡不够）", box.receipts.length, 0);
 }
 
 // ============================================================

@@ -227,6 +227,7 @@
 			<button class="nav-item" data-module="focus"><span class="nav-icon">◌</span>专注配置</button>
 			<button class="nav-item" data-module="audio"><span class="nav-icon">♪</span>音效管理</button>
 			<button class="nav-item" data-module="about"><span class="nav-icon">✎</span>关于内容</button>
+			<button class="nav-item" data-module="ops"><span class="nav-icon">⚙</span>运营</button>
 		<button class="nav-item" data-module="events"><span class="nav-icon">◇</span>事件设置</button>
 		<button class="nav-item" data-module="users"><span class="nav-icon">☷</span>玩家管理</button>
 			<button class="nav-item" data-module="payment"><span class="nav-icon">▣</span>付费配置 <span class="reserved">预留</span></button>
@@ -286,6 +287,7 @@
 			focus: JSON.parse(JSON.stringify(DEFAULT_DATA.focusConfig || { minFocusDuration: 25, maxFocusDuration: 120, rewardTiers: [] })),
 			audio: JSON.parse(JSON.stringify(DEFAULT_AUDIO)),
 			about: null,
+			ops: null,
 			events: [],
 			users: [],
 			trackSummary: null
@@ -303,6 +305,10 @@
 		let aboutDirty = false;
 		let aboutPublishedData = null;
 		let aboutGuardOn = false;
+		let opsPublished = true;
+		let opsDirty = false;
+		let opsPublishedData = null;
+		let opsGuardOn = false;
 		// 未保存离开拦截的开关：专注/音效页没有「返回列表」按钮，靠这个挡住误切页签。
 		let focusGuardOn = false;
 		let audioGuardOn = false;
@@ -450,13 +456,14 @@
 		}
 		async function loadAdminData() {
 			// 逐项接住失败：原来任何一项挂掉都会让整个后台打不开，也说不清是哪一项。
-			const [decorations, fish, focus, audio, events, about] = await Promise.allSettled([
+			const [decorations, fish, focus, audio, events, about, ops] = await Promise.allSettled([
 				apiRequest("/admin/decorations"),
 				apiRequest("/admin/fish"),
 				apiRequest("/admin/focus"),
 				apiRequest("/admin/audio"),
 				apiRequest("/admin/events"),
-				apiRequest("/admin/about")
+				apiRequest("/admin/about"),
+				apiRequest("/admin/ops")
 			]);
 			const failed = [];
 			const reasons = new Set();
@@ -492,6 +499,15 @@
 				aboutPublished = aboutRecord.published;
 				aboutDirty = !aboutPublished;
 				aboutPublishedData = aboutRecord.publishedData || null;
+			}
+			// 运营配置（停机 + 通知）：单例。老版本 API 没有它时照常打开后台，用内置默认兜底。
+			const opsData = ops && ops.status === "fulfilled" ? ops.value : null;
+			if (opsData && Array.isArray(opsData.data) && opsData.data[0] && opsData.data[0].data) {
+				const opsRecord = opsData.data[0];
+				state.ops = JSON.parse(JSON.stringify(opsRecord.data));
+				opsPublished = opsRecord.published;
+				opsDirty = !opsPublished;
+				opsPublishedData = opsRecord.publishedData || null;
 			}
 			if (decorationsData) state.decorations = applyRecords(decorationsData.data || [], "decorations");
 			// 事件是后加的配置类型，老版本 API 没有它时不能把后台整个搞挂（与音效同样的处理）。
@@ -669,7 +685,7 @@
 		function renderModule() {
 			const renderers = {
 				decorations: renderDecorationList, fish: renderFishList, focus: renderFocus,
-				audio: renderAudio, about: renderAbout, events: renderEventList, users: renderUserList, payment: renderPlaceholder
+				audio: renderAudio, about: renderAbout, ops: renderOps, events: renderEventList, users: renderUserList, payment: renderPlaceholder
 			};
 			const renderer = renderers[state.module];
 			if (!renderer) return;
@@ -1320,6 +1336,132 @@
 			const stripDiff = document.getElementById("aboutViewDiff");
 			if (stripDiff) stripDiff.onclick = () => showDiffDialog(aboutDraft(), "关于内容");
 			const stripPublish = document.getElementById("aboutPublishNow");
+			if (stripPublish) stripPublish.onclick = runPublish;
+		}
+		function defaultOpsNotice() { return { id: "", level: "info", title: "", body: "", startAt: 0, endAt: 0, ctaText: "", ctaUrl: "", active: false }; }
+		function defaultOps() { return { maintenance: false, maintenanceMessage: "", maintenanceEta: "", maintenanceAllowUids: [], notice: defaultOpsNotice() }; }
+		function opsConfig() {
+			if (!state.ops || typeof state.ops !== "object") state.ops = defaultOps();
+			if (!Array.isArray(state.ops.maintenanceAllowUids)) state.ops.maintenanceAllowUids = [];
+			if (!state.ops.notice || typeof state.ops.notice !== "object") state.ops.notice = defaultOpsNotice();
+			return state.ops;
+		}
+		// 后台用 datetime-local 输入，拿到的是**无时区**的 "YYYY-MM-DDTHH:mm"。
+		// 转毫秒必须显式按 +08:00：new Date("2026-09-30T14:00") 会按运行环境时区解释，
+		// 换台机器就整体偏 8 小时（公告提前 8 小时生效、提前 8 小时消失）。
+		function opsMsFromLocal(value) {
+			const s = String(value || "").trim();
+			if (!s) return 0;
+			const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(s);
+			if (!m) { const n = Number(s); return Number.isFinite(n) ? n : 0; }
+			const ms = Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00+08:00`);
+			return Number.isFinite(ms) ? ms : 0;
+		}
+		function opsLocalFromMs(ms) {
+			const n = Number(ms);
+			if (!Number.isFinite(n) || n <= 0) return "";
+			// 毫秒 → 北京时间（UTC+8）的 datetime-local：把钟拨快 8 小时再取 UTC 字段。
+			const shifted = new Date(n + 8 * 60 * 60 * 1000);
+			const p = v => String(v).padStart(2, "0");
+			return `${shifted.getUTCFullYear()}-${p(shifted.getUTCMonth() + 1)}-${p(shifted.getUTCDate())}T${p(shifted.getUTCHours())}:${p(shifted.getUTCMinutes())}`;
+		}
+		function opsFormValue(id) { const el = document.getElementById(id); return el ? String(el.value || "") : ""; }
+		function opsFormChecked(id) { const el = document.getElementById(id); return Boolean(el && el.checked); }
+		function collectOpsForm() {
+			return {
+				maintenance: opsFormChecked("opsMaintenance"),
+				maintenanceMessage: opsFormValue("opsMessage"),
+				maintenanceEta: opsFormValue("opsEta"),
+				maintenanceAllowUids: opsFormValue("opsAllow").split(",").map(s => s.trim()).filter(Boolean),
+				notice: {
+					id: opsFormValue("opsNoticeId"),
+					level: opsFormValue("opsNoticeLevel") === "warning" ? "warning" : "info",
+					title: opsFormValue("opsNoticeTitle"),
+					body: opsFormValue("opsNoticeBody"),
+					startAt: opsMsFromLocal(opsFormValue("opsNoticeStart")),
+					endAt: opsMsFromLocal(opsFormValue("opsNoticeEnd")),
+					ctaText: opsFormValue("opsCtaText"),
+					ctaUrl: opsFormValue("opsCtaUrl"),
+					active: opsFormChecked("opsNoticeActive")
+				}
+			};
+		}
+		function renderOps() {
+			const ops = opsConfig();
+			const notice = ops.notice;
+			setLeaveGuard(() => opsGuardOn);
+			const publishButton = `<button class="button publish" id="publishOps" ${opsDirty ? "" : "disabled"}>${opsDirty ? "待发布" : (opsPublished ? "已发布" : "待发布")}</button>`;
+			const savedStrip = lastSaved && lastSaved.type === "ops" && opsDirty ? `<div class="saved-banner"><span class="grow"><b>已保存为草稿。</b>当前线上版本：${opsPublishedData ? "发布中的旧版本" : "还没有发布过（全新配置）"}</span><button class="button secondary" id="opsViewDiff">查看差异</button><button class="button publish" id="opsPublishNow">发布</button></div>` : "";
+			main.innerHTML = pageHeader("OPS", "运营", "停机是服务端闸门：发布后玩家的写接口一律返回 503，读接口照常（他还看得到自己的鱼），只有白名单 uid 能继续写入。停机与通知在同一份配置里，发布是整体的。", `${publishButton}<button class="button primary" id="saveOps">保存配置</button>`) + savedStrip + `<section class="panel form-panel"><div class="form-body"><div class="form-error" id="formError" hidden></div>
+				<div class="about-edit-section">
+					<h3 class="section-title">停机</h3>
+					<div class="field"><label><input type="checkbox" id="opsMaintenance" ${ops.maintenance ? "checked" : ""}> 开启维护（发布后玩家写接口被拒，读接口照常）</label></div>
+					<div class="field full"><label>维护页正文</label><textarea id="opsMessage" rows="3" placeholder="正在维护，预计 22:10 恢复。你的鱼和泡泡都不会丢。">${esc(ops.maintenanceMessage || "")}</textarea></div>
+					<div class="form-grid">
+						<div class="field"><label>预计恢复（选填，纯文案）</label><input id="opsEta" value="${esc(ops.maintenanceEta || "")}" placeholder="22:10"></div>
+						<div class="field"><label>白名单 uid（逗号分隔，维护时仍可写入）</label><input id="opsAllow" value="${esc((ops.maintenanceAllowUids || []).join(","))}" placeholder="u_xxxx,u_yyyy"></div>
+					</div>
+				</div>
+				<div class="about-edit-section">
+					<h3 class="section-title">通知</h3>
+					<div class="field"><label><input type="checkbox" id="opsNoticeActive" ${notice.active ? "checked" : ""}> 启用这条通知</label></div>
+					<div class="form-grid">
+						<div class="field"><label>通知 id（改了标题或正文，记得换 id）</label><input id="opsNoticeId" value="${esc(notice.id || "")}" placeholder="2026-09-30-maintenance"></div>
+						<div class="field"><label>级别</label><select id="opsNoticeLevel"><option value="info"${notice.level === "warning" ? "" : " selected"}>info（蓝）</option><option value="warning"${notice.level === "warning" ? " selected" : ""}>warning（橙）</option></select></div>
+					</div>
+					<div class="field"><label>标题</label><input id="opsNoticeTitle" value="${esc(notice.title || "")}" placeholder="今晚 00:00 会短暂维护"></div>
+					<div class="field full"><label>正文（建议 ≤200 字）</label><textarea id="opsNoticeBody" rows="3">${esc(notice.body || "")}</textarea></div>
+					<div class="form-grid">
+						<div class="field"><label>生效起（北京时间）</label><input type="datetime-local" id="opsNoticeStart" value="${opsLocalFromMs(notice.startAt)}"></div>
+						<div class="field"><label>生效止（北京时间）</label><input type="datetime-local" id="opsNoticeEnd" value="${opsLocalFromMs(notice.endAt)}"></div>
+					</div>
+					<div class="form-grid">
+						<div class="field"><label>按钮文案（选填，空则不渲染按钮）</label><input id="opsCtaText" value="${esc(notice.ctaText || "")}"></div>
+						<div class="field"><label>按钮链接（选填）</label><input id="opsCtaUrl" value="${esc(notice.ctaUrl || "")}" placeholder="https://"></div>
+					</div>
+				</div>
+			</div></section>`;
+			const markDirty = () => { opsDirty = true; opsPublished = false; opsGuardOn = true; };
+			["opsMaintenance", "opsNoticeActive", "opsNoticeLevel"].forEach(id => {
+				const el = document.getElementById(id);
+				if (el) el.addEventListener("change", markDirty);
+			});
+			["opsMessage", "opsEta", "opsAllow", "opsNoticeId", "opsNoticeTitle", "opsNoticeBody", "opsNoticeStart", "opsNoticeEnd", "opsCtaText", "opsCtaUrl"].forEach(id => {
+				const el = document.getElementById(id);
+				if (el) el.addEventListener("input", markDirty);
+			});
+			document.getElementById("saveOps").onclick = async () => {
+				clearFormErrors(main);
+				const next = collectOpsForm();
+				if (next.notice.active && next.notice.startAt && next.notice.endAt && next.notice.endAt <= next.notice.startAt) {
+					showFormError(null, "保存失败：通知的生效止必须晚于生效起"); return;
+				}
+				try {
+					const response = await apiRequest("/admin/ops/ops", { method: "PUT", body: JSON.stringify(next) });
+					state.ops = JSON.parse(JSON.stringify(response.data.data));
+					opsPublished = response.data.published;
+					opsDirty = !opsPublished;
+					opsPublishedData = response.data.publishedData || opsPublishedData;
+					opsGuardOn = false;
+					lastSaved = { type: "ops", id: "ops" };
+					showToast("已保存为草稿，等待发布");
+					renderOps();
+				} catch (error) { showFormError(null, `保存失败：${error.message}`); }
+			};
+			const opsDraft = () => ({ publishedData: opsPublishedData, data: JSON.parse(JSON.stringify(opsConfig())) });
+			const runPublish = async () => {
+				if (!await openPublishDialog(opsDraft(), "运营配置")) return;
+				try {
+					const response = await apiRequest("/admin/ops/ops/publish", { method: "POST" });
+					if (response && response.data) opsPublishedData = response.data.data || opsPublishedData;
+					opsDirty = false; opsPublished = true; opsGuardOn = false; lastSaved = null;
+					showToast("运营配置已发布", 2400, "success"); renderOps();
+				} catch (error) { showFormError(null, `发布失败：${error.message}`); }
+			};
+			document.getElementById("publishOps").onclick = runPublish;
+			const stripDiff = document.getElementById("opsViewDiff");
+			if (stripDiff) stripDiff.onclick = () => showDiffDialog(opsDraft(), "运营配置");
+			const stripPublish = document.getElementById("opsPublishNow");
 			if (stripPublish) stripPublish.onclick = runPublish;
 		}
 		function tierTemplate(tier, index) { return `<div class="tier-row"><div class="field"><label>梯度编号</label><input value="${esc(tier.id)}"></div><div class="field"><label>结束时间（分钟）</label><input type="number" min="0" value="${tier.endMinute}"></div><div class="field"><label>普通用户泡泡 / 分钟</label><input type="number" min="0" value="${tier.normalBubblePerMinute}"></div><div class="field"><label>会员泡泡 / 分钟</label><input type="number" min="0" value="${tier.memberBubblePerMinute}"></div><button class="icon-button remove-tier" data-index="${index}" title="删除梯度">×</button></div>`; }

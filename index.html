@@ -584,6 +584,48 @@
 .v02-top-entry:hover{background:rgba(10,132,255,0.50)}
 .v02-top-entry:active{transform:scale(0.97)}
 .v02-top-entry.active{background:var(--screen-blue-500);border-color:var(--shell-border);}
+/* 顶栏公告图标：只在后台发布了公告时出现，常驻在标题右侧，
+   玩家关掉弹窗后还能点回来重看（关掉≠已读，图标不消失）。 */
+.v02-notice-btn{
+  flex:0 0 auto;width:28px;height:28px;padding:0;margin-left:10px;
+  display:none;align-items:center;justify-content:center;
+  font-family:var(--font-ui);font-size:16px;font-weight:800;line-height:1;
+  color:#fff;background:var(--screen-blue-500);
+  border:1px solid var(--shell-border);border-radius:50%;
+  box-shadow:var(--shell-edge);cursor:pointer;
+  transition:transform .12s ease,background .2s ease;
+}
+/* hidden 属性要能压过上面的 display:none，所以写成 :not([hidden]) 而不是直接 display:flex。 */
+.v02-notice-btn:not([hidden]){display:inline-flex;}
+.v02-notice-btn:active{transform:scale(0.94)}
+/* 级别取值与后台「运营」页那两个选项严格对齐：info / warning。 */
+.v02-notice-btn.level-info{background:var(--screen-blue-500)}
+.v02-notice-btn.level-warning{background:#e8590c}
+.notice-cta{display:inline-block;margin-right:10px;text-decoration:none;}
+.notice-cta[hidden]{display:none;}
+/* 维护页：服务端停机时盖住整个界面。z-index 9999 是算过的 —— 必须高于抽屉(2000)，
+   否则玩家还能从维护页边上点开商店，白操作一通再被 503 打回来。 */
+.fa-maintenance{
+  position:fixed;inset:0;z-index:9999;
+  display:flex;align-items:center;justify-content:center;padding:24px;
+  background:linear-gradient(180deg,#0b3a4a 0%,#06212c 100%);
+  color:#eaf6f8;font-family:var(--font-ui);text-align:center;
+}
+.fa-maintenance[hidden]{display:none;}
+.fa-maintenance-card{max-width:420px;}
+.fa-maintenance-glyph{font-size:44px;line-height:1;margin-bottom:14px;}
+.fa-maintenance-title{margin:0 0 12px;font-size:22px;font-weight:800;letter-spacing:.08em;}
+.fa-maintenance-msg{margin:0 0 10px;font-size:15px;line-height:1.8;opacity:.92;}
+.fa-maintenance-eta{margin:0 0 10px;font-size:13px;opacity:.8;}
+.fa-maintenance-eta[hidden]{display:none;}
+.fa-maintenance-hint{margin:0 0 20px;font-size:12px;line-height:1.7;opacity:.65;}
+.fa-maintenance-retry{
+  font:inherit;font-size:14px;font-weight:700;color:#06323f;
+  background:#7fd8e8;border:0;border-radius:12px;padding:10px 26px;cursor:pointer;
+}
+.fa-maintenance-retry:active{transform:scale(0.97)}
+/* 维护中顺手关掉底层交互：键盘 Tab 到鱼缸里的按钮也不该有反应。 */
+body.fa-maintenance-on .app{pointer-events:none;}
 /* 装点改成原型 .drawer：右侧滑出抽屉（深蓝浮水壳 + 左边界线 + 内颗粒）。
    只换壳，不碰结构：id / class / 开合方式（#shopModal 加 .show）全部原样保留。
    关闭态不能用 display:none —— 那样 transform 过渡不会跑；改成移出屏幕 +
@@ -1275,6 +1317,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
   <div class="bubbles" id="bubbles" aria-hidden="true"></div>
   <div class="v02-topbar">
     <h1 class="v02-brand-title" id="appTitle">鱼儿乐水族馆</h1>
+    <button type="button" class="v02-notice-btn" id="opsNoticeBtn" hidden aria-label="查看公告" title="公告">!</button>
     <nav class="v02-topbar-entries">
       <div class="v02-bubbles" id="bubbleDisplay" aria-label="当前泡泡数">🫧 0</div>
       <button type="button" class="v02-top-entry" id="shopOpenBtn" data-drawer="shopModal" aria-label="打开装点鱼缸" title="装点鱼缸">装点</button>
@@ -1540,6 +1583,29 @@ body:not(.dev-on) .dev-panel{display:none!important}
   </div>
 </div>
 
+<div class="modal" id="noticeModal" aria-hidden="true">
+  <div class="modal-card info-card">
+    <button type="button" class="info-close" id="noticeClose" aria-label="关闭">×</button>
+    <div class="info-title" id="noticeTitle"></div>
+    <div class="info-body" id="noticeBody"></div>
+    <div class="info-actions">
+      <a class="info-ok notice-cta" id="noticeCta" href="#" hidden target="_blank" rel="noopener noreferrer"></a>
+      <button type="button" class="info-ok" id="noticeOk">知道了</button>
+    </div>
+  </div>
+</div>
+
+<div class="fa-maintenance" id="maintenanceScreen" hidden aria-live="polite">
+  <div class="fa-maintenance-card">
+    <div class="fa-maintenance-glyph" aria-hidden="true">🛠</div>
+    <h2 class="fa-maintenance-title">维护中</h2>
+    <p class="fa-maintenance-msg" id="maintenanceMessage">鱼缸正在维护，暂时无法保存进度。</p>
+    <p class="fa-maintenance-eta" id="maintenanceEta" hidden></p>
+    <p class="fa-maintenance-hint">你的进度已经存在这台设备上，维护结束后会自动恢复。</p>
+    <button type="button" class="fa-maintenance-retry" id="maintenanceRetry">重试</button>
+  </div>
+</div>
+
 <script src="game-data.js"></script>
 <script src="config.js"></script>
 <script>
@@ -1615,6 +1681,11 @@ body:not(.dev-on) .dev-panel{display:none!important}
   // ⚠️ 与 ACCOUNT_UID 同理，必须在这里声明 —— saveGame() 在启动时（老存档补签名）就被
   //    同步调用，早于文件尾部账号代码块里的声明，let/const 的 TDZ 会直接白屏。
   let ACCOUNT_TOKEN = "";
+  // 运营配置（停机 / 公告）与停机开关。⚠️ 与上面同理，必须在启动期就能读到：
+  // saveGame() 在启动时会同步跑一次，scheduleCloudPush() 会读 maintenanceOn，
+  // 声明晚了会撞 TDZ 直接白屏。默认「不停机」= 失败开放。
+  let OPS_CONFIG = null;
+  let maintenanceOn = false;
   // 云同步总开关：账号就绪（拿到令牌）后才打开。任何一步失败都保持 false，
   // 此时应用退化成「纯本地存档」，行为与接入前完全一致。
   let CLOUD_SYNC_ENABLED = false;
@@ -2138,7 +2209,13 @@ body:not(.dev-on) .dev-panel{display:none!important}
         headers:cloudHeaders(),
         body:JSON.stringify(buildCloudPayload())
       });
-      if(!response.ok) throw new Error(`HTTP ${response.status}`);
+      // 停机时服务端回 503 + maintenance:true —— 这不是普通的推送失败，
+      // 重试也没用，直接切维护页；本地存档照旧留在设备上。
+      if(!response.ok){
+        const failure=await response.json().catch(()=>null);
+        if(handleMaintenanceResponse(response,failure)) return false;
+        throw new Error(`HTTP ${response.status}`);
+      }
       const body=await response.json();
       const data=(body&&body.data)||{};
       markPushed(Number(data.updatedAt)||Date.now());
@@ -2151,7 +2228,8 @@ body:not(.dev-on) .dev-panel{display:none!important}
 
   // 存档触发点很密（调音量、买一条鱼、摆一下位置都会存），合并成一次推送。
   function scheduleCloudPush(){
-    if(!CLOUD_SYNC_ENABLED) return;
+    // 停机期间不再排推送：明知会 503 还排队，只会让日志里全是失败。
+    if(!CLOUD_SYNC_ENABLED||maintenanceOn) return;
     if(cloudPushTimer) clearTimeout(cloudPushTimer);
     cloudPushTimer=setTimeout(()=>{ cloudPushTimer=0; pushCloudSave(); },1500);
   }
@@ -3412,6 +3490,9 @@ body:not(.dev-on) .dev-panel{display:none!important}
 
       if(!response.ok){
         const failure=body||{};
+        // 停机闸门：503 + maintenance:true 与下面的「暂时用不了」区别对待 ——
+        // 那种情况回落本地逻辑就行，停机必须让玩家看见维护页。
+        if(handleMaintenanceResponse(response,failure)) return false;
         // 409 = 云端还没有存档（本地还没同步成功）；401/503 = 令牌失效或数据层没就绪。
         // 这些都属于「暂时用不了」，回落本地逻辑比甩一个玩家看不懂的错误更合适。
         if(response.status===409||response.status===401||response.status===503) return false;
@@ -3728,7 +3809,13 @@ body:not(.dev-on) .dev-panel{display:none!important}
         headers: cloudHeaders(),
         body: JSON.stringify({ plannedMinutes, isMember })
       });
-      if(!response.ok) return;
+      // 停机：登记不上会话，但专注本身照常（本地计时不受影响）—— 只是这条
+      // 记录进不了服务端统计，结束时会回落本地结算。维护页要照常弹出。
+      if(!response.ok){
+        const failure = await response.json().catch(()=>null);
+        handleMaintenanceResponse(response, failure);
+        return;
+      }
       const body = await response.json();
       const id = body && body.data && body.data.sessionId;
       if(typeof id === "string" && id) focusSessionId = id;
@@ -3751,7 +3838,12 @@ body:not(.dev-on) .dev-panel{display:none!important}
         signal: controller ? controller.signal : undefined
       });
       if(timer) clearTimeout(timer);
-      if(!response.ok) return { reward: localReward, source: "local" };
+      // 停机：结算不上去就按本地奖励发（玩家这一轮专注不能白做），同时弹维护页。
+      if(!response.ok){
+        const failure = await response.json().catch(()=>null);
+        handleMaintenanceResponse(response, failure);
+        return { reward: localReward, source: "local" };
+      }
       const body = await response.json();
       const reward = Number(body && body.data && body.data.reward);
       if(!Number.isFinite(reward) || reward < 0) return { reward: localReward, source: "local" };
@@ -4247,6 +4339,212 @@ function categoryScale(key){
   }
   loadAboutConfig();
 
+  // ===== 运营配置：停机维护页 + 顶栏公告 =====
+  //
+  // 停机是**服务端闸门**（写接口直接 503），前端只负责把它说成人话。两处入口：
+  //   ① 进页面时拉一次配置，停机就直接落维护页 —— 不然玩家会在维护窗口里
+  //      装点半天、点保存才发现全部失败，那是最糟糕的体验。
+  //   ② 玩到一半被 503 命中（维护是随时可能开的），就地切维护页。
+  // 拉不到配置 = 不停机（与服务端「失败开放」一致）：
+  // 一次配置接口抖动不该把整个站变成维护页，那比停机本身严重得多。
+  const OPS_SEEN_KEY = "fa_notice_seen_v1";
+  const OPS_RECHECK_MS = 60000;
+  const MAINTENANCE_DEFAULT_MSG = "鱼缸正在维护，暂时无法保存进度。";
+  let lastOpsCheckAt = 0;
+  let pendingNotice = null;
+
+  // 命中服务端停机闸门（503 + maintenance:true）就把玩家挪到维护页。
+  // 只认 maintenance 标记：普通 503（数据层还没就绪）是另一回事，不该挡人。
+  function handleMaintenanceResponse(response, body){
+    if(!response || response.status !== 503) return false;
+    const payload = body && typeof body === "object" ? body : {};
+    if(payload.maintenance !== true) return false;
+    showMaintenance({ message: payload.error || "", eta: payload.eta || "" });
+    return true;
+  }
+
+  function showMaintenance(info){
+    const screen = document.getElementById("maintenanceScreen");
+    maintenanceOn = true;
+    const payload = info || {};
+    const opsOps = OPS_CONFIG || {};
+    const message = payload.message || opsOps.maintenanceMessage || MAINTENANCE_DEFAULT_MSG;
+    const eta = payload.eta || opsOps.maintenanceEta || "";
+    const messageEl = document.getElementById("maintenanceMessage");
+    const etaEl = document.getElementById("maintenanceEta");
+    if(messageEl) messageEl.textContent = message;
+    if(etaEl){
+      etaEl.textContent = eta ? `预计恢复：${eta}` : "";
+      etaEl.hidden = !eta;
+    }
+    // 维护页盖住整个界面，正在开的抽屉 / 弹窗先收掉，否则它们会浮在维护页上面。
+    ["infoModal","noticeModal","modal","shopModal","mineDrawer","settingsDrawer"].forEach(id => {
+      const el = document.getElementById(id);
+      if(el) el.classList.remove("show");
+    });
+    if(screen) screen.hidden = false;
+    document.body.classList.add("fa-maintenance-on");
+  }
+
+  function hideMaintenance(){
+    maintenanceOn = false;
+    document.body.classList.remove("fa-maintenance-on");
+    const screen = document.getElementById("maintenanceScreen");
+    if(screen) screen.hidden = true;
+  }
+
+  // 公告在有效期内的才算数。startAt / endAt 是后台按北京时间转好的毫秒值，前端不再碰时区。
+  function opsNotice(){
+    const notice = OPS_CONFIG && OPS_CONFIG.notice;
+    if(!notice || notice.active !== true) return null;
+    if(!(notice.title || notice.body)) return null;
+    const now = Date.now();
+    const startAt = Number(notice.startAt) || 0;
+    const endAt = Number(notice.endAt) || 0;
+    if(startAt && now < startAt) return null;   // 还没到生效时间
+    if(endAt && now >= endAt) return null;      // 已过期
+    return notice;
+  }
+
+  function opsSeenIds(){
+    try{
+      const raw = JSON.parse(localStorage.getItem(OPS_SEEN_KEY) || "[]");
+      return Array.isArray(raw) ? raw.filter(value => typeof value === "string") : [];
+    }catch(_){ return []; }   // 隐私模式读不到：当全部没看过
+  }
+  function markOpsNoticeSeen(id){
+    if(!id) return;
+    const list = opsSeenIds();
+    if(list.indexOf(id) >= 0) return;
+    list.push(id);
+    // 只留最近 20 条：公告 id 会一直涨，不裁剪 localStorage 就无限变长。
+    while(list.length > 20) list.shift();
+    try{ localStorage.setItem(OPS_SEEN_KEY, JSON.stringify(list)); }catch(_){ /* 存不住最多下次再弹一次 */ }
+  }
+
+  function openOpsNotice(notice, options){
+    if(!notice) return;
+    const modal = document.getElementById("noticeModal");
+    const titleEl = document.getElementById("noticeTitle");
+    const bodyEl = document.getElementById("noticeBody");
+    const cta = document.getElementById("noticeCta");
+    if(!modal || !titleEl || !bodyEl) return;
+    titleEl.textContent = notice.title || "公告";
+    // 正文与「关于」一样是后台富文本；标题走纯文本，避免后台填错标签把版式带崩。
+    bodyEl.innerHTML = notice.body || "";
+    if(cta){
+      const url = String(notice.ctaUrl || "").trim();
+      // 只放行 http(s)：后台配错成 javascript: 时不能原样塞进 href，
+      // 那等于把一段可执行的东西放进玩家的点击路径里。
+      const lower = url.toLowerCase();
+      const usable = lower.indexOf("http://") === 0 || lower.indexOf("https://") === 0;
+      if(usable){
+        cta.href = url;
+        cta.textContent = notice.ctaText || "查看详情";
+        cta.hidden = false;
+      }else{
+        cta.href = "#";
+        cta.hidden = true;
+      }
+    }
+    modal.classList.add("show");
+    modal.setAttribute("aria-hidden","false");
+    // 从顶栏图标点开的重看不算「已读」—— 下次进页面还会弹，直到玩家真的关掉一次。
+    if(!(options && options.keepUnseen)) markOpsNoticeSeen(String(notice.id || ""));
+  }
+  function closeOpsNotice(){
+    const modal = document.getElementById("noticeModal");
+    if(!modal) return;
+    modal.classList.remove("show");
+    modal.setAttribute("aria-hidden","true");
+  }
+
+  const opsNoticeBtn = document.getElementById("opsNoticeBtn");
+  if(opsNoticeBtn) opsNoticeBtn.onclick = () => openOpsNotice(opsNotice(), { keepUnseen: true });
+  const opsNoticeModal = document.getElementById("noticeModal");
+  const opsNoticeClose = document.getElementById("noticeClose");
+  const opsNoticeOk = document.getElementById("noticeOk");
+  if(opsNoticeClose) opsNoticeClose.onclick = closeOpsNotice;
+  if(opsNoticeOk) opsNoticeOk.onclick = closeOpsNotice;
+  if(opsNoticeModal) opsNoticeModal.addEventListener("click", event => { if(event.target === opsNoticeModal) closeOpsNotice(); });
+  const opsRetryBtn = document.getElementById("maintenanceRetry");
+  if(opsRetryBtn) opsRetryBtn.onclick = () => { refreshOps({ force: true }); };
+
+  function renderOpsNotice(){
+    const notice = opsNotice();
+    if(opsNoticeBtn){
+      opsNoticeBtn.hidden = !notice;
+      const level = notice && notice.level ? notice.level : "info";
+      opsNoticeBtn.className = `v02-notice-btn level-${level}`;
+    }
+    return notice;
+  }
+
+  async function fetchOpsConfig(){
+    try{
+      const controller = typeof AbortController === "function" ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), 8000) : null;
+      const response = await fetch(`${API_BASE}/game/ops`, {
+        cache:"no-store",
+        signal: controller ? controller.signal : undefined
+      });
+      if(timer) clearTimeout(timer);
+      if(!response.ok) return null;
+      const json = await response.json();
+      const list = (json && json.data) || [];
+      const record = list.find(entry => entry && entry.id === "ops");
+      return record && record.data && typeof record.data === "object" ? record.data : null;
+    }catch(_){ return null; }   // 网络 / 超时：按没配处理（不停机、没公告）
+  }
+
+  // 拉一次配置并落到界面上。force=true 用于「重试」按钮，跳过节流。
+  async function refreshOps(options){
+    const now = Date.now();
+    if(!(options && options.force) && now - lastOpsCheckAt < OPS_RECHECK_MS) return;
+    lastOpsCheckAt = now;
+    OPS_CONFIG = await fetchOpsConfig();
+    const ops = OPS_CONFIG || {};
+    if(ops.maintenance === true){ showMaintenance({}); return; }
+    hideMaintenance();
+    const notice = renderOpsNotice();
+    // 首屏自动弹一次。没 id 的公告不自动弹 —— 记不住"已读"就会每次切回页面都弹。
+    const id = notice ? String(notice.id || "") : "";
+    if(notice && id && opsSeenIds().indexOf(id) < 0){
+      pendingNotice = notice;
+      flushPendingNotice();
+    }
+  }
+
+  // 引导没看完就先让位：两个全屏层叠在一起谁都看不清，等引导收起来再补弹。
+  // 用一次性 MutationObserver 盯 guide 的 hidden，而不是去改 endGuide ——
+  // 引导是自己那一套状态机，运营这块不该往里插手（插了就变成两处互相知道对方存在）。
+  let opsGuideObserver = null;
+  function watchGuideEndOnce(){
+    if(!guide || opsGuideObserver) return;
+    opsGuideObserver = new MutationObserver(() => {
+      if(!guide.hidden){ return; }
+      opsGuideObserver.disconnect();
+      opsGuideObserver = null;
+      flushPendingNotice();
+    });
+    opsGuideObserver.observe(guide, { attributes:true, attributeFilter:["hidden"] });
+  }
+  function flushPendingNotice(){
+    const notice = pendingNotice;
+    if(!notice) return;
+    if(guide && !guide.hidden){ watchGuideEndOnce(); return; }
+    if(opsNotice() !== notice){ pendingNotice = null; return; }   // 期间过期了就不弹
+    pendingNotice = null;
+    openOpsNotice(notice);
+  }
+
+  // 切回页面时重查一次（停机 / 公告都是"随时可能开"的东西，不能只在进页面时看一眼）。
+  document.addEventListener("visibilitychange", () => {
+    if(document.visibilityState === "visible") refreshOps();
+  });
+  // 停机中每 60 秒自己试一次：维护结束时玩家不用手动刷新页面。
+  setInterval(() => { if(maintenanceOn) refreshOps({ force: true }); }, OPS_RECHECK_MS);
+
 function resetFocus(completed) {
     // 在重置 remaining 之前计算实际已专注时间。
     const elapsedSeconds = Math.max(
@@ -4698,7 +4996,10 @@ const elemToRemove = nearest.el;
   // 无论配置有没有拉到，首屏都必须渲染出来：
   // 之前失败时整个 then 分支被跳过，鱼缸会一直空白且没有任何提示。
   async function bootstrapConfig(){
+    // 运营配置与其余配置互不依赖，并行拉：串行会多等一次网络往返（最坏 8 秒才出首屏）。
+    const opsPromise = refreshOps({ force: true });
     await syncPublishedConfig();
+    await opsPromise;
     // 内置数据文件和页面不在同一目录时，商品列表会是空的，这个要让用户看见。
     if(!window.FISHTANK_DEFAULT_DATA) showConfigNotice("内置数据文件 game-data.js 未加载，商品列表为空。请确认它与 index.html 放在同一目录。");
     // 存档被改过的提示优先级最高：它影响的是账号数据本身。
@@ -4721,6 +5022,8 @@ const elemToRemove = nearest.el;
     checkOfflineEvents();
     // 新手引导放在最后：页面已经渲染完，聚光洞才能量到正确位置。
     // 配置没拉到时不引导 —— 那时候先把提示条给玩家看，别用引导盖住它。
+    // 停机中不引导：维护页已经盖住整个界面，引导会在它下面空跑一遍。
+    if(maintenanceOn) return;
     if(window.FISHTANK_DEFAULT_DATA && !guideSeen()) startGuide();
   }
   bootstrapConfig();

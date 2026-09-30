@@ -147,10 +147,37 @@ const seed = {
     story:  { title: "品牌故事", bodyHtml: "<p>品牌故事内容待补充。</p><p>这是鱼儿乐水族馆的由来 —— 爸妈以前开过水族馆，店没了鱼也少了，想把那些鱼「留在网上」。</p>" },
     tip:    { title: "打赏支持", bodyHtml: "<p>如果鱼儿乐水族馆让你感到放松，欢迎请我喝杯咖啡。</p>", imageUrl: "" },
     filing: { title: "备案信息", bodyHtml: "<p>备案号：待补充（ICP 备案通过后填「沪ICP备XXXXXX号」及公安联网备案号）。</p>" }
+  },
+  // 运营配置：停机 + 通知。
+  // 停机是**服务端闸门** —— maintenance 为真时玩家写接口一律 503，
+  // 只有 maintenanceAllowUids 里的 uid 能继续写（开发者自己在维护窗口里验证用）。
+  // 白名单放在服务端配置里，玩家改 URL 参数绕不过去。
+  // 🔴 运营态单例：seed 只给初始结构，之后以后台编辑的值为准（见 applySeedDefault）。
+  //    按普通单例那样「每次启动以 seed 为准」的话，maintenance 会被冲回 false，
+  //    维护窗口里服务一重启停机就失效了 —— 那才是最危险的时刻。
+  ops: {
+    maintenance: false,
+    maintenanceMessage: "",
+    maintenanceEta: "",
+    maintenanceAllowUids: [],
+    notice: {
+      id: "",
+      level: "info",
+      title: "",
+      body: "",
+      startAt: 0,
+      endAt: 0,
+      ctaText: "",
+      ctaUrl: "",
+      active: false
+    }
   }
 };
 
-const singletonTypes = new Set(["focus", "audio", "about"]);
+const singletonTypes = new Set(["focus", "audio", "about", "ops"]);
+// 运营态单例：后台填的值必须**跨重启保留**（停机开关、通知文案、白名单），
+// 所以 seed 只负责给初始结构、补齐以后新增的字段，绝不覆盖已有值。
+const operationalSingletons = new Set(["ops"]);
 const idForType = (type, data) => type === "fish" ? data.fishid : singletonTypes.has(type) ? type : data.id;
 
 function makeRecord(type, data, published = true) {
@@ -179,7 +206,16 @@ export function isLegacyPlaceholderPreview(value) {
 // - 用户内容（decorations / fish）：以 seed 为基底，仅补齐缺失字段，保留用户已有值。
 export function applySeedDefault(type, stored, seed) {
   const base = structuredClone(seed);
-  if (singletonTypes.has(type)) return base;
+  if (singletonTypes.has(type)) {
+    // 运营态单例（ops）：以 stored 为准，只把 seed 里新增的字段补进去。
+    // 停机状态要是重启就没了，维护窗口等于裸奔。
+    if (operationalSingletons.has(type) && stored && typeof stored === "object" && Object.keys(stored).length) {
+      const merged = { ...base, ...stored };
+      if (base.notice || stored.notice) merged.notice = { ...(base.notice || {}), ...(stored.notice || {}) };
+      return merged;
+    }
+    return base;
+  }
   const merged = base;
   for (const [k, v] of Object.entries(stored || {})) {
     if (v === null || v === undefined) continue;

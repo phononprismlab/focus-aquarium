@@ -15,6 +15,7 @@ import { resolveAdminApiKey, checkProductionConfig, warnWeakAdminKey } from "./r
 import { accountStatus, issueTicket, normalizeUid, checkRateLimit, resetAccountCache, resetRateLimit, RATE_LIMIT, clientIpFromHeaders } from "./account.js";
 import { readRequestUid, issueSessionToken, verifySessionToken, sessionSecretStatus } from "./session-token.js";
 import { issueSyncCode, verifySyncCode } from "./sync-code.js";
+import { isMaintenanceBlocked } from "./ops-guard.js";
 import { createPlayerStore, mergeSaveForWrite, planPurchase, planSettlement, normalizeBubbles, normalizeNickname, ARCHIVE_VERSION } from "./player-store.js";
 
 const app = express();
@@ -112,8 +113,8 @@ if (productionConfigError) {
   process.exit(1);
 }
 
-const types = new Set(["decorations", "fish", "focus", "audio", "events", "about"]);
-const singletonTypes = new Set(["focus", "audio", "about"]);
+const types = new Set(["decorations", "fish", "focus", "audio", "events", "about", "ops"]);
+const singletonTypes = new Set(["focus", "audio", "about", "ops"]);
 const idFor = (type, data) => type === "fish" ? data.fishid : singletonTypes.has(type) ? type : data.id;
 const validate = (type, data) => {
   if (!data || typeof data !== "object") return "请求体必须是对象";
@@ -153,6 +154,41 @@ const getRepository = async () => {
 };
 const records = async type => (await getRepository()).list(type, false);
 const sendError = (res, error) => res.status(500).json({ error: error.message || "服务器错误" });
+
+// ===== 运营配置（停机 / 通知）=====
+// 停机是**服务端闸门**，不只是前端提示 —— 玩家自己往 URL 上加参数绕不过服务端。
+// 读接口一律放行（玩家还看得到自己的鱼），只拦写接口。
+async function getPublishedOps() {
+  try {
+    const published = await (await getRepository()).list("ops", true);
+    const record = (published || []).find(r => r && r.id === "ops");
+    const data = record && (record.publishedData || record.data);
+    return data && typeof data === "object" ? data : null;
+  } catch (error) {
+    // 失败开放：配置读不到就当没停机。一次配置接口抖动不该把全站变成维护页。
+    console.warn(`读取运营配置失败，按未停机处理：${error.message}`);
+    return null;
+  }
+}
+
+// 专注接口走 readRequestUid（未登录也能专注），这里只要 uid、不要错误分支。
+const uidOfRequest = req => {
+  const auth = readRequestUid(req);
+  return auth && !auth.error ? (auth.uid || "") : "";
+};
+
+// 返回 true = 已经回过 503 了，调用方直接 return。
+// 白名单 uid（后台填的 maintenanceAllowUids）豁免：开发者自己在维护窗口里验证改动。
+async function blockIfMaintenance(res, uid) {
+  const ops = await getPublishedOps();
+  if (!isMaintenanceBlocked(ops, uid)) return false;
+  res.status(503).json({
+    error: (ops && ops.maintenanceMessage) || "维护中，暂时无法保存",
+    maintenance: true,
+    eta: (ops && ops.maintenanceEta) || ""
+  });
+  return true;
+}
 
 // ===== 玩家数据层（账号 / 存档 / 专注记录）=====
 // 与配置仓库分开初始化：配置仓库启动时要串行补齐十几条种子数据（网络往返），
@@ -646,6 +682,8 @@ async function resolveServerMembership(auth) {
 }
 
 app.post("/api/game/focus/start", async (req, res) => {
+  // 维护中不让开新专注：会话要落 focus_records，等于在维护窗口里改玩家数据。
+  if (await blockIfMaintenance(res, uidOfRequest(req))) return;
   try {
     const focusConfig = await getPublishedFocusConfig();
     if (!focusConfig) return res.status(503).json({ error: "专注配置不可用" });
@@ -691,6 +729,7 @@ app.post("/api/game/focus/start", async (req, res) => {
 });
 
 app.post("/api/game/focus/complete", async (req, res) => {
+  if (await blockIfMaintenance(res, uidOfRequest(req))) return;
   try {
     const sessionId = req.body && req.body.sessionId;
     if (!sessionId || typeof sessionId !== "string") return res.status(400).json({ error: "缺少 sessionId" });
@@ -827,6 +866,7 @@ async function writeSaveWithRetry(store, uid, { plan, onMissing = null, clientTs
 app.put("/api/game/save", async (req, res) => {
   const identity = await requireIdentity(req, res);
   if (!identity) return;
+  if (await blockIfMaintenance(res, identity.uid)) return;
   try {
     const clientTs = Number(req.body && req.body.clientTs);
     // 推存档有个特殊之处：**首次同步**（云端还没存档）也要允许写入，
@@ -871,6 +911,7 @@ app.put("/api/game/save", async (req, res) => {
 app.post("/api/game/shop/buy", async (req, res) => {
   const identity = await requireIdentity(req, res);
   if (!identity) return;
+  if (await blockIfMaintenance(res, identity.uid)) return;
   try {
     const itemId = String((req.body && req.body.itemId) || "").trim();
     if (!itemId) return res.status(400).json({ error: "缺少 itemId" });
@@ -929,6 +970,7 @@ app.post("/api/game/shop/buy", async (req, res) => {
 app.post("/api/game/shop/settle", async (req, res) => {
   const identity = await requireIdentity(req, res);
   if (!identity) return;
+  if (await blockIfMaintenance(res, identity.uid)) return;
   try {
     const published = await (await getRepository()).list("decorations", true);
     const items = new Map(published.map(record => [record.id, record.publishedData || record.data]));
@@ -1027,6 +1069,7 @@ function nicknameRateLimited(uid, at = Date.now()) {
 app.put("/api/game/me", async (req, res) => {
   const identity = await requireIdentity(req, res);
   if (!identity) return;
+  if (await blockIfMaintenance(res, identity.uid)) return;
   if (nicknameRateLimited(identity.uid)) {
     return res.status(429).json({ error: "改得太频繁了，过一会儿再试" });
   }
