@@ -222,6 +222,7 @@ function makeSyncBox(fetchImpl, { lastPushed = 0, enabled = true, token = "tok" 
     `let CLOUD_SYNC_ENABLED = ${enabled};`,
     `let lastPushedAt = ${lastPushed};`,
     "let cloudPushTimer = 0;",
+    "let cloudPushPromise = null;",
     "let renders = 0, persists = 0, pushes = 0;",
     "const console = { warn(){}, info(){}, log(){} };",
     'const localStorage = { _d: {}, getItem(k){ return this._d[k] ?? null; }, setItem(k, v){ this._d[k] = String(v); } };',
@@ -234,6 +235,11 @@ function makeSyncBox(fetchImpl, { lastPushed = 0, enabled = true, token = "tok" 
     "function renderBubbles(){ renders++; }",
     "function renderAquarium(){ renders++; }",
     "function persistLocalSave(){ persists++; }",
+    "globalThis.__lastGrantReceipt = null;",
+    // 小票是纯 DOM 渲染，沙箱里只要记下「弹了什么」；真源码另用正则断言。
+    "function showGrantReceipt(receipt){ globalThis.__lastGrantReceipt = receipt; }",
+    // 主动结算的真实行为由服务端测试（grants.test.js）覆盖；这里只需要一个可调用的桩。
+    "async function claimPendingRewards(){}",
     "let fetchImpl = globalThis.__syncFetchImpl;",
     "const fetch = (url, options) => fetchImpl(url, options);",
     extractFunction(playerCode, "cloudHeaders"),
@@ -241,6 +247,7 @@ function makeSyncBox(fetchImpl, { lastPushed = 0, enabled = true, token = "tok" 
     extractFunction(playerCode, "replaceContents"),
     extractFunction(playerCode, "applyCloudSave"),
     extractFunction(playerCode, "markPushed"),
+    extractFunction(playerCode, "adoptGrantResult"),
     extractFunction(playerCode, "pushCloudSave"),
     extractFunction(playerCode, "syncCloudSave"),
     "return {",
@@ -297,6 +304,60 @@ function makeSyncBox(fetchImpl, { lastPushed = 0, enabled = true, token = "tok" 
   let threw = false;
   try { await box.syncCloudSave(); } catch (_) { threw = true; }
   chk("④ 同步失败不抛异常（离线可用）", threw, false);
+}
+// ⑤ push 时服务端顺带结算了运营奖励 → 必须**当场采用**它返回的存档
+//    （不采用的话本地还是旧泡泡，下一次 push 会把刚发的奖励覆盖回去）
+{
+  const box = makeSyncBox(async (url, options) => {
+    if (options && options.method === "PUT") {
+      return { ok: true, json: async () => ({ data: {
+        updatedAt: 5000,
+        save: { PlayerData: { bubbles: 600, isMember: false, inventory: { fish: {}, decorations: { decoration001: 1 }, backgrounds: {}, sands: {}, sounds: {} } } },
+        claimedGrants: { count: 1, bubbles: 500, balance: 600, items: [{ id: "decoration001", category: "decorations", qty: 1 }], reasons: ["维护补偿"] }
+      } }) };
+    }
+    return { ok: true, json: async () => ({ data: { exists: true, save: { PlayerData: { bubbles: 100 } }, updatedAt: 100 } }) };
+  }, { lastPushed: 100 });
+  await box.syncCloudSave();
+  const s = box.state();
+  chk("⑤ 结算后的泡泡被当场采用（本地 10 → 600）", s.PlayerData.bubbles, 600);
+  chk("⑤ 结算后的库存被采用", s.PlayerData.inventory.decorations.decoration001, 1);
+  chk("⑤ 记下服务端的 updatedAt（下一次 push 不会覆盖奖励）", s.lastPushedAt, 5000);
+  chk("⑤ 弹出领奖小票", globalThis.__lastGrantReceipt && globalThis.__lastGrantReceipt.bubbles, 500);
+  chk("⑤ 没带奖励时不该弹小票", globalThis.__lastGrantReceipt && globalThis.__lastGrantReceipt.reasons, ["维护补偿"]);
+}
+// ⑥ 并发推送：只发一份请求（两份会各自拿旧本地值去 merge，后到的那次把奖励覆盖掉）
+{
+  let puts = 0;
+  const box = makeSyncBox(async (url, options) => {
+    if (options && options.method === "PUT") {
+      puts++;
+      await new Promise(resolve => setTimeout(resolve, 10)); // 拉长「在飞」的窗口
+      return { ok: true, json: async () => ({ data: { updatedAt: 2000 } }) };
+    }
+    return { ok: true, json: async () => ({ data: { exists: true, save: { PlayerData: { bubbles: 1 } }, updatedAt: 500 } }) };
+  }, { lastPushed: 800 });
+  const results = await Promise.all([box.pushCloudSave(), box.pushCloudSave()]);
+  chk("⑥ 并发推送只发一份请求（第二次复用在飞的那一次）", puts, 1);
+  chk("⑥ 两次调用拿到同一个结果", results, [true, true]);
+}
+// ⑦ 源码锚点：结算链路的每一环都不能少
+{
+  const pushSrc = extractFunction(playerCode, "pushCloudSave");
+  chkTrue("push 里有并发闸（复用在飞的那一次）", /if\(cloudPushPromise\) return cloudPushPromise;/.test(pushSrc));
+  chkTrue("push 结算后采用服务端存档", /adoptGrantResult\(data\.save,data\.updatedAt\)/.test(pushSrc));
+  chkTrue("push 结算后弹小票", /showGrantReceipt\(data\.claimedGrants\)/.test(pushSrc));
+  const syncSrc = extractFunction(playerCode, "syncCloudSave");
+  chkTrue("同步结束后主动结算奖励", /await claimPendingRewards\(\);/.test(syncSrc));
+  chkTrue("🔴 领奖在对齐**之后**（先领再对齐会被对齐那一步覆盖掉）",
+    syncSrc.lastIndexOf("await claimPendingRewards();") > syncSrc.indexOf("await pushCloudSave();"));
+  const claimSrc = extractFunction(playerCode, "claimPendingRewards");
+  chkTrue("主动结算走 /game/grants/claim", /\/game\/grants\/claim/.test(claimSrc));
+  chkTrue("主动结算用 POST", /method:"POST"/.test(claimSrc));
+  chkTrue("主动结算也认停机 503", /handleMaintenanceResponse\(response,failure\)/.test(claimSrc));
+  const adoptSrc = extractFunction(playerCode, "adoptGrantResult");
+  chkTrue("采用结算结果时只覆盖 PlayerData（不碰鱼缸，免得抹掉玩家正在摆的鱼）",
+    /replaceContents\(PlayerData,save\.PlayerData\)/.test(adoptSrc) && !/AquariumData/.test(adoptSrc));
 }
 
 // ============================================================

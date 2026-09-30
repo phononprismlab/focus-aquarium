@@ -117,9 +117,10 @@ console.log("\n--- 7. 票面时间 ---");
 {
   chkTrue("购买小票有时间元素", /<div class="v02-paper-meta" id="receiptTime"><\/div>/.test(source));
   chkTrue("事件小票有时间元素", /<div class="v02-paper-meta" id="eventModalTime"><\/div>/.test(source));
-  chkTrue("成功的票写「购买时间」",
+  chkTrue("成功的票写「购买时间」（领奖票可用 timeLabel 改口径）",
     /document\.getElementById\("receiptTime"\)/.test(source)
-    && /\$\{failed \? "小票时间" : "购买时间"\} \$\{formatReceiptStamp\(Date\.now\(\)\)\}/.test(source));
+    && /const timeLabel = options\.timeLabel \|\| \(failed \? "小票时间" : "购买时间"\);/.test(source)
+    && /\$\{timeLabel\} \$\{formatReceiptStamp\(Date\.now\(\)\)\}/.test(source));
   chkTrue("失败的票改口叫「小票时间」（那次并没有买成）",
     /const failed = String\(title \|\| ""\)\.startsWith\("无法"\)/.test(source));
   chkTrue("事件票写「发生时间」",
@@ -141,6 +142,18 @@ console.log("\n--- 8. 事件票上的影响标签 ---");
   chkTrue("[hidden] 必须显式 display:none（display:flex 会盖掉 hidden）",
     /\.v02-event-impact\[hidden\]\{display:none;?\}/.test(source));
   chkTrue("presentEventResult 会调它", /renderEventImpact\(result\.effect\)/.test(source));
+}
+
+console.log("\n--- 9. 领奖小票（与购买票同一张纸） ---");
+{
+  chkTrue("票面上有「奖励」行", /<div class="v02-receipt-row total" id="receiptGainRow" style="display:none"><span>奖励<\/span><span id="receiptGain"><\/span><\/div>/.test(source));
+  chkTrue("奖励行默认隐藏、有值才显示", /gainRow\.style\.display=gainAmount>0\?"flex":"none";/.test(source));
+  chkTrue("奖励写成 +N（不是扣款）", /document\.getElementById\("receiptGain"\)\.textContent=`\+\$\{gainAmount\} 🫧`;/.test(source));
+  chkTrue("领奖小票不显示单价（满屏「0 🫧」像算错了）", /const priceCell=plain\?"":`<span>\$\{displayPrice\} 🫧<\/span>`;/.test(source));
+  chkTrue("领奖小票时间口径是「小票时间」", /timeLabel:"小票时间"/.test(source));
+  chkTrue("小票标题与理由都来自服务端返回值", /function showGrantReceipt\(receipt\)\{/.test(source) && /receipt\.reasons/.test(source));
+  // 领奖不是购买：不能借道「支付」那一行显示，否则票面语义就乱了。
+  chkTrue("奖励没有走 paid 通道（paid 仍为 0）", /rows\.length\?rows:\[\{ name:"鱼缸管理员的心意", qty:1, price:0 \}\],\s*\n\s*0,/.test(source));
 }
 
 console.log(`\n===== 小票纸测试：${pass} 通过 / ${fail} 失败 =====`);

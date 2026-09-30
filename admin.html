@@ -87,6 +87,16 @@
 		.file-chip { padding: 4px 8px; border-radius: 5px; background: #edf5f1; color: var(--ink); font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
 		.chip-remove { border: 0; background: transparent; color: #7c8f8c; font-size: 15px; line-height: 1; padding: 0 2px; cursor: pointer; }
 		.chip-remove:hover { color: #b4553a; }
+		/* 发放奖励：收件人多选 + 物品清单 + 预览块 */
+		.grant-targets { max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 16px; }
+		.grant-target { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-weight: 400; font-size: 13px; }
+		.grant-target span { display: flex; flex-direction: column; min-width: 0; }
+		.grant-target i { font-style: normal; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		.grant-chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 32px; }
+		.grant-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 20px; padding: 4px 10px; font-size: 12px; background: var(--soft); }
+		.grant-preview { margin: 0 22px 22px; padding: 14px 16px; border: 1px dashed #a9cbc3; border-radius: 10px; background: #f7fbfa; font-size: 13px; line-height: 1.75; }
+		.grant-preview ul { margin: 6px 0 0; padding-left: 18px; }
+		.grant-preview .warn { color: #b4553a; font-weight: 700; }
 		.form-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--line); padding-top: 20px; margin-top: 25px; }
 		.tier-row { display: grid; grid-template-columns: 1.1fr 1fr 1fr minmax(150px, 1.2fr) 38px; gap: 10px; align-items: end; margin-bottom: 11px; }
 		.tier-row .field { min-width: 0; gap: 4px; }
@@ -1636,7 +1646,7 @@
 		// 切到本页签时调用：先拉数据再渲染（避免切页瞬间空白闪一下）。
 		// 埋点概览与用户列表并行拉取；概览失败静默置空（表还没建时不该一直弹 toast）。
 		async function refreshUsers() {
-			await Promise.all([loadUsers(), loadTrackSummary()]);
+			await Promise.all([loadUsers(), loadTrackSummary(), loadGrantCatalog()]);
 			if (state.module === "users") renderUserList();
 		}
 		async function loadTrackSummary() {
@@ -1677,13 +1687,17 @@
 				: `<div class="table-wrap"><table><thead><tr><th>事件</th><th>今日</th><th>最近 7 天</th><th>累计</th></tr></thead><tbody>${state.trackSummary.map(row => `<tr><td>${esc(TRACK_LABELS[row.event] || row.event)}</td><td>${row.today}</td><td>${row.last7d}</td><td>${row.total}</td></tr>`).join("")}</tbody></table></div>`;
 			main.innerHTML = pageHeader("PLAYER MANAGEMENT", "玩家管理", "按注册时间从早到晚排序；可按 cohort 与赞赏状态筛选，赞赏者单独高亮。", `<button class="button secondary" id="exportSavesJson">导出全量存档</button><button class="button primary" id="exportUsersCsv">导出 CSV</button>`)
 				+ `<section class="panel"><div class="panel-head"><div><h3>埋点概览</h3><p>打开 / 开始专注 / 完成专注 / 购买成功</p></div></div>${trackHtml}</section>`
+				+ grantPanelHtml()
 				+ `<section class="panel"><div class="panel-head"><div><h3>筛选</h3></div></div><div class="filter-row">
 					<label>cohort <select id="filterCohort">${cohortOptions}</select></label>
 					<label>赞赏状态 <select id="filterSupporter">${supporterOptions}</select></label>
 					<button class="button secondary" id="applyUserFilter">应用筛选</button>
 					<span class="count">共 ${state.users.length} 人（赞赏者 ${supporters}）</span>
 				</div></section>`
-				+ `<section class="panel"><div class="panel-head"><div><h3>玩家列表</h3><p>按注册时间从早到晚</p></div></div>${tableHtml}</section>`;
+				+ `<section class="panel"><div class="panel-head"><div><h3>玩家列表</h3><p>按注册时间从早到晚</p></div></div>${tableHtml}</section>`
+				+ `<section class="panel"><div class="panel-head"><div><h3>最近发放记录</h3><p>最近 20 条；「待领取」会在玩家下次同步或主动领取时结算</p></div></div><div id="grantHistory"></div></section>`;
+			wireGrantPanel();
+			renderGrantHistory();
 			document.getElementById("exportUsersCsv").onclick = exportUsersCsv;
 			document.getElementById("exportSavesJson").onclick = exportSavesJson;
 			document.getElementById("applyUserFilter").onclick = async () => {
@@ -1693,6 +1707,192 @@
 				renderUserList();
 			};
 		}
+		// ===== 发放奖励 =====
+		// 为什么要「预览 → 确认」两步：这是唯一直接改经济数据的后台操作，而且一次可能发给几十个人。
+		// 服务端默认就是干跑（不带 mode:"apply" 一个字都不写），前端只是把这个能力露出来 ——
+		// 先看清「发给谁、发什么」，再点确认。
+		let grantCatalog = null;      // 可发放的物品（来自**已发布**配置）
+		let grantItemList = [];       // 本次要发的物品清单 [{id, category, qty, name}]
+		let grantPreviewOk = false;   // 上一次干跑通过了没有；没通过就不让点「确认发放」
+		const GRANT_CATEGORY_LABELS = { fish: "鱼", decorations: "装饰", backgrounds: "背景", sands: "沙", sounds: "音效" };
+
+		async function loadGrantCatalog() {
+			if (grantCatalog) return grantCatalog;
+			try {
+				const body = await apiRequest("/admin/decorations");
+				// 只列**已发布**的物品：服务端发放校验用的就是已发布配置，
+				// 列一堆草稿物品只会让人点了才发现发不出去。
+				grantCatalog = (body.data || [])
+					.filter(record => record.publishedData)
+					.map(record => ({ ...record.publishedData, id: record.id }));
+			} catch (error) {
+				console.warn("奖励物品清单加载失败：", error.message);
+				grantCatalog = [];
+			}
+			return grantCatalog;
+		}
+		function grantSelectedUserIds() {
+			const ids = [...document.querySelectorAll(".grant-user:checked")].map(input => input.value);
+			const extra = String((document.getElementById("grantExtraIds") || {}).value || "")
+				.split(/[\s,，]+/).map(value => value.trim()).filter(Boolean);
+			return [...new Set([...ids, ...extra])];
+		}
+		function grantFormState() {
+			return {
+				userIds: grantSelectedUserIds(),
+				bubbles: Math.floor(Number((document.getElementById("grantBubbles") || {}).value) || 0),
+				items: grantItemList.map(({ id, category, qty }) => ({ id, category, qty })),
+				reason: String((document.getElementById("grantReason") || {}).value || "").trim()
+			};
+		}
+		function renderGrantChips() {
+			const box = document.getElementById("grantChips");
+			if (!box) return;
+			if (!grantItemList.length) {
+				box.innerHTML = `<span class="hint">还没加物品（只发泡泡也可以）</span>`;
+				return;
+			}
+			box.innerHTML = grantItemList.map((item, index) =>
+				`<span class="grant-chip">${esc(item.name || item.id)} ×${item.qty}<button type="button" class="chip-remove" data-grant-remove="${index}" aria-label="移除">×</button></span>`).join("");
+			box.querySelectorAll("[data-grant-remove]").forEach(button => {
+				button.onclick = () => { grantItemList.splice(Number(button.dataset.grantRemove), 1); renderGrantChips(); markGrantDirty(); };
+			});
+		}
+		// 表单一改，之前那份预览就作废了 —— 否则会出现「预览的是 500，真发的是 5000」。
+		function markGrantDirty() {
+			grantPreviewOk = false;
+			const applyBtn = document.getElementById("grantApplyBtn");
+			if (applyBtn) applyBtn.disabled = true;
+			const box = document.getElementById("grantPreviewBox");
+			if (box) box.innerHTML = "";
+		}
+		function renderGrantPreview(result) {
+			const box = document.getElementById("grantPreviewBox");
+			if (!box) return;
+			const bubbles = Number(result.bubbles) || 0;
+			const items = result.items || [];
+			const what = [
+				bubbles > 0 ? `${bubbles} 🫧` : "",
+				...items.map(item => `${esc(item.name || item.id)} ×${item.qty}`)
+			].filter(Boolean).join("、");
+			const targets = result.targets || [];
+			const skipped = result.skipped || [];
+			box.innerHTML = `<div class="grant-preview">
+				<strong>将要发放：</strong>${what || "（空）"}<br>
+				<strong>理由：</strong>${esc(result.reason || "")}<br>
+				<strong>收件人 ${targets.length} 人：</strong>
+				<ul>${targets.map(t => `<li>${esc(t.nickname || "（未命名）")} · ${esc(t.userId)}</li>`).join("") || "<li>（没有可发放的收件人）</li>"}</ul>
+				${skipped.length ? `<div class="warn">跳过的 uid ${skipped.length} 个：${skipped.map(s => esc(s.userId)).join("、")}</div>` : ""}
+				${result.applied ? "<div><strong>已发放。</strong></div>" : "<div>确认无误后点「确认发放」，这一步才会真正写入。</div>"}
+			</div>`;
+		}
+		async function previewGrant() {
+			const form = grantFormState();
+			if (!form.userIds.length) { showToast("先选收件人（或填 uid）"); return; }
+			try {
+				const body = await apiRequest("/admin/grants", { method: "POST", body: JSON.stringify({ ...form, mode: "dry-run" }) });
+				const result = body.data || {};
+				// 干跑列出的 targets 才是真正会被发到的人（未注册的会被跳过）。
+				grantPreviewOk = (result.targets || []).length > 0;
+				renderGrantPreview(result);
+				const applyBtn = document.getElementById("grantApplyBtn");
+				if (applyBtn) applyBtn.disabled = !grantPreviewOk;
+				if (!grantPreviewOk) showToast("没有可发放的收件人");
+			} catch (error) {
+				grantPreviewOk = false;
+				showToast(`预览失败：${error.message}`);
+			}
+		}
+		async function applyGrant() {
+			if (!grantPreviewOk) { showToast("请先预览确认"); return; }
+			const form = grantFormState();
+			try {
+				const body = await apiRequest("/admin/grants", { method: "POST", body: JSON.stringify({ ...form, mode: "apply" }) });
+				const result = body.data || {};
+				renderGrantPreview(result);
+				grantPreviewOk = false;
+				const applyBtn = document.getElementById("grantApplyBtn");
+				if (applyBtn) applyBtn.disabled = true;
+				showToast(`已发放给 ${(result.grants || []).length} 名玩家`, 3200, "success");
+			} catch (error) {
+				showToast(`发放失败：${error.message}`, 3600, "error");
+			}
+		}
+		function grantPanelHtml() {
+			const targetHtml = state.users.length
+				? state.users.map(u => `<label class="grant-target"><input type="checkbox" class="grant-user" value="${esc(u.userId)}"><span><b>${esc(u.nickname || "（未命名）")}</b><i>${esc(u.userId)}</i></span></label>`).join("")
+				: `<div class="empty"><strong>还没有玩家</strong>先让玩家注册，或直接在下面手填 uid。</div>`;
+			const itemOptions = (grantCatalog || []).map(item =>
+				`<option value="${esc(item.id)}">${esc(GRANT_CATEGORY_LABELS[item.category] || item.category)} · ${esc(item.name || item.id)}</option>`).join("");
+			return `<section class="panel form-panel"><div class="panel-head"><div><h3>发放奖励</h3><p>先预览「发给谁、发什么」，确认后才真正写入</p></div></div>
+				<div class="form-body"><div class="form-grid">
+					<div class="field full"><label>收件人</label>
+						<div class="grant-targets" id="grantTargets">${targetHtml}</div>
+						<div class="upload-row" style="margin-top:8px">
+							<button class="button secondary" type="button" id="grantSelectAll">全选当前列表</button>
+							<button class="button secondary" type="button" id="grantClearAll">清空</button>
+							<span class="hint">只有已注册的 uid 会被发放，其余会在预览里列为「跳过」</span>
+						</div>
+					</div>
+					<div class="field full"><label>额外 uid（每行一个，可选）</label><textarea id="grantExtraIds" rows="2" placeholder="u_xxxxxxxx"></textarea></div>
+					<div class="field"><label>泡泡</label><input type="number" id="grantBubbles" min="0" step="1" value="0"></div>
+					<div class="field"><label>理由 <span>*</span></label><input type="text" id="grantReason" maxlength="200" placeholder="例：维护补偿"><span class="hint">必填。这是唯一能回答「这笔泡泡为什么发出去」的字段</span></div>
+					<div class="field"><label>加物品</label><select id="grantItemSelect">${itemOptions || `<option value="">（没有可发放的物品）</option>`}</select></div>
+					<div class="field"><label>数量</label><div class="upload-row"><input type="number" id="grantItemQty" min="1" step="1" value="1"><button class="button secondary" type="button" id="grantAddItem">加入清单</button></div></div>
+					<div class="field full"><label>物品清单</label><div class="grant-chips" id="grantChips"></div></div>
+				</div>
+				<div class="form-foot"><button class="button secondary" type="button" id="grantPreviewBtn">预览</button><button class="button primary" type="button" id="grantApplyBtn" disabled>确认发放</button></div>
+				</div>
+				<div id="grantPreviewBox"></div>
+			</section>`;
+		}
+		function wireGrantPanel() {
+			const selectAll = document.getElementById("grantSelectAll");
+			if (selectAll) selectAll.onclick = () => { document.querySelectorAll(".grant-user").forEach(input => { input.checked = true; }); markGrantDirty(); };
+			const clearAll = document.getElementById("grantClearAll");
+			if (clearAll) clearAll.onclick = () => { document.querySelectorAll(".grant-user").forEach(input => { input.checked = false; }); markGrantDirty(); };
+			document.querySelectorAll(".grant-user").forEach(input => { input.onchange = markGrantDirty; });
+			for (const id of ["grantExtraIds", "grantBubbles", "grantReason"]) {
+				const el = document.getElementById(id);
+				if (el) el.oninput = markGrantDirty;
+			}
+			const addItem = document.getElementById("grantAddItem");
+			if (addItem) addItem.onclick = () => {
+				const select = document.getElementById("grantItemSelect");
+				const id = select ? select.value : "";
+				const item = (grantCatalog || []).find(entry => entry.id === id);
+				if (!item) { showToast("先选一件物品"); return; }
+				const qty = Math.max(1, Math.floor(Number((document.getElementById("grantItemQty") || {}).value) || 1));
+				const existing = grantItemList.find(entry => entry.id === id);
+				if (existing) existing.qty = Math.min(999, existing.qty + qty);
+				else grantItemList.push({ id, category: item.category, qty, name: item.name || id });
+				renderGrantChips();
+				markGrantDirty();
+			};
+			const previewBtn = document.getElementById("grantPreviewBtn");
+			if (previewBtn) previewBtn.onclick = previewGrant;
+			const applyBtn = document.getElementById("grantApplyBtn");
+			if (applyBtn) applyBtn.onclick = applyGrant;
+			renderGrantChips();
+		}
+		// 最近发放记录：只读，用来回答「上次那批到底发出去没有 / 领了没有」。
+		async function renderGrantHistory() {
+			const box = document.getElementById("grantHistory");
+			if (!box) return;
+			try {
+				const body = await apiRequest("/admin/grants?limit=20");
+				const grants = body.data.grants || [];
+				box.innerHTML = grants.length
+					? `<div class="table-wrap"><table><thead><tr><th>时间</th><th>玩家</th><th>内容</th><th>理由</th><th>状态</th></tr></thead><tbody>${grants.map(g => {
+						const what = [g.bubbles > 0 ? `${g.bubbles} 🫧` : "", ...(g.items || []).map(item => `${esc(item.id)} ×${item.qty}`)].filter(Boolean).join("、");
+						return `<tr><td>${g.createdAt ? new Date(g.createdAt).toLocaleString() : "—"}</td><td class="item-id">${esc(g.userId)}</td><td>${what || "—"}</td><td>${esc(g.reason)}</td><td>${g.claimed ? `<span class="badge published">已领取</span>` : `<span class="badge">待领取</span>`}</td></tr>`;
+					}).join("")}</tbody></table></div>`
+					: `<div class="empty"><strong>还没有发放记录</strong>发出去的奖励会显示在这里</div>`;
+			} catch (error) {
+				box.innerHTML = `<div class="empty"><strong>发放记录暂不可用</strong>${esc(error.message)}</div>`;
+			}
+		}
+
 		// CSV 单元格转义：含逗号/引号/换行的用双引号包住并把内部引号翻倍（RFC 4180）。
 		function csvCell(value) {
 			const s = String(value ?? "");

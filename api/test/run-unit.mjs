@@ -49,6 +49,7 @@ const files = ["reward.test.js", "focus-session.test.js", "audio-categories.test
   "about-config.test.js",
   "ops-config.test.js",
   "player-ops-ui.test.js",
+  "grants.test.js",
   "t25-e2e.test.js"];
 
 let failed = 0;

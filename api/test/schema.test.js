@@ -1,7 +1,7 @@
 // schema.sql 必须和代码用到的表/列保持一致。
 //
 // 为什么需要这个闸：
-//   这 4 张表原来只写在交付文档里、靠人在控制台手工建。代码加一列、线上没加，
+//   这 5 张表原来只写在交付文档里、靠人在控制台手工建。代码加一列、线上没加，
 //   只有跑到那条 SQL 才会 500 —— 而且玩家端表现为「云存档偶尔失败」，很难定位。
 //   现在 schema.sql 是唯一权威，这个测试盯着它别和代码走偏。
 // 运行：node test/schema.test.js
@@ -53,19 +53,20 @@ const schemaNoComments = schema.replace(/^\s*--.*$/gm, "");
 
 console.log("--- 1. 表名与代码里的常量一一对应 ---");
 const constants = [...store.matchAll(/export const TABLE_(\w+) = "(\w+)";/g)].map(m => ({ constName: m[1], table: m[2] }));
-chk("代码里声明了 4 张表", constants.length, 4);
+chk("代码里声明了 5 张表", constants.length, 5);
 chk("表名集合与 schema.sql 一致",
   constants.map(c => c.table).sort(),
   Object.keys(tables).sort());
-chkTrue("users / saves / focus_records / tracking_events 都在",
-  ["users", "saves", "focus_records", "tracking_events"].every(t => t in tables));
+chkTrue("users / saves / focus_records / tracking_events / grants 都在",
+  ["users", "saves", "focus_records", "tracking_events", "grants"].every(t => t in tables));
 
 console.log("\n--- 2. 列清单锁死（改结构必须是有意的）---");
 const EXPECTED = {
   users: ["user_id", "sync_code_hash", "nickname", "cohort", "is_supporter", "supporter_note", "created_at", "last_seen_at"],
   saves: ["user_id", "data", "save_version", "client_ts", "updated_at"],
   focus_records: ["id", "user_id", "planned_minutes", "counted_minutes", "reward", "natural", "started_at", "settled_at"],
-  tracking_events: ["id", "user_id", "event", "detail", "at"]
+  tracking_events: ["id", "user_id", "event", "detail", "at"],
+  grants: ["id", "user_id", "bubbles", "items", "reason", "created_at", "claimed_at"]
 };
 for (const [table, cols] of Object.entries(EXPECTED)) {
   chk(`${table} 的列`, (tables[table] || []).slice().sort(), cols.slice().sort());
@@ -111,9 +112,11 @@ chk("代码用到但 schema.sql 里没有的列", missing, []);
 
 console.log("\n--- 4. 类型与刻意的取舍 ---");
 {
-  chk("4 张表都声明了主键", (schema.match(/PRIMARY KEY \(/g) || []).length, 4);
+  chk("5 张表都声明了主键", (schema.match(/PRIMARY KEY \(/g) || []).length, 5);
   chkTrue("saves.data 是 text（不是 varchar，整包 JSON 会超长）",
     /data\s+text\s+NOT NULL/.test(schema));
+  chkTrue("grants.items 是 text（塞的是 JSON 字符串，同 saves.data 风格）",
+    /CREATE TABLE IF NOT EXISTS public\.grants[\s\S]*?items\s+text\s+NOT NULL/.test(schema));
   chkTrue("tracking_events.detail 是 text（购买事件要塞 JSON）",
     /detail\s+text\s+NOT NULL/.test(schema));
   chkTrue("tracking_events.id 是 varchar 主键（控制台建不出 bigserial，ID 由应用层生成）",
@@ -128,14 +131,14 @@ console.log("\n--- 4. 类型与刻意的取舍 ---");
     for (const m of body.matchAll(/^\s*(\w+)\s+(\w+)/gm)) typeOf[m[1]] = m[2];
   }
   // 所有存毫秒时间戳的列 —— 一个都不能是 integer。
-  const TIME_COLUMNS = ["created_at", "last_seen_at", "client_ts", "updated_at", "started_at", "settled_at", "at"];
+  const TIME_COLUMNS = ["created_at", "last_seen_at", "client_ts", "updated_at", "started_at", "settled_at", "at", "claimed_at"];
   const wrongType = TIME_COLUMNS.filter(col => typeOf[col] !== "bigint");
   chk("毫秒时间戳列全是 bigint", wrongType, []);
-  chkTrue("7 个时间列都真的在 schema 里（不是全没匹配上）",
+  chkTrue(`${TIME_COLUMNS.length} 个时间列都真的在 schema 里（不是全没匹配上）`,
     TIME_COLUMNS.every(col => col in typeOf), TIME_COLUMNS.map(c => `${c}:${typeOf[c] || "缺失"}`).join(" "));
   chkTrue("没有 MySQL 专属语法", !/TINYINT|LONGTEXT|DEFAULT CHARSET|^\s*KEY\s/im.test(schemaNoComments));
   chkTrue("语句是幂等的（IF NOT EXISTS）",
-    (schema.match(/CREATE TABLE IF NOT EXISTS/g) || []).length === 4 &&
+    (schema.match(/CREATE TABLE IF NOT EXISTS/g) || []).length === 5 &&
     (schema.match(/CREATE INDEX IF NOT EXISTS/g) || []).length >= 1);
 }
 

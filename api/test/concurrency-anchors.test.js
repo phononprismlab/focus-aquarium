@@ -87,7 +87,19 @@ chkTrue("🔴 plan 自己判定失败（余额不足等）→ 不重试，直接
 
 // ===== 4. 三条写路径全部接入 =====
 console.log("\n--- 4. 三条写路径都必须走重试层（漏一条就是漏一个并发口子）---");
-chk("writeSaveWithRetry 的调用点数量", count(serverSrc, /await writeSaveWithRetry\(/g), 3);
+// 推存档那条**刻意不复用** writeSaveWithRetry：它要多做一步「认领待领取的运营奖励」，
+// 而认领是**有副作用的** —— 放进「冲突就重试」的循环里会重复认领（第二次认领返回空 → 奖励丢了）。
+// 所以它有自己的重试循环（pushSaveWithGrants）：认领只做一次，重试的只有纯计算部分。
+chk("writeSaveWithRetry 的调用点数量（buy / settle）", count(serverSrc, /await writeSaveWithRetry\(/g), 2);
+chk("推存档走 pushSaveWithGrants", count(serverSrc, /await pushSaveWithGrants\(/g), 1);
+chkTrue("pushSaveWithGrants 里有自己的重试循环",
+  /async function pushSaveWithGrants[\s\S]{0,900}?for \(let attempt = 1; attempt <= SAVE_WRITE_MAX_ATTEMPTS; attempt\+\+\)/.test(serverSrc));
+chkTrue("🔴 认领在重试循环**之外**（只做一次，绝不重复认领）",
+  /const claimed = await store\.claimPendingGrants\(uid, \{ at: Date\.now\(\) \}\);\s*\n\s*const saveVersion/.test(serverSrc));
+chkTrue("🔴 push 的叠加发生在 merge **之后**（先加再 merge 会被客户端更小的泡泡值夹掉）",
+  /mergeSaveForWrite\([\s\S]{0,140}\);[\s\S]{0,300}?applyGrants\(merged\.save, claimed\)/.test(serverSrc));
+chkTrue("认领成功但存档没写成 → 退回未领取（否则奖励永久卡住）",
+  /async function releaseClaimed\(store, claimed, cause\)[\s\S]{0,700}?store\.releaseGrants\(claimed\.map\(g => g\.id\), \{ claimedAt \}\)/.test(serverSrc));
 
 // ===== 5. 409 契约保留 =====
 console.log("\n--- 5. 409 语义（前端契约）没有被乐观锁顺手改掉 ---");

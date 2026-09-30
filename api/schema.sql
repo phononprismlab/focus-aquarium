@@ -1,7 +1,7 @@
 -- 鱼儿乐水族馆 · 业务表结构（CloudBase PostgreSQL）
 --
 -- 为什么要有这个文件：
---   这 4 张表原来只写在交付文档里，靠人在控制台手工建。结果是
+--   这 5 张表原来只写在交付文档里，靠人在控制台手工建。结果是
 --   ① 换环境（或本地起一个）没法一键重建；② 表结构没有任何版本记录，
 --   代码加了列、线上却没加，只有跑到那条 SQL 才 500。
 --   现在这里是唯一权威，`test/schema.test.js` 会盯着它和代码别走偏。
@@ -91,9 +91,34 @@ CREATE TABLE IF NOT EXISTS public.tracking_events (
 -- 埋点概览要按时间窗（今日 / 最近 7 天）过滤，按事件分组。
 CREATE INDEX IF NOT EXISTS idx_tracking_event_at ON public.tracking_events (event, at);
 
+-- ===== 5. 运营奖励（发放 + 结算）=====
+-- 为什么奖励不直接写进 saves.bubbles：存档是**前端推上来的整包**，
+-- `mergeSaveForWrite` 会接受客户端提交的更小泡泡值（购买后就是要推更小值，刻意设计）。
+-- 直接加进去的泡泡会被玩家下一次 push 覆盖掉，所以奖励先在这里落成「待领取」的行，
+-- 再由结算协议在 merge **之后**叠加到存档上。
+--
+-- 🔴 `claimed_at = 0` 表示未领取。结算时用条件更新
+--    `UPDATE grants SET claimed_at = $now WHERE id = $1 AND claimed_at = 0`
+--    抢占 —— 并发下只有抢到行的那次请求发放，这是防重复发放的关键。
+-- 🔴 `items` 是 text（JSON 字符串，形如 [{"id":"fish001","qty":1}]），与 saves.data 同风格。
+--    发放前必须校验物品 id 在已发布配置里存在，否则存档里会出现幽灵物品。
+CREATE TABLE IF NOT EXISTS public.grants (
+  id          varchar(36) NOT NULL,
+  user_id     varchar(32) NOT NULL DEFAULT '',
+  bubbles     integer     NOT NULL DEFAULT 0,
+  items       text        NOT NULL DEFAULT '',
+  reason      text        NOT NULL DEFAULT '',
+  created_at  bigint      NOT NULL DEFAULT 0,
+  claimed_at  bigint      NOT NULL DEFAULT 0,
+  PRIMARY KEY (id)
+);
+
+-- 结算要按 user_id 捞「未领取」（claimed_at = 0）的行，后台列表也按 user_id 过滤。
+CREATE INDEX IF NOT EXISTS idx_grants_user ON public.grants (user_id, claimed_at);
+
 -- ===== 自检 =====
--- 建完跑一下，应该看到 4 行：
+-- 建完跑一下，应该看到 5 行：
 --   SELECT table_name FROM information_schema.tables
 --   WHERE table_schema = 'public'
---     AND table_name IN ('users','saves','focus_records','tracking_events')
+--     AND table_name IN ('users','saves','focus_records','tracking_events','grants')
 --   ORDER BY table_name;

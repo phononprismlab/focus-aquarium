@@ -16,7 +16,11 @@ import { accountStatus, issueTicket, normalizeUid, checkRateLimit, resetAccountC
 import { readRequestUid, issueSessionToken, verifySessionToken, sessionSecretStatus } from "./session-token.js";
 import { issueSyncCode, verifySyncCode } from "./sync-code.js";
 import { isMaintenanceBlocked } from "./ops-guard.js";
-import { createPlayerStore, mergeSaveForWrite, planPurchase, planSettlement, normalizeBubbles, normalizeNickname, ARCHIVE_VERSION } from "./player-store.js";
+import {
+  createPlayerStore, mergeSaveForWrite, planPurchase, planSettlement, normalizeBubbles, normalizeNickname, ARCHIVE_VERSION,
+  applyGrants, normalizeGrantItems, parseGrantItems, serializeGrantItems,
+  GRANT_BUBBLES_MAX, GRANT_REASON_MAX_LENGTH, INVENTORY_CATEGORIES
+} from "./player-store.js";
 
 const app = express();
 const host = process.env.HOST || "0.0.0.0";
@@ -466,6 +470,131 @@ app.post("/api/admin/saves/restore", async (req, res) => {
   } catch (error) { sendError(res, error); }
 });
 
+// ===== 运营奖励：后台发放 / 列表 =====
+//
+// 为什么要有这套接口：停机期间改数据影响了玩家，唯一能补偿的手段就是发点泡泡 / 物品。
+// 但它同时也是**最危险的接口** —— 直接写经济数据。所以三条自保：
+//   ① 默认干跑：不带 `mode:"apply"` 只返回「发给谁、发什么」，一个字都不写（同 /saves/restore）
+//   ② 物品 id 必须存在于**已发布配置**：否则玩家存档里会出现幽灵物品
+//   ③ reason 必填：这是唯一能回答「这 500 泡泡为什么发出去」的字段
+//
+// ⚠️ 路由必须注册在 `app.post("/api/admin/:type")` 之前，否则会被那条通配路由截走。
+app.get("/api/admin/grants", async (req, res) => {
+  try {
+    const store = await getPlayerStore();
+    const userId = typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(500, Math.floor(rawLimit)) : 100;
+    const grants = await store.listGrants({ userId, limit });
+    res.json({
+      data: {
+        grants: grants.map(g => ({
+          id: g.id,
+          userId: g.user_id,
+          bubbles: Number(g.bubbles) || 0,
+          items: parseGrantItems(g.items),
+          reason: String(g.reason || ""),
+          createdAt: Number(g.created_at) || 0,
+          claimedAt: Number(g.claimed_at) || 0,
+          claimed: Number(g.claimed_at) > 0
+        })),
+        count: grants.length
+      }
+    });
+  } catch (error) { sendError(res, error); }
+});
+
+app.post("/api/admin/grants", async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const apply = body.mode === "apply";
+
+    // ① 收件人。上限 200：一次发太多说明该走「导出 uid 批量发」，
+    //    而不是让一个请求背着几百次写入。
+    const rawIds = Array.isArray(body.userIds) ? body.userIds : (body.userId ? [body.userId] : []);
+    const userIds = [...new Set(rawIds.map(value => String(value || "").trim()).filter(Boolean))];
+    if (!userIds.length) return res.status(400).json({ error: "缺少 userIds（要发给谁）" });
+    if (userIds.length > 200) return res.status(400).json({ error: "一次最多发给 200 个玩家" });
+
+    // ② 泡泡
+    const rawBubbles = body.bubbles === undefined || body.bubbles === null || body.bubbles === ""
+      ? 0
+      : Math.floor(Number(body.bubbles));
+    if (!Number.isFinite(rawBubbles) || rawBubbles < 0) return res.status(400).json({ error: "bubbles 必须是非负整数" });
+    if (rawBubbles > GRANT_BUBBLES_MAX) return res.status(400).json({ error: `单次发放泡泡不能超过 ${GRANT_BUBBLES_MAX}` });
+
+    // ③ 物品：先校验形状，再逐个到**已发布配置**里核对存在性与分类 ——
+    //    分类由服务端从配置里读出来（不采信后台提交的），免得发成「鱼缸里算装饰」的怪东西。
+    const itemCheck = normalizeGrantItems(body.items);
+    if (!itemCheck.ok) return res.status(400).json({ error: itemCheck.reason });
+    const published = await (await getRepository()).list("decorations", true);
+    const catalog = new Map(published.map(record => [record.id, record.publishedData || record.data]));
+    const items = [];
+    for (const entry of itemCheck.items) {
+      const config = catalog.get(entry.id);
+      if (!config) return res.status(400).json({ error: `物品「${entry.id}」不在已发布配置里，无法发放` });
+      const category = String(config.category || "");
+      if (!INVENTORY_CATEGORIES.includes(category)) {
+        return res.status(400).json({ error: `物品「${entry.id}」在配置里没有合法的分类` });
+      }
+      if (category !== entry.category) {
+        return res.status(400).json({ error: `物品「${entry.id}」的分类是 ${category}，与提交的 ${entry.category} 不一致` });
+      }
+      items.push({ id: entry.id, category, qty: entry.qty });
+    }
+
+    // ④ 理由：必填，这是唯一的审计线索。
+    const reason = String(body.reason || "").trim();
+    if (!reason) return res.status(400).json({ error: "缺少 reason（为什么发这笔奖励）" });
+    if (reason.length > GRANT_REASON_MAX_LENGTH) {
+      return res.status(400).json({ error: `reason 最多 ${GRANT_REASON_MAX_LENGTH} 个字` });
+    }
+
+    if (rawBubbles <= 0 && !items.length) return res.status(400).json({ error: "泡泡和物品至少要发一样" });
+
+    // ⑤ 逐个确认「已注册」。未注册的 uid 跳过而不是整批报错 ——
+    //    后台是从玩家列表选的人，混进一两个已失效的 uid 不该让整批失败。
+    const store = await getPlayerStore();
+    const targets = [];
+    const skipped = [];
+    for (const uid of userIds) {
+      const user = await store.getUser(uid);
+      if (!user) { skipped.push({ userId: uid, reason: "该 uid 没有注册记录" }); continue; }
+      targets.push({ userId: uid, nickname: user.nickname || "" });
+    }
+
+    // 默认干跑：先看清楚「发给谁、发什么」，确认后才真发。
+    if (!apply) {
+      return res.json({
+        data: { mode: "dry-run", applied: false, bubbles: rawBubbles, items, reason, targets, skipped, grants: [] }
+      });
+    }
+
+    const at = Date.now();
+    const rows = targets.map(target => ({
+      id: grantId(),
+      user_id: target.userId,
+      bubbles: rawBubbles,
+      items: serializeGrantItems(items),
+      reason,
+      created_at: at
+    }));
+    const created = rows.length ? await store.addGrants(rows) : [];
+    res.json({
+      data: {
+        mode: "apply",
+        applied: true,
+        bubbles: rawBubbles,
+        items,
+        reason,
+        targets,
+        skipped,
+        grants: created.map(g => ({ id: g.id, userId: g.user_id, createdAt: Number(g.created_at) || 0 }))
+      }
+    });
+  } catch (error) { sendError(res, error); }
+});
+
 for (const type of types) {
   app.get(`/api/admin/${type}`, async (req, res) => {
     try {
@@ -863,30 +992,126 @@ async function writeSaveWithRetry(store, uid, { plan, onMissing = null, clientTs
   return { row: null, stored: null, plan: null, exhausted: true };
 }
 
+// ===== 运营奖励：发放 + 结算协议 =====
+//
+// 见 player-store.js 段头：奖励不能直接写进 saves.bubbles，会被玩家下一次 push 覆盖。
+// 所以奖励先落成 grants 行（claimed_at = 0 = 待领取），结算时叠加到存档上再标记已领取。
+//
+// 🔴 叠加的位置有两种，都不能搞错：
+//   · push 路径：读存档 → mergeSaveForWrite → **在合并结果上**叠加 → 写回
+//   · claim 路径：读存档 → 直接叠加 → 写回（不走 merge）
+//   共同点：叠加发生在「存档内容已经确定」之后。先加再 merge 会被客户端更小的泡泡值夹掉。
+const grantId = () => `gr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+// 退回「已认领但存档没写成」的奖励。这是补偿路径 —— 退不掉的话奖励会永久卡在已领取状态，
+// 玩家再也拿不到，所以退不干净必须留下明确日志，而不是静默吞掉。
+async function releaseClaimed(store, claimed, cause) {
+  if (!claimed.length) return;
+  const claimedAt = claimed[0].claimed_at;
+  try {
+    const released = await store.releaseGrants(claimed.map(g => g.id), { claimedAt });
+    if (released !== claimed.length) {
+      console.error(`奖励退回不完整：${released}/${claimed.length} 条卡在已领取状态，需人工核对（${cause}）`);
+    }
+  } catch (error) {
+    console.error(`奖励退回失败：${claimed.length} 条可能卡在已领取状态，需人工核对（${cause}）：${error.message}`);
+  }
+}
+
+// 小票内容：玩家端拿它渲染「领到了什么」。reasons 去重 —— 同一批发放通常只有一个理由。
+function grantReceipt(claimed, applied) {
+  return {
+    count: claimed.length,
+    bubbles: applied.bubbles,
+    balance: applied.balance,
+    items: applied.items,
+    reasons: [...new Set(claimed.map(g => String(g.reason || "")).filter(Boolean))]
+  };
+}
+
+// 推存档：读存档 → merge → 叠加待领取奖励 → 写回。
+//
+// 为什么不复用 writeSaveWithRetry：认领奖励是**有副作用的**，放进「冲突就重试」的循环里
+// 会重复认领（第二次认领返回空 → 奖励就丢了）。所以认领只做一次，
+// 重试的只是「重新读 → 重新 merge → 重新叠加同一批 grants」这段纯计算。
+async function pushSaveWithGrants(store, uid, body, { clientTs }) {
+  const claimed = await store.claimPendingGrants(uid, { at: Date.now() });
+  const saveVersion = String((body && body.saveVersion) || "");
+  let lastMerged = null;
+  try {
+    for (let attempt = 1; attempt <= SAVE_WRITE_MAX_ATTEMPTS; attempt++) {
+      const stored = await store.getSave(uid);
+      const hasStored = Boolean(stored && stored.data);
+      const merged = mergeSaveForWrite(hasStored ? stored.data : null, body, { saveVersion });
+      lastMerged = merged;
+      // 🔴 叠加在 merge **之后**（方案 §0.2）。
+      const applied = applyGrants(merged.save, claimed);
+      const row = await store.putSave(uid, applied.save, {
+        saveVersion: applied.save.saveVersion,
+        clientTs,
+        // 首推时只允许「确实还不存在」时插入，别覆盖别人刚建好的存档。
+        expectUpdatedAt: hasStored ? Number(stored.updated_at) || 0 : 0
+      });
+      if (row && row.conflict) continue;
+      if (!row) break;
+      return { row, merged, applied, claimed };
+    }
+  } catch (error) {
+    await releaseClaimed(store, claimed, `push 存档失败：${error.message}`);
+    throw error;
+  }
+  // 重试用尽 / 写不进去：把奖励退回去，等下一次推送再结算。
+  await releaseClaimed(store, claimed, "push 存档重试用尽");
+  return { row: null, merged: lastMerged, applied: null, claimed: [] };
+}
+
+// 玩家端主动结算。没有待领取的奖励时返回空结果（不是错误）。
+async function claimGrantsForPlayer(store, uid) {
+  const claimed = await store.claimPendingGrants(uid, { at: Date.now() });
+  if (!claimed.length) return { claimed: [], receipt: null, save: null, updatedAt: 0 };
+
+  try {
+    for (let attempt = 1; attempt <= SAVE_WRITE_MAX_ATTEMPTS; attempt++) {
+      const stored = await store.getSave(uid);
+      if (!stored || !stored.data) {
+        // 还没有云存档：奖励先留着（退回未领取），等玩家同步过一次再来领。
+        // 在这里凭空建一份空存档，等于把玩家本地的鱼缸抹掉。
+        await releaseClaimed(store, claimed, "玩家还没有云存档");
+        return { claimed: [], receipt: null, save: null, updatedAt: 0, reason: "NO_SAVE" };
+      }
+      const applied = applyGrants(stored.data, claimed);
+      if (!applied.changed) {
+        // 认领到的行什么都没带（脏数据）：标记已领取、不动存档。
+        return { claimed, receipt: null, save: null, updatedAt: 0 };
+      }
+      const row = await store.putSave(uid, applied.save, {
+        saveVersion: applied.save.saveVersion,
+        clientTs: Date.now(),
+        expectUpdatedAt: Number(stored.updated_at) || 0
+      });
+      if (row && row.conflict) continue;
+      if (!row) break;
+      return { claimed, receipt: grantReceipt(claimed, applied), save: row.data, updatedAt: row.updated_at };
+    }
+  } catch (error) {
+    await releaseClaimed(store, claimed, `结算奖励失败：${error.message}`);
+    throw error;
+  }
+  await releaseClaimed(store, claimed, "结算奖励重试用尽");
+  return { claimed: [], receipt: null, save: null, updatedAt: 0, exhausted: true };
+}
+
 app.put("/api/game/save", async (req, res) => {
   const identity = await requireIdentity(req, res);
   if (!identity) return;
   if (await blockIfMaintenance(res, identity.uid)) return;
   try {
     const clientTs = Number(req.body && req.body.clientTs);
-    // 推存档有个特殊之处：**首次同步**（云端还没存档）也要允许写入，
-    // 所以 plan 里要能拿到「stored 为 null」这个信息（mergeSaveForWrite 认 null = 首推）。
-    const result = await writeSaveWithRetry(identity.store, identity.uid, {
-      clientTs: Number.isFinite(clientTs) ? clientTs : Date.now(),
-      plan: stored => mergeSaveForWrite(stored, req.body, {
-        saveVersion: String((req.body && req.body.saveVersion) || "")
-      }),
-      onMissing: async () => {
-        const merged = mergeSaveForWrite(null, req.body, {
-          saveVersion: String((req.body && req.body.saveVersion) || "")
-        });
-        const row = await identity.store.putSave(identity.uid, merged.save, {
-          saveVersion: merged.save.saveVersion,
-          clientTs: Number.isFinite(clientTs) ? clientTs : Date.now(),
-          expectUpdatedAt: 0 // 只允许「确实还不存在」时插入
-        });
-        return { row: row && row.conflict ? null : row, stored: null, plan: merged, exhausted: Boolean(row && row.conflict) };
-      }
+    // 这条路径比另外两条多一步：合并完还要**顺带结算待领取的运营奖励**（见 pushSaveWithGrants）。
+    // 为什么要在 push 里兜底结算：只靠玩家端主动调 claim 会有丢失窗口 ——
+    // 页面加载自动同步、游客转登录、多设备切换时 push 先发生，客户端旧值就把奖励覆盖掉了。
+    const result = await pushSaveWithGrants(identity.store, identity.uid, req.body, {
+      clientTs: Number.isFinite(clientTs) ? clientTs : Date.now()
     });
 
     if (!result.row) {
@@ -899,8 +1124,30 @@ app.put("/api/game/save", async (req, res) => {
         save: result.row.data,
         updatedAt: result.row.updated_at,
         // 服务端丢弃/修正了什么。不展示给玩家，只用于对账与排查。
-        adjustments: result.plan.problems,
-        firstPush: result.plan.firstPush
+        adjustments: result.merged.problems,
+        firstPush: result.merged.firstPush,
+        // 本次顺带结算的运营奖励（没有就是 null）。玩家端拿它弹一张小票。
+        claimedGrants: result.applied && result.applied.changed ? grantReceipt(result.claimed, result.applied) : null
+      }
+    });
+  } catch (error) { sendError(res, error); }
+});
+
+// 玩家端主动结算待领取的奖励。返回**服务端权威**的存档，玩家端据此覆盖本地并 markPushed ——
+// 否则本地还是旧泡泡，下一次 push 会把刚发的奖励覆盖回去。
+app.post("/api/game/grants/claim", async (req, res) => {
+  const identity = await requireIdentity(req, res);
+  if (!identity) return;
+  if (await blockIfMaintenance(res, identity.uid)) return;
+  try {
+    const result = await claimGrantsForPlayer(identity.store, identity.uid);
+    res.json({
+      data: {
+        save: result.save,
+        updatedAt: result.updatedAt,
+        receipt: result.receipt,
+        // 还没有云存档时不是错误：奖励留着，等玩家同步过一次再来领。
+        pending: result.reason === "NO_SAVE"
       }
     });
   } catch (error) { sendError(res, error); }

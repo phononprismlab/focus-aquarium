@@ -47,6 +47,11 @@ export const TABLE_USERS = "users";
 export const TABLE_SAVES = "saves";
 export const TABLE_FOCUS_RECORDS = "focus_records";
 export const TABLE_TRACKING_EVENTS = "tracking_events";
+// 运营发放的奖励。为什么要单独一张表而不是直接改 saves.bubbles：
+// 存档是**前端推上来的整包**，mergeSaveForWrite 会接受客户端更小的泡泡值（买完要能推更小值），
+// 直接写进去的奖励会被下一次 push 覆盖掉。所以奖励先落成「待领取」的行，
+// 再由结算协议在 merge **之后**叠加到存档上（见 grants 相关实现）。
+export const TABLE_GRANTS = "grants";
 // 用户档案里允许被客户端改的列。白名单写死在数据层：路由层哪怕传了别的键也写不进去，
 // 免得将来有人顺手把 is_supporter / cohort 一起塞进 patch。
 export const UPDATABLE_USER_FIELDS = new Set(["nickname"]);
@@ -467,7 +472,120 @@ export function planSettlement({ save, target, items }) {
   };
 }
 
+// ===== 运营奖励：发放 + 结算 =====
+//
+// 为什么奖励不能直接写进 saves.bubbles（本模块最容易踩的坑）：
+//   mergeSaveForWrite 对泡泡是「客户端权威 + 增长上限」—— 客户端提交的是**绝对值**，
+//   只要不超过「服务端现值 + 2000」就全盘接受，**包括比服务端现值更小的情况**
+//   （购买后本来就要推更小值，cloud-save.test.js 有一条断言专门守着这个行为）。
+//   所以服务端悄悄加进去的泡泡会被玩家下一次 push 覆盖回去，奖励凭空蒸发。
+//
+// 协议：奖励先落成 grants 行（claimed_at = 0 = 待领取），结算时
+//       读存档 → 【合并结果之后】叠加待领取的 grants → 写回 → 标记 claimed_at。
+//       叠加必须在 merge 之后 —— 先加再 merge 会被客户端更小的泡泡值夹掉。
+export const GRANT_BUBBLES_MAX = 100000;      // 单次发放上限：防手滑多打一个 0
+export const GRANT_ITEMS_MAX = 20;            // 单次最多发几种物品
+export const GRANT_QTY_MAX = 999;             // 单种物品的数量上限
+export const GRANT_REASON_MAX_LENGTH = 200;
+
+// items 的形状：数组，每项 { id, category, qty }。
+// category 在**发放时**就由服务端从已发布配置解析并固化下来：
+//   ① 结算发生在 push 热路径上，那时再读一次配置既慢又多一个失败点；
+//   ② 固化下来也留下了「当初到底发了什么」的审计线索。
+export function normalizeGrantItems(input) {
+  if (input === undefined || input === null) return { ok: true, items: [] };
+  if (!Array.isArray(input)) return { ok: false, reason: "items 必须是数组" };
+  if (input.length > GRANT_ITEMS_MAX) return { ok: false, reason: `一次最多发 ${GRANT_ITEMS_MAX} 种物品` };
+  const merged = new Map();
+  for (const entry of input) {
+    if (!isPlainObject(entry)) return { ok: false, reason: "items 的每一项都必须是对象" };
+    const id = String(entry.id || "").trim();
+    if (!id) return { ok: false, reason: "items 里有一项没有 id" };
+    if (id.length > 64) return { ok: false, reason: "物品 id 过长" };
+    const category = String(entry.category || "").trim();
+    if (!INVENTORY_CATEGORIES.includes(category)) {
+      return { ok: false, reason: `物品 ${id} 的分类不合法（应为 ${INVENTORY_CATEGORIES.join(" / ")}）` };
+    }
+    const qty = Math.floor(Number(entry.qty));
+    if (!Number.isFinite(qty) || qty <= 0) return { ok: false, reason: `物品 ${id} 的数量必须是正整数` };
+    if (qty > GRANT_QTY_MAX) return { ok: false, reason: `物品 ${id} 的数量超过上限（${GRANT_QTY_MAX}）` };
+    const key = `${category}:${id}`;
+    const existing = merged.get(key);
+    merged.set(key, { id, category, qty: (existing ? existing.qty : 0) + qty });
+  }
+  return { ok: true, items: [...merged.values()] };
+}
+
+// 读一行 grants 的 items。库里存的是 JSON 文本（内存实现直接给数组）。
+// 解析失败返回空数组 —— 存档侧不该因为一行坏 JSON 崩掉，泡泡照发、物品丢掉。
+export function parseGrantItems(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw !== "string") return [];
+  const text = raw.trim();
+  if (!text) return [];
+  try {
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+// 空数组存成空串而不是 "[]" —— 与 schema 的 DEFAULT '' 保持一致，读的时候不用分支。
+export function serializeGrantItems(items) {
+  const list = Array.isArray(items) ? items : [];
+  return list.length ? JSON.stringify(list) : "";
+}
+
+// 把一批 grants 叠加到存档上。**纯函数**，返回新存档 + 本次实际到手的明细。
+// 🔴 调用方必须在 mergeSaveForWrite 之后调用它（见本段开头）。
+export function applyGrants(save, grants) {
+  const list = Array.isArray(grants) ? grants : [];
+  const base = isPlainObject(save) ? save : {};
+  const player = isPlainObject(base.PlayerData) ? base.PlayerData : defaultPlayer({});
+  const balance = normalizeBubbles(player.bubbles);
+  if (!list.length) return { save: base, bubbles: 0, items: [], balance, changed: false };
+
+  const inventory = normalizeInventory(player.inventory);
+  let bubbles = balance;
+  let addedBubbles = 0;
+  const addedItems = [];
+
+  for (const grant of list) {
+    const add = normalizeBubbles(grant && grant.bubbles);
+    if (add > 0) {
+      const before = bubbles;
+      // 走一遍 normalizeBubbles 是为了套上 MAX_BUBBLES 上限；
+      // 计数用「实际到手的差额」而不是 add，否则小票上的数字会比真实余额大。
+      bubbles = normalizeBubbles(bubbles + add);
+      addedBubbles += bubbles - before;
+    }
+    for (const entry of parseGrantItems(grant && grant.items)) {
+      if (!isPlainObject(entry)) continue;
+      const id = String(entry.id || "");
+      const category = String(entry.category || "");
+      if (!id || !INVENTORY_CATEGORIES.includes(category)) continue;
+      const qty = Math.floor(Number(entry.qty));
+      if (!Number.isFinite(qty) || qty <= 0) continue;
+      inventory[category][id] = Math.floor(Number(inventory[category][id]) || 0) + qty;
+      addedItems.push({ id, category, qty });
+    }
+  }
+
+  if (addedBubbles <= 0 && !addedItems.length) {
+    return { save: base, bubbles: 0, items: [], balance, changed: false };
+  }
+  return {
+    save: { ...base, PlayerData: { ...player, bubbles, inventory } },
+    bubbles: addedBubbles,
+    items: addedItems,
+    balance: bubbles,
+    changed: true
+  };
+}
+
 const nowIso = () => new Date().toISOString();
+
 
 // 服务端当天 00:00 的时间戳（毫秒），按服务端本地时区。
 // 专注聚合的「今日」边界统一以此为准（先按服务端时区，后续要时区再调）。
@@ -516,6 +634,7 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
   const users = new Map();
   const saves = new Map();
   const focusRecords = new Map();
+  const grants = new Map();
   const trackingEvents = [];
   let trackingSeq = 0;
 
@@ -748,8 +867,63 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
       return { items, rollback };
     },
 
+    // ===== 运营奖励（发放 / 认领 / 退回）=====
+    // 内存实现天然串行，"条件更新"退化成一次读一次写 —— 接口形状与云实现一致，
+    // 路由层不用分支判断。
+    async addGrants(rows) {
+      const created = [];
+      for (const row of rows) {
+        const record = {
+          id: row.id,
+          user_id: row.user_id,
+          bubbles: Math.floor(Number(row.bubbles) || 0),
+          items: typeof row.items === "string" ? row.items : serializeGrantItems(row.items),
+          reason: String(row.reason || ""),
+          created_at: row.created_at,
+          claimed_at: 0
+        };
+        grants.set(record.id, record);
+        created.push({ ...record });
+      }
+      return created;
+    },
+
+    async listGrants({ userId = "", limit = 200 } = {}) {
+      let list = [...grants.values()];
+      if (userId) list = list.filter(g => g.user_id === userId);
+      list.sort((a, b) => (Number(b.created_at) || 0) - (Number(a.created_at) || 0));
+      return list.slice(0, Math.max(0, limit)).map(g => ({ ...g }));
+    },
+
+    // 认领该玩家所有待领取的奖励（claimed_at = 0 → at），返回**本次真的认领到**的行。
+    // 返回空数组 = 没有待领取的，调用方直接跳过写存档。
+    async claimPendingGrants(uid, { at = now() } = {}) {
+      const claimed = [];
+      for (const row of grants.values()) {
+        if (row.user_id !== uid) continue;
+        if (Number(row.claimed_at)) continue;
+        row.claimed_at = at;
+        claimed.push({ ...row });
+      }
+      return claimed;
+    },
+
+    // 补偿：把认领过的行退回「未领取」。
+    // 只在「已认领但存档没写成」时调用 —— 否则这条奖励会永久卡在已领取状态，玩家再也拿不到。
+    // 只退回 claimed_at 仍等于本次认领值的行，避免误退别人刚认领的。
+    async releaseGrants(ids, { claimedAt } = {}) {
+      let released = 0;
+      for (const id of Array.isArray(ids) ? ids : []) {
+        const row = grants.get(id);
+        if (!row || Number(row.claimed_at) !== Number(claimedAt)) continue;
+        row.claimed_at = 0;
+        released++;
+      }
+      return released;
+    },
+
     // 仅供测试观察
-    _sizes: () => ({ users: users.size, saves: saves.size, focusRecords: focusRecords.size })
+    _sizes: () => ({ users: users.size, saves: saves.size, focusRecords: focusRecords.size, grants: grants.size })
   };
 }
 
@@ -1084,6 +1258,80 @@ export function createCloudbasePlayerStore(db, { now = () => Date.now() } = {}) 
         }
       }
       return { items, rollback };
+    },
+
+    // ===== 运营奖励（发放 / 认领 / 退回）=====
+    // 一次 insert 写多行：后台是「选一批人发同一份奖励」，逐行 insert 会变成 N 次往返。
+    async addGrants(rows) {
+      const payload = rows.map(row => ({
+        id: row.id,
+        user_id: row.user_id,
+        bubbles: Math.floor(Number(row.bubbles) || 0),
+        items: typeof row.items === "string" ? row.items : serializeGrantItems(row.items),
+        reason: String(row.reason || ""),
+        created_at: row.created_at,
+        claimed_at: 0
+      }));
+      if (!payload.length) return [];
+      await db.from(TABLE_GRANTS).insert(payload, { defaultToNull: false }).throwOnError();
+      return payload;
+    },
+
+    async listGrants({ userId = "", limit = 200 } = {}) {
+      let q = db.from(TABLE_GRANTS).select("*");
+      if (userId) q = q.eq("user_id", userId);
+      const { data } = await q.throwOnError();
+      // 排序与截断都在 JS 侧做 —— 这个查询构造器没有 order 方法（同 listUsers 的取舍）。
+      return (data || [])
+        .slice()
+        .sort((a, b) => (Number(b.created_at) || 0) - (Number(a.created_at) || 0))
+        .slice(0, Math.max(0, limit));
+    },
+
+    // 🔴 认领待领取的奖励：条件更新（claimed_at = 0 → 本次令牌）+ 回读确认。
+    //
+    //    为什么不能直接把 claimed_at 写成 now()：这个 SDK 不回传影响行数，
+    //    「update 不报错」不等于「真的改到了」，只能靠回读比对确认自己抢到了。
+    //    而如果两个请求在同一毫秒认领同一行、令牌都用 now()，两边回读到的是同一个值
+    //    → 都以为自己抢到了 → 同一份奖励发两次。
+    //    所以令牌用**负数随机值**：claimed_at 的正数区被毫秒时间戳占用、0 = 未领取，
+    //    负数区空着，正好拿来当「每次认领唯一」的标记，回读比对才有意义。
+    //    确认抢到后再把 claimed_at 改成真实时间（后台列表要显示领取时间）。
+    async claimPendingGrants(uid, { at = now() } = {}) {
+      const { data } = await db.from(TABLE_GRANTS).select("*")
+        .eq("user_id", uid).eq("claimed_at", 0).throwOnError();
+      const claimed = [];
+      for (const row of (data || [])) {
+        const token = -(1 + Math.floor(Math.random() * 2 ** 48));
+        await db.from(TABLE_GRANTS).update({ claimed_at: token })
+          .eq("id", row.id).eq("claimed_at", 0).throwOnError();
+        const mine = await selectOne(TABLE_GRANTS, "id", row.id);
+        if (!mine || Number(mine.claimed_at) !== token) continue; // 被别的请求抢走了
+        await db.from(TABLE_GRANTS).update({ claimed_at: at })
+          .eq("id", row.id).eq("claimed_at", token).throwOnError();
+        const final = await selectOne(TABLE_GRANTS, "id", row.id);
+        if (!final || Number(final.claimed_at) !== Number(at)) {
+          // 极端情况（这一行被并发退回）：把令牌清回 0，别让奖励永久卡死。
+          await db.from(TABLE_GRANTS).update({ claimed_at: 0 })
+            .eq("id", row.id).eq("claimed_at", token).throwOnError();
+          continue;
+        }
+        claimed.push(final);
+      }
+      return claimed;
+    },
+
+    // 补偿：退回「已认领但存档没写成」的行。必须回读确认 —— 退不掉的话奖励会卡住，
+    // 调用方需要据此告警（见 server.js 的 releaseClaimed）。
+    async releaseGrants(ids, { claimedAt } = {}) {
+      let released = 0;
+      for (const id of Array.isArray(ids) ? ids : []) {
+        await db.from(TABLE_GRANTS).update({ claimed_at: 0 })
+          .eq("id", id).eq("claimed_at", claimedAt).throwOnError();
+        const after = await selectOne(TABLE_GRANTS, "id", id);
+        if (after && Number(after.claimed_at) === 0) released++;
+      }
+      return released;
     }
   };
 }

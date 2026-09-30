@@ -1510,6 +1510,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
       <div id="receiptRows"></div>
       <div class="v02-paper-line"></div>
       <div class="v02-receipt-row total" id="receiptPaidRow"><span>支付</span><span id="receiptPaid"></span></div>
+      <div class="v02-receipt-row total" id="receiptGainRow" style="display:none"><span>奖励</span><span id="receiptGain"></span></div>
       <div class="v02-receipt-row total" id="receiptRefundRow" style="display:none"><span>返还</span><span id="receiptRefund"></span></div>
       <div class="v02-receipt-row" id="receiptBalanceRow" style="display:none"><span>剩余泡泡</span><span id="receiptBalance"></span></div>
       <div class="v02-receipt-note" id="receiptNote"></div>
@@ -2201,29 +2202,45 @@ body:not(.dev-on) .dev-panel{display:none!important}
   }
 
   // 推送本地存档。成功返回 true。
+  // 🔴 同一时刻只允许一次推送在飞：两次并发推送会各自拿同一份旧本地值去 merge，
+  //    后到的那次会把前一次刚结算进来的奖励覆盖掉（服务端 merge 接受更小的泡泡值）。
+  //    已经在飞就直接复用那一次的结果，不再发第二份。
+  let cloudPushPromise=null;
   async function pushCloudSave(){
     if(!CLOUD_SYNC_ENABLED||!ACCOUNT_TOKEN) return false;
-    try{
-      const response=await fetch(`${API_BASE}/game/save`,{
-        method:"PUT",
-        headers:cloudHeaders(),
-        body:JSON.stringify(buildCloudPayload())
-      });
-      // 停机时服务端回 503 + maintenance:true —— 这不是普通的推送失败，
-      // 重试也没用，直接切维护页；本地存档照旧留在设备上。
-      if(!response.ok){
-        const failure=await response.json().catch(()=>null);
-        if(handleMaintenanceResponse(response,failure)) return false;
-        throw new Error(`HTTP ${response.status}`);
+    if(cloudPushPromise) return cloudPushPromise;
+    cloudPushPromise=(async()=>{
+      try{
+        const response=await fetch(`${API_BASE}/game/save`,{
+          method:"PUT",
+          headers:cloudHeaders(),
+          body:JSON.stringify(buildCloudPayload())
+        });
+        // 停机时服务端回 503 + maintenance:true —— 这不是普通的推送失败，
+        // 重试也没用，直接切维护页；本地存档照旧留在设备上。
+        if(!response.ok){
+          const failure=await response.json().catch(()=>null);
+          if(handleMaintenanceResponse(response,failure)) return false;
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const body=await response.json();
+        const data=(body&&body.data)||{};
+        markPushed(Number(data.updatedAt)||Date.now());
+        // 服务端在 push 里兜底结算了后台发的奖励（§3.4）：必须**当场采用**它返回的存档。
+        // 不采用的话本地还是旧泡泡，下一次 push 会把刚发的奖励覆盖回去。
+        if(data.claimedGrants){
+          adoptGrantResult(data.save,data.updatedAt);
+          showGrantReceipt(data.claimedGrants);
+        }
+        return true;
+      }catch(error){
+        console.warn("[cloud] 存档推送失败（本地已保存，下次改动会重试）：",error.message);
+        return false;
+      }finally{
+        cloudPushPromise=null;
       }
-      const body=await response.json();
-      const data=(body&&body.data)||{};
-      markPushed(Number(data.updatedAt)||Date.now());
-      return true;
-    }catch(error){
-      console.warn("[cloud] 存档推送失败（本地已保存，下次改动会重试）：",error.message);
-      return false;
-    }
+    })();
+    return cloudPushPromise;
   }
 
   // 存档触发点很密（调音量、买一条鱼、摆一下位置都会存），合并成一次推送。
@@ -2247,6 +2264,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
       const data=(body&&body.data)||{};
       if(!data.exists){
         await pushCloudSave();
+        await claimPendingRewards();
         return;
       }
       const remoteUpdatedAt=Number(data.updatedAt)||0;
@@ -2263,6 +2281,48 @@ body:not(.dev-on) .dev-panel{display:none!important}
       }
     }catch(error){
       console.warn("[cloud] 存档同步失败（继续用本地存档）：",error.message);
+    }
+    // 存档对齐之后再去结算奖励：这时本地的泡泡已经是对齐过的值，结算结果覆盖上去才对得上。
+    // 顺序不能反 —— 先领奖再对齐，对齐那一步会把刚领到的奖励覆盖掉。
+    await claimPendingRewards();
+  }
+
+  // 采用服务端结算后的存档。**只覆盖 PlayerData**（泡泡 + 库存），不碰鱼缸与设置：
+  // 请求发出去的这半秒里玩家可能正在摆鱼，整包覆盖会把那一下抹掉。
+  // 而泡泡与库存必须覆盖 —— 本地还是旧泡泡的话，下一次 push 会把刚发的奖励覆盖回去。
+  function adoptGrantResult(save,updatedAt){
+    if(save&&typeof save==="object"&&save.PlayerData){
+      replaceContents(PlayerData,save.PlayerData);
+      ensureInventory();
+      renderBubbles();
+    }
+    if(Number(updatedAt)>0) markPushed(Number(updatedAt));
+  }
+
+  // 主动结算待领取的运营奖励（后台发的补偿 / 维护奖励）。
+  // 服务端在 push 存档时也会兜底结算，这里再领一次是为了覆盖
+  // 「玩家本地没有改动、压根不会触发 push」的情况。
+  async function claimPendingRewards(){
+    if(!CLOUD_SYNC_ENABLED||!ACCOUNT_TOKEN) return;
+    try{
+      const response=await fetch(`${API_BASE}/game/grants/claim`,{
+        method:"POST",
+        headers:cloudHeaders(),
+        body:"{}"
+      });
+      if(!response.ok){
+        const failure=await response.json().catch(()=>null);
+        if(handleMaintenanceResponse(response,failure)) return;
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const body=await response.json();
+      const data=(body&&body.data)||{};
+      if(!data.receipt) return; // 没有待领取的（绝大多数情况）
+      adoptGrantResult(data.save,data.updatedAt);
+      showGrantReceipt(data.receipt);
+    }catch(error){
+      // 奖励没领到不打扰玩家：下一次 push 或下次打开还会再试。
+      console.warn("[cloud] 奖励结算失败：",error.message);
     }
   }
   function getInv(item){ return Number((PlayerData.inventory[item.category]||{})[item.id]||0); }
@@ -3206,28 +3266,39 @@ body:not(.dev-on) .dev-panel{display:none!important}
     // 失败的小票不该写"购买时间"—— 那一次并没有买成。
     const failed = String(title || "").startsWith("无法");
     const timeEl = document.getElementById("receiptTime");
-    if(timeEl) timeEl.textContent = `${failed ? "小票时间" : "购买时间"} ${formatReceiptStamp(Date.now())}`;
+    // 领奖小票不是「购买」，票面时间要能改口径（options.timeLabel）。
+    const timeLabel = options.timeLabel || (failed ? "小票时间" : "购买时间");
+    if(timeEl) timeEl.textContent = `${timeLabel} ${formatReceiptStamp(Date.now())}`;
     renderBarcode(document.getElementById("receiptBarcode"), RECEIPT_BARCODE_TEXT);
     const modal=document.getElementById("purchaseReceipt");
     const rowsEl=document.getElementById("receiptRows");
+    // plain：整单不收钱（领奖）。此时不显示单价/小计 —— 满屏「0 ×1」「0 🫧」只会让人以为算错了。
+    const plain = options.plain === true;
     rowsEl.innerHTML="";
     rows.forEach(row=>{
       const div=document.createElement("div");
       div.className="v02-receipt-row";
       const quantity=Number(row.qty)||1;
       const unitPrice=Math.abs(Number(row.price)||0)/quantity;
-      const qtyText=`${unitPrice} ×${quantity}`;
+      const qtyText=plain?`×${quantity}`:`${unitPrice} ×${quantity}`;
       const memberMark=row.isMemberOnly?'<span class="v02-member-badge">★ 会员</span>':'';
       const displayPrice=Math.abs(Number(row.price)||0);
-      div.innerHTML=`<span>${memberMark}${escapeHtml(row.name)} ${qtyText}</span><span>${displayPrice} 🫧</span>`;
+      const priceCell=plain?"":`<span>${displayPrice} 🫧</span>`;
+      div.innerHTML=`<span>${memberMark}${escapeHtml(row.name)} ${qtyText}</span>${priceCell}`;
       rowsEl.appendChild(div);
     });
     document.getElementById("receiptTitle").textContent=title||"购买成功";
     const paidAmount=typeof paid==="number"?paid:0;
     const refundAmount=Number(options.refund||0);
+    const gainAmount=Number(options.gain||0);
     const paidRow=document.getElementById("receiptPaidRow");
+    const gainRow=document.getElementById("receiptGainRow");
     const refundRow=document.getElementById("receiptRefundRow");
     paidRow.style.display=paidAmount>0?"flex":"none";
+    if(gainRow){
+      gainRow.style.display=gainAmount>0?"flex":"none";
+      if(gainAmount>0) document.getElementById("receiptGain").textContent=`+${gainAmount} 🫧`;
+    }
     refundRow.style.display=refundAmount>0?"flex":"none";
     document.getElementById("receiptPaid").textContent=`-${paidAmount} 🫧`;
     document.getElementById("receiptRefund").textContent=`${refundAmount} 🫧`;
@@ -3251,6 +3322,25 @@ body:not(.dev-on) .dev-panel{display:none!important}
     const modal=document.getElementById("purchaseReceipt");
     modal.classList.remove("show");
     modal.setAttribute("aria-hidden","true");
+  }
+  // 领奖小票：和购买小票同一张纸，但不显示单价 —— 这是收到的，不是买来的。
+  // receipt 由服务端给：{ count, bubbles, balance, items:[{id,category,qty}], reasons:[] }。
+  function grantItemName(id){
+    const item=typeof getItem==="function"?getItem(id):null;
+    return item&&item.name?item.name:"";
+  }
+  function showGrantReceipt(receipt){
+    if(!receipt) return;
+    const items=Array.isArray(receipt.items)?receipt.items:[];
+    const rows=items.map(item=>({ name:grantItemName(item.id)||item.id, qty:Number(item.qty)||1, price:0 }));
+    const reason=(receipt.reasons&&receipt.reasons[0])||"";
+    showPurchaseReceipt(
+      "收到一份奖励",
+      rows.length?rows:[{ name:"鱼缸管理员的心意", qty:1, price:0 }],
+      0,
+      reason?`鱼缸管理员：${reason}`:"鱼缸管理员给你留了点东西，收好。",
+      { gain:Number(receipt.bubbles)||0, balance:Number(receipt.balance)||PlayerData.bubbles, plain:true, timeLabel:"小票时间" }
+    );
   }
   let shopCategory="all";
 
