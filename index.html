@@ -2078,6 +2078,9 @@ body:not(.dev-on) .dev-panel{display:none!important}
   // 注意：签名算法在客户端，挡不住铁了心的攻击者，它的作用是「发现」而非「阻止」；
   // 真正的防篡改要等存档服务端化（见 /api/game/focus/* 的奖励结算）。
   const SAVE_INTEGRITY_SALT = "fishtank-v0.2-integrity";
+  // 🔴 这里签的字段集必须与后端 PLAYER_FIELDS（api/player-store.js）里 signed:true 的字段一致。
+  //    加字段时两边一起改，并且**升版本 + 写迁移**：签名算法一变，所有老存档都算不出匹配的
+  //    签名 → 被判 tampered → 泡泡清零。api/test/player-field-registry.test.js 有断言盯着这条。
   function computeSaveSignature(player){
     const payload = JSON.stringify({
       bubbles: Math.floor(Number(player.bubbles)||0),
@@ -2111,6 +2114,10 @@ body:not(.dev-on) .dev-panel{display:none!important}
     saveGame(); // 老存档补签，避免下次误判
   }
 
+  // 老存档缺字段在这里补默认值。
+  // 🔴 PlayerData 里加新字段必须**同时**在后端 api/player-store.js 的 PLAYER_FIELDS 注册 ——
+  //    没注册的键会被服务端静默丢弃，而 applyCloudSave 的 replaceContents 是先清空再写入，
+  //    于是本地这份也会被一起抹掉（表现成「本地解锁了、一联网就归零」，全程无报错）。
   function migrateData(){
     const inv=PlayerData.inventory=PlayerData.inventory||{};
     if(inv.plants && !inv.decorations) inv.decorations=inv.plants;
@@ -2226,12 +2233,14 @@ body:not(.dev-on) .dev-panel{display:none!important}
         const body=await response.json();
         const data=(body&&body.data)||{};
         markPushed(Number(data.updatedAt)||Date.now());
-        // 服务端在 push 里兜底结算了后台发的奖励（§3.4）：必须**当场采用**它返回的存档。
-        // 不采用的话本地还是旧泡泡，下一次 push 会把刚发的奖励覆盖回去。
-        if(data.claimedGrants){
-          adoptGrantResult(data.save,data.updatedAt);
-          showGrantReceipt(data.claimedGrants);
-        }
+        // 🔴 服务端是权威：响应带回它**实际存下来的** PlayerData（泡泡 + 库存），本地一律采用。
+        //    两个理由：
+        //      ① 服务端会拒掉泡泡上浮（泡泡已服务端权威）。不采用的话本地还留着那个高值，
+        //         两边永久漂移，且每次 push 都会再被拒一次。
+        //      ② push 里会兜底结算后台发的奖励（§3.4），那份新存档不采用就白发了。
+        //    只覆盖 PlayerData，不碰鱼缸 —— 请求发出的这半秒里玩家可能正在摆鱼。
+        if(data.save) adoptGrantResult(data.save,data.updatedAt);
+        if(data.claimedGrants) showGrantReceipt(data.claimedGrants);
         return true;
       }catch(error){
         console.warn("[cloud] 存档推送失败（本地已保存，下次改动会重试）：",error.message);
@@ -2295,6 +2304,10 @@ body:not(.dev-on) .dev-panel{display:none!important}
       replaceContents(PlayerData,save.PlayerData);
       ensureInventory();
       renderBubbles();
+      // 🔴 落盘但**不回推**（persistLocalSave 不排推送）。不落盘的话本地镜像一直落后于
+      //    服务端已接受的值，下次刷新又会把那个旧值推上去、再被服务端拒一次。
+      //    这里绝不能调 saveGame() —— 它会排一次推送，而推送的响应又会走回这里，变成死循环。
+      persistLocalSave();
     }
     if(Number(updatedAt)>0) markPushed(Number(updatedAt));
   }
@@ -2896,21 +2909,25 @@ body:not(.dev-on) .dev-panel{display:none!important}
     return results;
   }
   // 进入时（或长时间切回来时）跑一次离线结算。
-  function checkOfflineEvents(){
+  // async：泡泡奖励要等服务端落账（见 applyEventEffect）。逐条 await 而不是并发 ——
+  // 同一批事件里如果有两条都发泡泡，并发会让它们各自基于同一份旧存档去结算。
+  async function checkOfflineEvents(){
     if(!EVENT_CONFIGS.length) return [];
     const now = Date.now();
     const lastSeenAt = readLastSeenAt();
     // 首次进入：只记录，不判定。
     if(!lastSeenAt){ writeLastSeenAt(now); return []; }
     const results = pickOfflineEventResults(EVENT_CONFIGS, eventRuntime, eventContext(), lastSeenAt, now, Math.random);
-    results.forEach(result => {
-      applyEventEffect(result.effect);
+    for(const result of results){
+      const applied = await applyEventEffect(result.effect, result.config);
+      // 无论发没发奖都要推进冷却：不然被服务端拒掉之后，每 5 秒会再试一次。
       markEventTriggered(result.config.id, now);
+      if(!applied) continue;
       // 离开期间发生的事件同样进大事记：玩家回来才看得到的那几条，最需要被记住。
       result.at = now;
       recordEventLog(result, now);
       pendingEventResults.push(result);
-    });
+    }
     if(results.length){ saveEventRuntime(); flushPendingEvents(); }
     return results;
   }
@@ -2930,11 +2947,64 @@ body:not(.dev-on) .dev-panel{display:none!important}
       dayCount: (slot.dayKey === dayKey ? Math.max(0, Math.floor(Number(slot.dayCount) || 0)) : 0) + 1
     };
   }
+  // 事件奖励的服务端出口。返回**服务端裁定的泡泡数**；返回 null = 这次服务端够不着
+  // （未登录 / 纯本地 / 网络挂了），调用方回落本地加法。
+  //
+  // 触发条件仍由前端判定（服务端不复现随机与条件），服务端只强制「冷却 + 每日上限」
+  // 并把数量钳到配置区间内 —— 所以伪造一次事件最多拿到配置允许的那一份，刷不出无限泡泡。
+  async function requestEventReward(config, bubbles){
+    if(!CLOUD_SYNC_ENABLED || !ACCOUNT_TOKEN) return null;
+    if(!config || !config.id) return null;
+    try{
+      const response = await fetch(`${API_BASE}/game/events/reward`,{
+        method:"POST",
+        headers: cloudHeaders(),
+        body: JSON.stringify({ eventId: config.id, bubbles })
+      });
+      const body = await response.json().catch(()=>null);
+      if(!response.ok){
+        // 409 = 冷却中 / 今日上限，404 = 事件没发布。这些是**正常的拒绝**：
+        // 事件本身照常展示，但绝不本地补泡泡 —— 补了就等于绕过服务端闸门。
+        if(response.status === 409 || response.status === 404) return 0;
+        handleMaintenanceResponse(response, body);
+        return null;
+      }
+      const data = (body && body.data) || {};
+      // 服务端顺带结算了存档 → 当场采用。不采用的话本地还是旧泡泡，下一次 push 会把它夹回去。
+      if(data.save) adoptGrantResult(data.save, data.updatedAt);
+      return Math.max(0, Math.floor(Number(data.bubbles) || 0));
+    }catch(_){
+      return null;
+    }
+  }
+
   // 把 handler 返回的效果落到存档上。这里是唯一会改玩家数据的地方。
-  function applyEventEffect(effect){
+  //
+  // 🔴 泡泡是**服务端权威**：已登录时不再本地加，改为让服务端落账（写 grant + 当场结算），
+  //    拿它返回的存档覆盖本地。本地加的那份会被下一次 push 的 `Math.min` 夹回去，
+  //    玩家看到的就是「+30 泡泡又没了」。未登录 / 纯本地模式才走本地加法 ——
+  //    那种情况根本没有服务端权威可言。
+  // 返回 true = 这次事件确实发生了（调用方据此进大事记、弹票）；false = 服务端说没发生，
+  // 调用方要把它整个跳过 —— 不能弹一张「+13 泡泡」却一颗都没到账的票。
+  async function applyEventEffect(effect, config){
     if(effect.bubbles > 0){
-      PlayerData.bubbles += effect.bubbles;
-      renderBubbles();
+      const rolled = effect.bubbles;
+      const granted = await requestEventReward(config, rolled);
+      if(granted === null){
+        // 服务端够不着（未登录 / 纯本地 / 网络挂了）→ 本地加法。
+        PlayerData.bubbles += rolled;
+        renderBubbles();
+      }else if(granted === 0){
+        // 🔴 服务端明确拒绝（冷却中 / 今日上限 / 事件没发布）。
+        //    客户端的 eventRuntime 是本地状态，多设备或清过缓存时会和服务端对不上 ——
+        //    以服务端为准：这次就当没发生，**不补泡泡、不弹票、不进大事记**。
+        console.info("[event] 服务端拒绝发放这次事件奖励（冷却或每日上限），已跳过：", config && config.id);
+        return false;
+      }else if(granted !== rolled){
+        // 服务端钳制过（正常游玩不会发生）→ 票面上的数字要跟着改，别让票面和到账对不上。
+        effect.bubbles = granted;
+        effect.message = formatEventMessage(config.message, { count: granted, source: effect.source });
+      }
     }
     if(Array.isArray(effect.lost) && effect.lost.length){
       effect.lost.forEach(entry => {
@@ -2944,6 +3014,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
       renderAquarium(AquariumData);
     }
     saveGame();
+    return true;
   }
 
   // ===== 鱼缸大事记：最近 10 次随机事件 =====
@@ -3052,21 +3123,26 @@ body:not(.dev-on) .dev-panel{display:none!important}
   }
   // 检测入口。reason 只用于日志：timer / focus-complete。
   // 商店开着的时候不检测 —— 那时候玩家正在改鱼缸，中途把鱼拿走会让预览状态错乱。
-  function checkEvents(reason){
+  //
+  // async：泡泡奖励要等服务端落账（见 applyEventEffect）。逐条 await 而不是并发 ——
+  // 同一批事件里如果有两条都发泡泡，并发会让它们各自基于同一份旧存档去结算。
+  async function checkEvents(reason){
     if(!EVENT_CONFIGS.length) return [];
     const shop = document.getElementById("shopModal");
     if(shop && shop.classList.contains("show")) return [];
     const now = Date.now();
     const { results, checked } = pickEventResults(EVENT_CONFIGS, eventRuntime, eventContext(), now, Math.random);
     markEventChecked(checked, now);
-    results.forEach(result => {
-      applyEventEffect(result.effect);
+    for(const result of results){
+      const applied = await applyEventEffect(result.effect, result.config);
+      // 无论发没发奖都要推进冷却：不然被服务端拒掉之后，每 5 秒会再试一次。
       markEventTriggered(result.config.id, now);
+      if(!applied) continue;
       // 事件发生的真实时刻，给票面时间和大事记用（弹窗可能排在别的遮罩后面）。
       result.at = now;
       recordEventLog(result, now);
       pendingEventResults.push(result);
-    });
+    }
     saveEventRuntime();
     if(results.length) flushPendingEvents();
     return results;
@@ -3075,8 +3151,9 @@ body:not(.dev-on) .dev-panel{display:none!important}
     if(eventTimer) return;
     eventTimer = setInterval(() => {
       if(document.hidden) return;      // 后台标签页不检测：既省电，也避免回来时一次弹一堆
-      checkEvents("timer");
-      flushPendingEvents();
+      // checkEvents 现在是 async（要等服务端落账），flush 必须挂在它后面 ——
+      // 否则会在事件还没进队列时就 flush，那一次提示就丢了。
+      void checkEvents("timer").then(() => flushPendingEvents());
     }, EVENT_TICK_MS);
     // 离线结算靠「最后在线时刻」，所以要持续记录它。
     // 60s 写一次 + 切后台/关页面时补一次 —— 页面被直接杀掉时最多差 60 秒，不影响判定。
@@ -3085,8 +3162,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
     document.addEventListener("visibilitychange", () => {
       if(document.hidden){ writeLastSeenAt(Date.now()); return; }
       // 从后台切回来：先按刚才记下的时刻结算离线事件（挂了一天没关页面也能算到）。
-      checkOfflineEvents();
-      flushPendingEvents();
+      void checkOfflineEvents().then(() => flushPendingEvents());
     });
   }
   function bindEventModal(){
@@ -4359,7 +4435,7 @@ function categoryScale(key){
     completionFlash.setAttribute("aria-hidden","true");
     // 专注结算完成是事件的第二个检测点（S8）：刚专注完的这一刻最有意义。
     // 放在完成提示关掉之后，避免两层遮罩叠在一起。
-    if(typeof checkEvents === "function"){ checkEvents("focus-complete"); flushPendingEvents(); }
+    if(typeof checkEvents === "function"){ void checkEvents("focus-complete").then(() => flushPendingEvents()); }
   };
 
   confirmBtn.onclick = () => {
@@ -4683,8 +4759,12 @@ function resetFocus(completed) {
     // "获得了 25 泡泡"被改成 0、已经进兜的泡泡又消失，像是被吞了奖励。
     // 所以先显示"结算中"，等结果回来一次性给出数字。
     completionReward.textContent = "正在结算…";
-    const finishFocusReward = reward => {
-      const granted = applyFocusReward(reward);
+    // settledByServer = true 表示泡泡已由服务端落账，这里**只负责显示**、不再本地加。
+    // 本地加的那份会被下一次 push 的 `Math.min` 夹回去（泡泡已是服务端权威）。
+    const finishFocusReward = (reward, settledByServer) => {
+      const granted = settledByServer
+        ? Math.max(0, Math.floor(Number(reward) || 0))
+        : applyFocusReward(reward);
       // 算出 0 说明这次确实没攒够时长（DEV 快进、提前结束都算），
       // 这时要把话说清楚，否则玩家只会觉得奖励被吞了。
       completionReward.textContent = granted > 0
@@ -4692,8 +4772,24 @@ function resetFocus(completed) {
         : "这次没攒够时长，没有泡泡。下次专注满 25 分钟就有啦 🫧";
     };
     settleFocusReward(localReward).then(
-      settlement => { finishFocusReward(settlement.reward); refreshFocusStats(); },
-      () => { finishFocusReward(localReward); refreshFocusStats(); }
+      settlement => {
+        const detail = settlement.detail || {};
+        if(settlement.source === "server" && detail.granted){
+          // 服务端已把奖励落账（写 grant + 当场结算）。
+          // save 为空 = 还没有云存档，奖励挂在待领取状态，第一次 push 时结算，不会丢。
+          if(detail.save) adoptGrantResult(detail.save, detail.updatedAt);
+          // 结算时顺带领进来的**别的**待领奖励（运营补偿等）单独弹一张小票，别让它静默到账。
+          if(detail.receipt && (detail.receipt.reasons || []).some(reason => reason !== "专注奖励")){
+            showGrantReceipt(detail.receipt);
+          }
+          finishFocusReward(settlement.reward, true);
+        }else{
+          // 未登录 / 落账失败 / 服务端够不着 → 本地兜底（纯本地模式没有权威可言）。
+          finishFocusReward(settlement.reward, false);
+        }
+        refreshFocusStats();
+      },
+      () => { finishFocusReward(localReward, false); refreshFocusStats(); }
     );
   }
 
@@ -5109,7 +5205,8 @@ const elemToRemove = nearest.el;
     startEventLoop();
     // 离线事件在进入时结算一次 —— 必须放在 startEventLoop() 之后，
     // 因为首次进入是「只记录不判定」，得先让 lastSeenAt 有值。
-    checkOfflineEvents();
+    // async（泡泡要等服务端落账），这里不阻塞后面的渲染。
+    void checkOfflineEvents().then(() => flushPendingEvents());
     // 新手引导放在最后：页面已经渲染完，聚光洞才能量到正确位置。
     // 配置没拉到时不引导 —— 那时候先把提示条给玩家看，别用引导盖住它。
     // 停机中不引导：维护页已经盖住整个界面，引导会在它下面空跑一遍。

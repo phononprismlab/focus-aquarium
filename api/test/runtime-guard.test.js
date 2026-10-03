@@ -3,13 +3,40 @@
 //   1) 纯函数单测（resolveAdminApiKey / checkProductionConfig / warnWeakAdminKey）
 //   2) 真起进程的端到端验证：生产环境漏配密钥必须拒绝启动
 // 运行：node test/runtime-guard.test.js
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveAdminApiKey, checkProductionConfig, warnWeakAdminKey, MIN_RECOMMENDED_ADMIN_KEY_LENGTH } from "../runtime-guard.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const apiDir = path.join(here, "..");
+
+// 跑一个会自己退出的子进程，把 stdout / stderr / 退出码一并收回来。
+//
+// 🔴 必须用异步 spawn，**不能用 spawnSync**：在沙箱与部分 CI 里 spawnSync 读子进程管道
+//    会 EBUSY，拿到的 stdout/stderr 是空的 —— 于是「报错信息点明原因」这条会假失败
+//    （而「退出码非 0」那条反而是对的，因为 status 不走管道）。异步 spawn 收 'data' 事件
+//    不经过同步管道读取，两边都拿得到。
+function runProcess(command, args, { cwd, env, timeoutMs = 15000 } = {}) {
+  return new Promise(resolve => {
+    const child = spawn(command, args, { cwd, env });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timer = null;
+    const finish = (status, timedOut) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve({ status, stdout, stderr, timedOut: Boolean(timedOut) });
+    };
+    child.stdout.on("data", chunk => { stdout += chunk.toString(); });
+    child.stderr.on("data", chunk => { stderr += chunk.toString(); });
+    child.on("error", error => { stderr += String((error && error.message) || error); finish(null, false); });
+    child.on("close", code => finish(code, false));
+    timer = setTimeout(() => { child.kill(); finish(null, true); }, timeoutMs);
+  });
+}
 
 let pass = 0;
 let fail = 0;
@@ -49,11 +76,9 @@ delete baseEnv.ADMIN_API_KEY;
 delete baseEnv.NODE_ENV;
 
 // 2.1 生产环境 + 无密钥 → 必须退出且退出码非 0
-const denied = spawnSync(process.execPath, ["server.js"], {
+const denied = await runProcess(process.execPath, ["server.js"], {
   cwd: apiDir,
-  env: { ...baseEnv, NODE_ENV: "production" },
-  encoding: "utf8",
-  timeout: 15000
+  env: { ...baseEnv, NODE_ENV: "production" }
 });
 chk("生产环境无密钥退出码非 0", denied.status !== 0, true);
 chk("报错信息点明原因", String(denied.stderr || "").includes("ADMIN_API_KEY"), true);

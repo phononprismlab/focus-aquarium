@@ -21,6 +21,7 @@ const files = ["reward.test.js", "focus-session.test.js", "audio-categories.test
   "account.test.js",
   "account-client.test.js",
   "cloud-save.test.js",
+  "player-field-registry.test.js",
   "player-cloud-sync.test.js",
   "sync-code.test.js",
   "focus-stats.test.js",
@@ -50,6 +51,7 @@ const files = ["reward.test.js", "focus-session.test.js", "audio-categories.test
   "ops-config.test.js",
   "player-ops-ui.test.js",
   "grants.test.js",
+  "bubble-authority.test.js",
   "t25-e2e.test.js"];
 
 let failed = 0;

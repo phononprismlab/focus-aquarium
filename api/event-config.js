@@ -15,6 +15,59 @@ export const BUBBLE_RANGE_HANDLERS = ["give-bubbles", "treasure"];
 // id 会被当作配置主键、localStorage 后缀使用，限制字符集。
 export const EVENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,48}$/;
 
+// ===== 事件奖励的服务端闸门 =====
+//
+// 事件的**触发判定仍在前端**（5s 心跳、命中概率也配在前端）。服务端不复现触发条件 ——
+// 它只强制两件配置里本来就写着的事：**冷却**与**每日上限**。
+//
+// 于是伪造一次事件最多拿到「配置允许的那一份」，而不是无限泡泡。
+// 账本直接用 grants 表：每发一次就留一行 `reason = "event:<id>"`，
+// 行数就是「今天发过几次」，最大的 created_at 就是「上次什么时候发的」。
+//
+// ⚠️ reason 必须**精确匹配**整个 `event:<id>`，不能用前缀模糊 —— 否则
+//    `event:e1` 与 `event:e10` 会互相污染配额。
+export const EVENT_REWARD_REASON_PREFIX = "event:";
+export const eventRewardReason = id => `${EVENT_REWARD_REASON_PREFIX}${String(id)}`;
+
+// 裁定「这次事件奖励该不该发、发多少」。纯函数，冷却与上限所需的状态由调用方查好传进来。
+//
+//   config    已发布的该事件配置
+//   observed  { count, lastAt } —— 该用户今天已发次数 / 上次发放时间（来自 queryGrants）
+//   requested 客户端报的数量。**只作为上限内的意图**：服务端钳到 [min, max]，
+//             传了非法值就按 min 发（保守），绝不采信区间外的数。
+//   now       当前时间戳
+export function planEventReward({ config, observed, requested, now }) {
+  if (!config || !config.id) return { ok: false, code: "EVENT_NOT_FOUND", error: "事件不存在或已下架" };
+  if (config.enabled === false) return { ok: false, code: "EVENT_DISABLED", error: "这个事件已停用" };
+  // 只有靠 min/max 决定给多少泡泡的 handler 才发奖。fish-escape 是消耗端，不发泡泡。
+  if (!BUBBLE_RANGE_HANDLERS.includes(config.handler)) {
+    return { ok: false, code: "EVENT_NO_BUBBLES", error: "这个事件不发泡泡" };
+  }
+
+  const min = Number(config.params && config.params.min);
+  const max = Number(config.params && config.params.max);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max < min) {
+    return { ok: false, code: "EVENT_BAD_CONFIG", error: "事件奖励区间配置不合法" };
+  }
+
+  const maxPerDay = Math.max(1, Math.floor(Number(config.maxPerDay) || 1));
+  const usedToday = Math.max(0, Math.floor(Number(observed && observed.count) || 0));
+  if (usedToday >= maxPerDay) {
+    return { ok: false, code: "DAILY_LIMIT", error: "这个事件今天已经发生够了", maxPerDay, usedToday };
+  }
+
+  const cooldownMs = Math.max(0, Number(config.cooldownMinutes) || 0) * 60000;
+  const lastAt = Number(observed && observed.lastAt) || 0;
+  const readyAt = lastAt + cooldownMs;
+  if (cooldownMs > 0 && lastAt > 0 && readyAt > now) {
+    return { ok: false, code: "COOLDOWN", error: "这个事件还在冷却中", readyAt, remainingMs: readyAt - now };
+  }
+
+  const rolled = Math.floor(Number(requested));
+  const bubbles = Math.min(max, Math.max(min, Number.isFinite(rolled) ? rolled : min));
+  return { ok: true, bubbles, reason: eventRewardReason(config.id) };
+}
+
 export function validateEventConfig(data) {
   if (!data.id || typeof data.id !== "string") return "事件必须包含 id";
   if (!EVENT_ID_PATTERN.test(data.id)) return `事件 id 只能是字母、数字、下划线或连字符（1-48 位）：${data.id}`;

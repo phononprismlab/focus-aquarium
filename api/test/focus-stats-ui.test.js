@@ -102,7 +102,9 @@ chkTrue("renderFocusStats 没账号时隐藏状态条", /el\.hidden\s*=\s*true/.
 
 // 调用时机：账号就绪 + 每次专注结算后都要拉一次。
 chkTrue("ensureAccount（有令牌分支）结算后刷新统计", /syncCloudSave\(\);\s*\n\s*refreshFocusStats\(\);/.test(extractFunction(playerCode, "ensureAccount")));
-chkTrue("专注结算完成后刷新统计", /settleFocusReward\(localReward\)\.then\([\s\S]{0,200}refreshFocusStats\(\)/.test(extractFunction(playerCode, "resetFocus")));
+// 窗口放宽到 2000 字符：结算分支里现在还要 adopt 服务端存档、必要时弹奖励小票
+// （泡泡已改为服务端权威）。断言的本意不变 —— 「结算完成之后」必须刷新统计，顺序不能反。
+chkTrue("专注结算完成后刷新统计", /settleFocusReward\(localReward\)\.then\([\s\S]{0,2000}?refreshFocusStats\(\)/.test(extractFunction(playerCode, "resetFocus")));
 chkTrue("兑换同步码接管后刷新统计", /await syncCloudSave\(\);\s*\n\s*refreshFocusStats\(\);/.test(extractFunction(playerCode, "redeemSyncCode")));
 
 // ============================================================

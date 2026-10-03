@@ -16,26 +16,31 @@
 //                                 商品只能经 POST /api/game/shop/buy 获得，价格以服务端配置为准。
 //      PlayerData.isMember     —— 会员标记（V1.0 不卖会员，但也不能让客户端自己开）
 //
+//   🔀 客户端只能减、服务端只能加
+//      PlayerData.bubbles      —— 客户端提交值只用于**下调**（买东西要推更小的余额），
+//                                 上浮一律以服务端现值为准。见 PLAYER_FIELDS.bubbles 的注释。
+//
 //   🟢 客户端权威（接受客户端值，只做范围钳制）
-//      PlayerData.bubbles      —— 见下面「泡泡为什么暂时是客户端权威」
 //      AquariumData.*           —— 鱼缸布局：选中哪条鱼、哪个背景/沙/装饰/音效
 //      Settings.*               —— 音量等偏好
 //
-// ===== 泡泡为什么暂时是客户端权威（已知欠账，公开发布前必须收紧）=====
+// ===== 泡泡是怎么变成服务端权威的 =====
 //
-// 定稿写的是「经济数据只由服务端改」。要真正做到，泡泡的每一次变动都得走服务端：
-// 专注奖励（已做到，focus/complete 服务端结算）、以及 4 个随机事件给的泡泡。
-// 但**事件检测完全在前端**（5s 心跳、命中概率也配在前端），服务端拿不到可信的触发证据，
-// 要校验就得把整套事件系统搬到服务端 —— 那是好几天的工作量，会把 11/4 上线推后。
+// 旧规则是 `min(提交值, 服务端值 + 2000)` —— 只挡单次增量、不挡次数，循环 push 就能刷。
+// 现在客户端提交值只用于下调，任何上浮都由服务端经手的事落账，且一律走 grants：
 //
-// 灰度期的实际风险：改存档需要玩家主动开 DevTools 改 localStorage，不是点两下就能做到的；
-// 灰度对象是 20–30 个熟人，没有真实支付、没有会员、没有排行榜与社交，
-// 改出来的泡泡只能影响他自己那个鱼缸。这个风险可以接受。
+//   专注奖励   focus/complete 结算完写一条 grant
+//   事件奖励   POST /api/game/events/reward，服务端校验冷却 + 每日上限后写一条 grant
+//   运营奖励   后台 /api/admin/grants
 //
-// ⚠️ 收紧的前提条件（任一满足就该动手）：
-//   · 开始有真实陌生用户 / 真实支付
-//   · 上线任何形式的排行榜、社交或分享对比
-//   收紧方式：泡泡也归服务端权威，事件命中改为上报服务端、由服务端按额度与每日上限发奖。
+// 🔴 为什么统统走 grants 而不是直接写 saves.bubbles：写完玩家下一次 push 会把更小的
+//    本地值推上来，`Math.min` 一夹，奖励就蒸发了。grants 是在 merge **之后**叠加的，
+//    天然免疫这个夹逼（这也是当初发运营奖励时踩出来的坑）。
+//
+// 事件奖励的强度边界（有意为之，不是遗漏）：事件的**触发判定仍在前端**（5s 心跳、
+// 概率也配在前端），服务端不复现触发条件 —— 它只强制「冷却 + 每日上限」这两个配置里
+// 本来就有的约束。所以伪造一次事件最多拿到「配置允许的那份」，刷不出无限泡泡。
+// 要再进一步就得把整套事件检测搬到服务端（含服务端随机），收益与成本不成比例。
 //
 // 但 AquariumData 不能无条件信任 —— 它是**间接的经济出口**：
 //   · 摆 1000 条鱼 → 不校验就能白嫖（鱼的条数必须 ≤ 库存条数）
@@ -47,10 +52,15 @@ export const TABLE_USERS = "users";
 export const TABLE_SAVES = "saves";
 export const TABLE_FOCUS_RECORDS = "focus_records";
 export const TABLE_TRACKING_EVENTS = "tracking_events";
-// 运营发放的奖励。为什么要单独一张表而不是直接改 saves.bubbles：
-// 存档是**前端推上来的整包**，mergeSaveForWrite 会接受客户端更小的泡泡值（买完要能推更小值），
-// 直接写进去的奖励会被下一次 push 覆盖掉。所以奖励先落成「待领取」的行，
-// 再由结算协议在 merge **之后**叠加到存档上（见 grants 相关实现）。
+// 待发放 / 已发放的奖励。**这是泡泡唯一的合法增长入口** —— 运营奖励、专注奖励、
+// 事件奖励都落在这里，再由结算协议在 merge **之后**叠加到存档上（见 grants 相关实现）。
+//
+// 为什么不直接改 saves.bubbles：存档是前端推上来的整包，客户端提交值能把服务端加上的
+// 泡泡夹回去（`Math.min`），直接写进去的奖励会被下一次 push 覆盖掉。
+//
+// 附带用途：这张表同时被当作**事件奖励的冷却账本** —— 每发一次事件奖励就留一行
+// `reason = "event:<id>"`，行数与时间戳就是「今天发过几次、上次什么时候发的」。
+// 因此查询它时必须按 reason 精确匹配（见 queryGrants）。
 export const TABLE_GRANTS = "grants";
 // 用户档案里允许被客户端改的列。白名单写死在数据层：路由层哪怕传了别的键也写不进去，
 // 免得将来有人顺手把 is_supporter / cohort 一起塞进 patch。
@@ -87,11 +97,8 @@ export const SINGLE_SLOT_FIELDS = {
   ambientSound: "sounds"
 };
 
-// 单次推送允许的泡泡增长上限。
-// 正常游玩两次推送之间的增量是个位数到几百（一次 25 分钟专注 + 几个事件），
-// 离线一整天再回来也远到不了这个数。超出的截断。
-// ⚠️ 这不是安全边界（泡泡是客户端权威），只是一道「别让 999999999 直接写进来」的兜底。
-export const MAX_BUBBLE_GAIN_PER_PUSH = 2000;
+// 泡泡绝对值上限。任何一条加法（发放 / 结算 / 首次同步）都套这个帽子，
+// 防的是「手滑多打几个 0」和脏数据，不是防作弊 —— 防作弊靠的是「客户端不能加」。
 export const MAX_BUBBLES = 1_000_000_000;
 
 // ===== 首次同步的上限（首 push 服务端没有基线，但不能因此就成了无底洞）=====
@@ -221,43 +228,107 @@ export function normalizeAquarium(value, inventory, previous = {}, { respectEmpt
   return { aquarium, problems };
 }
 
+// ===== PlayerData 字段注册表 =====
+//
+// mergeSaveForWrite 按这张表重建 PlayerData。**表里没注册的键一律丢弃** ——
+// 客户端塞不进任何没登记的东西（防脏数据的第一道闸）。
+//
+// 为什么要有这张表：以前 merge 是硬编码三个键，加第四个字段（图鉴 / 成就 / 连续打卡…）
+// 会被**静默丢掉**。而且丢在服务端还不够 —— 前端 applyCloudSave 用 replaceContents
+// （先清空再写入），会把本地那份也一起抹掉，表现成「本地解锁了、一联网就归零」，全程无报错。
+//
+// 每个字段声明三件事：
+//   source  「以谁为准」：client = 客户端提交的算数（图鉴解锁）
+//                        server = 服务端已存的算数（库存、会员，客户端改不动）
+//                        ⚠️ bubbles 是个特例：**客户端只能减、服务端只能加**（见那条的注释），
+//                        它标 client 是因为「客户端提交的值要参与计算」，不是因为客户端权威。
+//   merge   (server, client, { firstPush, problems }) => 归一后的值
+//   signed  是否纳入本机存档签名（见 index.html 的 computeSaveSignature）
+//
+// 🔴 加新字段的完整步骤（少一步就出问题）：
+//   ① 在这里注册一条，写清 merge 归一 —— 别信客户端提交的形状
+//   ② 前端 migrateData() 里补默认值（老存档没有这个键）
+//   ③ signed:true 的字段必须**同时**升签名版本 + 写迁移：签名算法一变，
+//      所有老存档都算不出匹配的签名 → 被判 tampered → 泡泡清零。
+//      test/player-field-registry.test.js 会盯着这条，别绕过去。
+export const PLAYER_FIELDS = {
+  // 🔴 泡泡：客户端**只能减，不能加**。
+  //
+  // 旧规则是 `Math.min(提交值, 服务端值 + 2000)`，注释里就写着「这不是安全边界」——
+  // 它只挡单次增量，挡不住次数：攻击者循环 PUT /api/game/save、每次报「当前 +2000」，
+  // 一秒几十次就是无限泡泡，根本不用真的专注。现在改成客户端提交值只用于**下调**
+  // （买完要推更小的值），任何上浮一律以服务端现值为准。
+  //
+  // 那泡泡怎么增加？**只能由服务端经手的事落账**，而且必须走 grants 协议：
+  //   专注奖励   focus/complete 结算完写一条 grant
+  //   事件奖励   POST /api/game/events/reward 校验冷却与每日上限后写一条 grant
+  //   运营奖励   后台 /api/admin/grants
+  // 为什么不能「服务端直接写 saves.bubbles」：写完玩家下一次 push 会把更小的本地值
+  // 推上来，`Math.min` 一夹，奖励就蒸发了。grants 是在 merge **之后**叠加的，天然免疫。
+  bubbles: {
+    source: "client",
+    signed: true,
+    merge: (server, client, { firstPush, problems }) => {
+      const submitted = normalizeBubbles(client.bubbles);
+      if (firstPush) {
+        // 首次同步：玩家的进度确实只在他的浏览器里，服务端没有依据可核对，
+        // 若强行从 0 开始等于把历史进度抹掉。但「以本地为准」不等于「来者不拒」——
+        // 按新账号的常识范围封顶（T3-9 之前这里能一次写进 1e9）。
+        // ⚠️ 这条通道是有界的作弊面：注册新号最多写进 FIRST_PUSH_MAX_BUBBLES 个泡泡，
+        //    之后就只能靠服务端落账了。V1.0 泡泡不对应任何现实价值，这个上界可接受。
+        const capped = Math.min(submitted, FIRST_PUSH_MAX_BUBBLES);
+        if (submitted > capped) {
+          problems.push(`首次同步泡泡超过新账号上限（提交 ${submitted} → ${FIRST_PUSH_MAX_BUBBLES}），已截断`);
+        }
+        return capped;
+      }
+      const serverBubbles = normalizeBubbles(server.bubbles);
+      if (submitted > serverBubbles) {
+        problems.push(`泡泡只允许服务端增加（服务端 ${serverBubbles} → 提交 ${submitted}），增量已忽略`);
+      }
+      return Math.min(submitted, serverBubbles);
+    }
+  },
+  isMember: {
+    source: "server",
+    signed: true,
+    merge: server => server.isMember === true
+  },
+  inventory: {
+    source: "server",
+    signed: true,
+    merge: (server, client, { firstPush, problems }) => {
+      if (!firstPush) return normalizeInventory(server.inventory);
+      const { inventory, problems: inventoryProblems } = normalizeInventoryForFirstPush(client.inventory);
+      problems.push(...inventoryProblems);
+      return inventory;
+    }
+  }
+};
+
 // 存档合并的**唯一入口**。stored 为 null 表示这个账号还没有存档（首次同步）。
 export function mergeSaveForWrite(stored, incoming, { saveVersion = "" } = {}) {
   const problems = [];
   const incomingSave = isPlainObject(incoming) ? incoming : {};
   const incomingPlayer = isPlainObject(incomingSave.PlayerData) ? incomingSave.PlayerData : {};
   const hasStored = isPlainObject(stored) && isPlainObject(stored.PlayerData);
+  const firstPush = !hasStored;
+  const serverPlayer = hasStored ? stored.PlayerData : {};
 
-  let player;
-  if (!hasStored) {
-    // 首次同步：服务端还没有基线，只能以玩家的本地存档为准。
-    // 这不是「信任客户端」的问题 —— 玩家的进度确实只存在于他的浏览器里，
-    // 服务端没有任何依据可以核对。若强行从 0 开始，等于把历史进度抹掉。
-    // 但「以本地为准」不等于「来者不拒」：泡泡与库存都按上面的常识范围归一。
-    const { inventory, problems: inventoryProblems } = normalizeInventoryForFirstPush(incomingPlayer.inventory);
-    const submittedBubbles = normalizeBubbles(incomingPlayer.bubbles);
-    const bubbles = Math.min(submittedBubbles, FIRST_PUSH_MAX_BUBBLES);
-    if (submittedBubbles > bubbles) {
-      problems.push(`首次同步泡泡超过新账号上限（提交 ${submittedBubbles} → ${FIRST_PUSH_MAX_BUBBLES}），已截断`);
+  // 客户端提交了「服务端权威」的字段 → 记一条，便于排查「我明明改了怎么没生效」。
+  // 首次同步不记：那一步本来就是以客户端为准，不存在「被忽略」。
+  if (!firstPush) {
+    for (const [key, rule] of Object.entries(PLAYER_FIELDS)) {
+      if (rule.source === "server" && key in incomingPlayer) {
+        problems.push(`忽略了客户端提交的 PlayerData.${key}`);
+      }
     }
-    problems.push(...inventoryProblems);
-    player = defaultPlayer({ bubbles, inventory });
-  } else {
-    // 已有存档：库存与会员标记以服务端为准，泡泡接受客户端的（带增长上限）。
-    const serverPlayer = stored.PlayerData;
-    for (const key of ["isMember", "inventory"]) {
-      if (key in incomingPlayer) problems.push(`忽略了客户端提交的 PlayerData.${key}`);
-    }
-    const serverBubbles = normalizeBubbles(serverPlayer.bubbles);
-    const submitted = normalizeBubbles(incomingPlayer.bubbles);
-    if (submitted > serverBubbles + MAX_BUBBLE_GAIN_PER_PUSH) {
-      problems.push(`泡泡增量超过单次上限（服务端 ${serverBubbles} → 提交 ${submitted}），已截断`);
-    }
-    player = {
-      bubbles: Math.min(submitted, serverBubbles + MAX_BUBBLE_GAIN_PER_PUSH),
-      isMember: serverPlayer.isMember === true,
-      inventory: normalizeInventory(serverPlayer.inventory)
-    };
+  }
+
+  // 按注册表重建。加字段只需在 PLAYER_FIELDS 里注册，这里不用动。
+  const player = {};
+  for (const [key, rule] of Object.entries(PLAYER_FIELDS)) {
+    player[key] = rule.merge(serverPlayer, incomingPlayer, { firstPush, problems });
   }
 
   const previousAquarium = hasStored && isPlainObject(stored.AquariumData) ? stored.AquariumData : {};
@@ -588,8 +659,8 @@ const nowIso = () => new Date().toISOString();
 
 
 // 服务端当天 00:00 的时间戳（毫秒），按服务端本地时区。
-// 专注聚合的「今日」边界统一以此为准（先按服务端时区，后续要时区再调）。
-function startOfTodayMs(nowFn = Date.now) {
+// 专注聚合与事件奖励每日上限的「今日」边界统一以此为准（先按服务端时区，后续要时区再调）。
+export function startOfTodayMs(nowFn = Date.now) {
   const d = new Date(nowFn());
   d.setHours(0, 0, 0, 0);
   return d.getTime();
@@ -893,6 +964,22 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
       if (userId) list = list.filter(g => g.user_id === userId);
       list.sort((a, b) => (Number(b.created_at) || 0) - (Number(a.created_at) || 0));
       return list.slice(0, Math.max(0, limit)).map(g => ({ ...g }));
+    },
+
+    // 按 reason 精确统计「某人在某段时间内领过几次、最后一次是什么时候」。
+    // 事件奖励的冷却与每日上限靠它 —— grants 表本身就是账本，不另建表。
+    async queryGrants({ userId = "", reason = "", since = 0 } = {}) {
+      let count = 0;
+      let lastAt = 0;
+      for (const row of grants.values()) {
+        if (userId && row.user_id !== userId) continue;
+        if (reason && row.reason !== reason) continue;
+        const at = Number(row.created_at) || 0;
+        if (at < since) continue;
+        count++;
+        if (at > lastAt) lastAt = at;
+      }
+      return { count, lastAt };
     },
 
     // 认领该玩家所有待领取的奖励（claimed_at = 0 → at），返回**本次真的认领到**的行。
@@ -1281,11 +1368,32 @@ export function createCloudbasePlayerStore(db, { now = () => Date.now() } = {}) 
       let q = db.from(TABLE_GRANTS).select("*");
       if (userId) q = q.eq("user_id", userId);
       const { data } = await q.throwOnError();
-      // 排序与截断都在 JS 侧做 —— 这个查询构造器没有 order 方法（同 listUsers 的取舍）。
+      // 排序与截断在 JS 侧做。构造器其实有 order 方法（fa-rdb-capability-probe.mjs 验过），
+      // 但它的实际行为没在线上验证过，不值得为一次排序去赌 —— 这里的数据量本来就小。
       return (data || [])
         .slice()
         .sort((a, b) => (Number(b.created_at) || 0) - (Number(a.created_at) || 0))
         .slice(0, Math.max(0, limit));
+    },
+
+    // 按 reason 精确统计。三个条件都下推到查询里（eq + eq + gte）——
+    // 这是**热路径**（每次事件触发都要问一次），不能像 listGrants 那样把该用户的
+    // 全部历史行拉回来再过滤：专注奖励每天都会留一行，跑一年就是上千行。
+    // 🔴 reason 必须精确匹配（`event:<id>`），不能用前缀 —— 否则 id 互为前缀的两个事件
+    //    会互相污染配额（`event:e1` 与 `event:e10`）。
+    async queryGrants({ userId = "", reason = "", since = 0 } = {}) {
+      let q = db.from(TABLE_GRANTS).select("*");
+      if (userId) q = q.eq("user_id", userId);
+      if (reason) q = q.eq("reason", reason);
+      if (since > 0) q = q.gte("created_at", since);
+      const { data } = await q.throwOnError();
+      const rows = Array.isArray(data) ? data : [];
+      let lastAt = 0;
+      for (const row of rows) {
+        const at = Number(row.created_at) || 0;
+        if (at > lastAt) lastAt = at;
+      }
+      return { count: rows.length, lastAt };
     },
 
     // 🔴 认领待领取的奖励：条件更新（claimed_at = 0 → 本次令牌）+ 回读确认。

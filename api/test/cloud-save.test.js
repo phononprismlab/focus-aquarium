@@ -55,7 +55,7 @@ function withEnv(env, fn) {
 
 const { issueSessionToken, verifySessionToken, sessionSecretStatus, resetSessionSecretCache } =
   await import("../session-token.js");
-const { mergeSaveForWrite, planPurchase, planSettlement, MAX_BUBBLE_GAIN_PER_PUSH,
+const { mergeSaveForWrite, planPurchase, planSettlement,
   FIRST_PUSH_MAX_BUBBLES, FIRST_PUSH_MAX_FISH_PER_ITEM, FIRST_PUSH_MAX_SINGLE_SLOT } =
   await import("../player-store.js");
 
@@ -160,17 +160,20 @@ const baseSave = () => ({
   const merged = mergeSaveForWrite(stored, incoming);
   chk("库存以服务端为准（客户端改不动）", merged.save.PlayerData.inventory.fish.fish001, 3);
   chk("会员标记以服务端为准（客户端自己开不了）", merged.save.PlayerData.isMember, false);
-  chk("泡泡接受客户端的（增量在上限内）", merged.save.PlayerData.bubbles, 120);
+  // 🔴 泡泡是服务端权威：客户端提交更大的值一律无效（旧规则是「服务端值 + 2000 以内放行」，
+  //    那条规则只挡单次增量、不挡次数，循环 push 就能刷）。
+  chk("泡泡上浮被忽略（客户端不能加）", merged.save.PlayerData.bubbles, 100);
   chk("不再标记 firstPush", merged.firstPush, false);
   chkTrue("记录了被忽略的 inventory", merged.problems.some(p => p.includes("inventory")), merged.problems.join(" / "));
   chkTrue("记录了被忽略的 isMember", merged.problems.some(p => p.includes("isMember")));
+  chkTrue("记录了被忽略的泡泡上浮", merged.problems.some(p => p.includes("泡泡只允许服务端增加")), merged.problems.join(" / "));
 }
 {
   const incoming = baseSave();
   incoming.PlayerData = { ...baseSave().PlayerData, bubbles: 999999 };
   const merged = mergeSaveForWrite(baseSave(), incoming);
-  chk("泡泡暴涨被截断到「服务端值 + 单次上限」", merged.save.PlayerData.bubbles, 100 + MAX_BUBBLE_GAIN_PER_PUSH);
-  chkTrue("截断有记录", merged.problems.some(p => p.includes("增量超过单次上限")));
+  chk("泡泡暴涨一律回落到服务端现值", merged.save.PlayerData.bubbles, 100);
+  chkTrue("拒绝上浮有记录", merged.problems.some(p => p.includes("泡泡只允许服务端增加")));
 }
 {
   const incoming = baseSave();
@@ -388,11 +391,20 @@ console.log("\n--- 7. HTTP：存档读写与分权 ---");
     chk("客户端改库存 → 服务端仍保持 3", rejected.body.data?.save?.PlayerData?.inventory?.fish?.fish001, 3);
     chkTrue("并且留下了「忽略了 inventory」的记录", (rejected.body.data?.adjustments || []).some(p => p.includes("inventory")));
 
-    // 客户端改泡泡 → 接受（V1.0 泡泡是客户端权威，见 player-store.js 的说明）
+    // 🔴 客户端改泡泡上浮 → 服务端不认。泡泡已是服务端权威，只有 grants（专注/事件/运营）
+    //    能把它加上去；这条路径以前是「服务端值 + 2000 以内放行」，循环 push 就能刷。
     const grow = baseSave();
     grow.PlayerData = { ...baseSave().PlayerData, bubbles: 150 };
     const grown = await call(base, "PUT", "/api/game/save", { token: account.token, body: grow });
-    chk("客户端改泡泡 → 接受", grown.body.data?.save?.PlayerData?.bubbles, 150);
+    chk("客户端改泡泡上浮 → 服务端保持原值", grown.body.data?.save?.PlayerData?.bubbles, 100);
+    chkTrue("并且留下了「泡泡只允许服务端增加」的记录",
+      (grown.body.data?.adjustments || []).some(p => p.includes("泡泡只允许服务端增加")));
+
+    // 反向：客户端把泡泡调小 → 放行（买完东西就是要推更小的余额）。
+    const spend = baseSave();
+    spend.PlayerData = { ...baseSave().PlayerData, bubbles: 40 };
+    const spent = await call(base, "PUT", "/api/game/save", { token: account.token, body: spend });
+    chk("客户端下调泡泡 → 放行", spent.body.data?.save?.PlayerData?.bubbles, 40);
 
     // 别人的令牌读不到你的存档
     const other = await newAccount(base);

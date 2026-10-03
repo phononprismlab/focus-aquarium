@@ -10,7 +10,7 @@ import { resolveAllowList, createOriginChecker } from "./cors.js";
 import { validateStartRequest } from "./reward.js";
 import { createFocusSessionStore } from "./focus-session.js";
 import { validateAudioConfig } from "./audio-config.js";
-import { validateEventConfig } from "./event-config.js";
+import { validateEventConfig, planEventReward, eventRewardReason } from "./event-config.js";
 import { resolveAdminApiKey, checkProductionConfig, warnWeakAdminKey } from "./runtime-guard.js";
 import { accountStatus, issueTicket, normalizeUid, checkRateLimit, resetAccountCache, resetRateLimit, RATE_LIMIT, clientIpFromHeaders } from "./account.js";
 import { readRequestUid, issueSessionToken, verifySessionToken, sessionSecretStatus } from "./session-token.js";
@@ -18,7 +18,7 @@ import { issueSyncCode, verifySyncCode } from "./sync-code.js";
 import { isMaintenanceBlocked } from "./ops-guard.js";
 import {
   createPlayerStore, mergeSaveForWrite, planPurchase, planSettlement, normalizeBubbles, normalizeNickname, ARCHIVE_VERSION,
-  applyGrants, normalizeGrantItems, parseGrantItems, serializeGrantItems,
+  applyGrants, normalizeGrantItems, parseGrantItems, serializeGrantItems, startOfTodayMs,
   GRANT_BUBBLES_MAX, GRANT_REASON_MAX_LENGTH, INVENTORY_CATEGORIES
 } from "./player-store.js";
 
@@ -876,16 +876,102 @@ app.post("/api/game/focus/complete", async (req, res) => {
     // ⚠️ 结算结果**不再在这里写库** —— settle 内部已经通过 persistence.settleSession
     //    把 counted_minutes / reward / natural 落到 focus_records 了（而且那一步用的是
     //    抢到会话的那次 CAS，重复写会把"已结算"的标记又冲一遍）。
-    // ⚠️ 这里也**不写存档泡泡**：V1.0 泡泡是客户端权威（见 player-store.js 的说明），
-    //    前端自己落地奖励并随后 push 存档；两边都加会变成双倍奖励。
+    //
+    // 🔴 奖励**由服务端落账**（泡泡已是服务端权威，客户端不再自己加）：
+    //    写一条 grant 再当场结算，响应里带着新存档，玩家端 adopt 即可。
+    //    未登录会话没有存档可落 —— 那条路照旧由前端本地兜底（纯本地模式，没有权威可言）。
+    let granted = null;
     if (!auth.error) {
       // 埋点：完成专注。fire-and-forget —— settle 只在真正抢到会话时才会走到这里，
       // 所以不需要再判重复；失败只记日志，绝不影响已下发的奖励。
       (await getPlayerStore()).addTrackingEvent({ userId: auth.uid, event: "focus_complete", at: Date.now() })
         .catch(error => console.warn(`埋点 focus_complete 写入失败：${error.message}`));
+
+      try {
+        granted = await grantAndSettle(await getPlayerStore(), auth.uid, {
+          bubbles: settlement.reward,
+          reason: "专注奖励"
+        });
+      } catch (error) {
+        // 发奖失败不能让这次专注变成 500：奖励没落成，前端会退回本地兜底值。
+        console.warn(`专注奖励落账失败（本次改由前端本地兜底）：${error.message}`);
+      }
     }
 
-    res.json({ data: settlement });
+    res.json({
+      data: {
+        ...settlement,
+        // 服务端是否已把奖励落账。false = 前端该退回本地加法（未登录 / 落账失败）。
+        granted: Boolean(granted && !granted.skipped),
+        // 服务端权威的新存档。前端拿到就覆盖本地 PlayerData，别让下一次 push 把它夹回去。
+        save: granted ? granted.save : null,
+        updatedAt: granted ? granted.updatedAt : 0,
+        receipt: granted ? granted.receipt : null
+      }
+    });
+  } catch (error) { sendError(res, error); }
+});
+
+// ===== 随机事件奖励 =====
+//
+// 客户端报告「某个随机事件触发了」，服务端裁定**能不能发、发多少**，然后落账。
+//
+// 边界说清楚（这是有意为之，不是漏做）：事件的**触发判定仍在前端** ——
+// 5 秒心跳、概率、条件匹配都在 index.html 里跑，服务端不复现。它只强制两件
+// 配置里本来就写着的事：**冷却**与**每日上限**，账本就是 grants 表。
+// 所以伪造一次事件最多拿到「配置允许的那一份」，而不是无限泡泡。
+//
+// 泡泡已是服务端权威（客户端提交值只能下调），所以这条路径是事件奖励的唯一出口：
+// 玩家端不再自己 `PlayerData.bubbles += effect.bubbles`。
+app.post("/api/game/events/reward", async (req, res) => {
+  const identity = await requireIdentity(req, res);
+  if (!identity) return;
+  if (await blockIfMaintenance(res, identity.uid)) return;
+  try {
+    const eventId = String((req.body && req.body.eventId) || "").trim();
+    if (!eventId) return res.status(400).json({ error: "缺少 eventId" });
+
+    // 配置一律取**已发布**的那份：草稿里的数值不该影响线上发奖。
+    const published = await (await getRepository()).list("events", true);
+    const record = published.find(r => r.id === eventId);
+    const config = record ? (record.publishedData || record.data) : null;
+
+    const now = Date.now();
+    // 账本只查「今天」—— 每日上限看条数，冷却看最后一条的时间。
+    const observed = await identity.store.queryGrants({
+      userId: identity.uid,
+      reason: eventRewardReason(eventId),
+      since: startOfTodayMs(() => now)
+    });
+
+    const plan = planEventReward({ config, observed, requested: req.body && req.body.bubbles, now });
+    if (!plan.ok) {
+      // 冷却 / 上限不是「错误」，是正常的拒绝：前端据此静默跳过这次奖励（事件本身照常展示）。
+      const status = plan.code === "EVENT_NOT_FOUND" ? 404 : 409;
+      return res.status(status).json({
+        error: plan.error,
+        code: plan.code,
+        maxPerDay: plan.maxPerDay,
+        usedToday: plan.usedToday,
+        readyAt: plan.readyAt
+      });
+    }
+
+    const settled = await grantAndSettle(identity.store, identity.uid, {
+      bubbles: plan.bubbles,
+      reason: plan.reason
+    });
+    res.json({
+      data: {
+        // 服务端裁定的数量（可能被钳到配置区间内）。前端小票显示这个值。
+        bubbles: plan.bubbles,
+        save: settled.save,
+        updatedAt: settled.updatedAt,
+        receipt: settled.receipt,
+        // 还没有云存档时不是错误：奖励留着，等玩家同步过一次再结算。
+        pending: settled.reason === "NO_SAVE"
+      }
+    });
   } catch (error) { sendError(res, error); }
 });
 
@@ -1099,6 +1185,29 @@ async function claimGrantsForPlayer(store, uid) {
   }
   await releaseClaimed(store, claimed, "结算奖励重试用尽");
   return { claimed: [], receipt: null, save: null, updatedAt: 0, exhausted: true };
+}
+
+// 「发一份奖励并当场结算」——服务端自己产生的奖励（专注 / 事件）都走这里。
+//
+// 为什么写完 grant 要立刻结算，而不是等客户端自己来领：
+//   ① 少一个往返。玩家刚做完专注，响应里就该带着新余额，而不是「小票说 +25、余额没变」；
+//   ② 不结算的话，客户端拿到的仍是旧存档，它下一次 push 会把奖励再夹一遍（虽然
+//      grants 是 merge 之后叠加的、夹不掉，但玩家会看到一次余额倒退）。
+//
+// ⚠️ 没有云存档时不建空档（会抹掉玩家本地的鱼缸）—— 奖励留在待领取状态，
+//    等玩家第一次 push 时由 pushSaveWithGrants 兜底结算。
+async function grantAndSettle(store, uid, { bubbles, reason }) {
+  const amount = normalizeBubbles(bubbles);
+  if (amount <= 0) return { skipped: true, bubbles: 0, save: null, updatedAt: 0, receipt: null };
+  await store.addGrants([{
+    id: grantId(),
+    user_id: uid,
+    bubbles: amount,
+    items: [],
+    reason: String(reason || "").slice(0, GRANT_REASON_MAX_LENGTH),
+    created_at: Date.now()
+  }]);
+  return claimGrantsForPlayer(store, uid);
 }
 
 app.put("/api/game/save", async (req, res) => {

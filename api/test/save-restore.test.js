@@ -118,11 +118,11 @@ console.log("\n--- 2. 恢复不做合并（否则要恢复的东西又被改一�
 
   // 反向对照：同一份内容走 mergeSaveForWrite（**已有存档**分支，也就是覆盖恢复的真实场景）
   // 会被改掉 —— 证明上面几条不是空闸。
-  const { mergeSaveForWrite, MAX_BUBBLE_GAIN_PER_PUSH } = await import("../player-store.js");
+  const { mergeSaveForWrite } = await import("../player-store.js");
   const storedSave = { saveVersion: "0.2.0", PlayerData: { bubbles: 100, isMember: false, inventory: { fish: { fish001: 3 }, decorations: {}, backgrounds: {}, sands: {}, sounds: {} } }, AquariumData: { fish: [], decoration: "", background: "", sand: "", ambientSound: "" }, Settings: {} };
   const merged = mergeSaveForWrite(storedSave, wild);
-  chk("R2 反向：走 merge 时泡泡被截到「服务端现值 + 单次上限」",
-    merged.save.PlayerData.bubbles, 100 + MAX_BUBBLE_GAIN_PER_PUSH);
+  chk("R2 反向：走 merge 时泡泡回落到服务端现值（客户端加不上去）",
+    merged.save.PlayerData.bubbles, 100);
   chk("R2 反向：走 merge 时 inventory 用服务端现值，备份里的 fish999 被丢掉",
     merged.save.PlayerData.inventory.fish.fish999, undefined);
   chkTrue("R2 反向：走 merge 时缸内鱼被 normalizeAquarium 清掉（fish999 不在库存里）",
