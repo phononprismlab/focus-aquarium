@@ -17,7 +17,14 @@ const playerPath = path.join(here, "..", "..", "index.html");
 const raw = fs.readFileSync(playerPath, "utf8");
 // 工作区是 CRLF，正则里的 \n 会匹配不上 —— 统一成 LF 再断言。
 const playerRaw = raw.replace(/\r\n/g, "\n");
-const playerCode = (playerRaw.match(/<script>([\s\S]*?)<\/script>/) || [null, playerRaw])[1];
+// ⚠️ 必须**先剥掉 HTML 注释**再找 script 块：非贪婪正则会命中注释里写的字面开标签
+//    （index.html 头部那段 CSP 说明就提到过它），取到一段不含主逻辑的文本，
+//    于是所有基于 playerCode 的断言集体误报 —— 而「函数不存在」的报错会把人引向错误方向。
+const playerNoComments = playerRaw.replace(/<!--[\s\S]*?-->/g, "");
+// ⚠️ 再取**最长**的那个内联 script 块，而不是第一个：head 里还有一小段防嵌套兜底脚本，
+//    按顺序取第一个会拿到它，主逻辑全部找不到。
+const playerInlineScripts = [...playerNoComments.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
+const playerCode = playerInlineScripts.sort((a, b) => b.length - a.length)[0] || playerNoComments;
 
 let pass = 0;
 let fail = 0;

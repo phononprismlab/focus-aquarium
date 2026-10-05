@@ -1009,8 +1009,51 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
       return released;
     },
 
+    // ===== 自助注销：删掉这个人的全部数据 =====
+    // 5 张表按 user_id 全删。
+    //
+    // 为什么是硬删而不是标个 deleted 字段：隐私政策写的是「删除」，数据留在库里
+    // 只改个标记，严格说不构成删除。而这些表里没有需要留档的东西（无交易、无支付），
+    // 留着只是负担。代价是不可恢复 —— 所以前端必须二次确认，且运维侧靠备份兜底。
+    //
+    // 🔴 uid 必须是非空字符串：focus_records.user_id 有默认值 ''（未登录也能专注），
+    //    空串 uid 会把**所有未登录玩家**的专注记录一起删掉。
+    //
+    // 幂等：删第二遍时各表都查不到这个人，计数全 0，仍然返回成功。
+    async deleteUser(uid) {
+      const id = String(uid || "").trim();
+      const deleted = { users: 0, saves: 0, focus_records: 0, tracking_events: 0, grants: 0 };
+      if (!id) return { userId: "", deleted };
+
+      if (users.delete(id)) deleted.users++;
+      if (saves.delete(id)) deleted.saves++;
+
+      // focusRecords 与 grants 都是「按行 id 索引」的 Map，只能逐条比对 user_id。
+      for (const [key, row] of [...focusRecords]) {
+        if (row && row.user_id === id) { focusRecords.delete(key); deleted.focus_records++; }
+      }
+      for (const [key, row] of [...grants]) {
+        if (row && row.user_id === id) { grants.delete(key); deleted.grants++; }
+      }
+
+      // trackingEvents 是数组，且可能有别的闭包持有同一引用 → 原地过滤，别重新赋值。
+      let removed = 0;
+      const kept = [];
+      for (const row of trackingEvents) {
+        if (row && row.user_id === id) removed++;
+        else kept.push(row);
+      }
+      if (removed) {
+        trackingEvents.length = 0;
+        trackingEvents.push(...kept);
+      }
+      deleted.tracking_events = removed;
+
+      return { userId: id, deleted };
+    },
+
     // 仅供测试观察
-    _sizes: () => ({ users: users.size, saves: saves.size, focusRecords: focusRecords.size, grants: grants.size })
+    _sizes: () => ({ users: users.size, saves: saves.size, focusRecords: focusRecords.size, grants: grants.size, trackingEvents: trackingEvents.length })
   };
 }
 
@@ -1440,6 +1483,36 @@ export function createCloudbasePlayerStore(db, { now = () => Date.now() } = {}) 
         if (after && Number(after.claimed_at) === 0) released++;
       }
       return released;
+    },
+
+    // ===== 自助注销：删掉这个人的全部数据 =====
+    // 与内存实现同一套语义（硬删、5 张表、uid 非空、幂等），不重复注释理由。
+    //
+    // 🔴 这个 SDK 的 delete 不回传影响行数，「delete 不报错」不等于「真的删掉了」——
+    //    和 claimPendingGrants 同一个坑。所以删完回读一次，报的是**实际清掉的行数**，
+    //    而不是「发出了几次删除」。注销是低频操作，多打一次查询不值得优化。
+    async deleteUser(uid) {
+      const id = String(uid || "").trim();
+      const deleted = { users: 0, saves: 0, focus_records: 0, tracking_events: 0, grants: 0 };
+      if (!id) return { userId: "", deleted };
+
+      const tables = [
+        ["users", TABLE_USERS],
+        ["saves", TABLE_SAVES],
+        ["focus_records", TABLE_FOCUS_RECORDS],
+        ["tracking_events", TABLE_TRACKING_EVENTS],
+        ["grants", TABLE_GRANTS]
+      ];
+      for (const [name, table] of tables) {
+        const before = await db.from(table).select("*").eq("user_id", id).throwOnError();
+        const beforeCount = Array.isArray(before && before.data) ? before.data.length : 0;
+        if (!beforeCount) { deleted[name] = 0; continue; }
+        await db.from(table).delete().eq("user_id", id).throwOnError();
+        const after = await db.from(table).select("*").eq("user_id", id).throwOnError();
+        const afterCount = Array.isArray(after && after.data) ? after.data.length : 0;
+        deleted[name] = Math.max(0, beforeCount - afterCount);
+      }
+      return { userId: id, deleted };
     }
   };
 }

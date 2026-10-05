@@ -759,6 +759,48 @@ app.post("/api/account/sync/redeem", async (req, res) => {
   });
 });
 
+// ===== 自助注销：删掉自己的全部数据 =====
+//
+// 5 张玩家表（users / saves / focus_records / tracking_events / grants）按 user_id 全删。
+//
+// 🔴 **身份只从令牌解析，绝不接受 body 里的 uid** —— 否则这就是个「删别人账号」的接口。
+//    uid 会出现在 localStorage、浏览器网络面板、用户截图里，它**不是凭证**。
+//    同理：uid 只从令牌里取，不接受查询参数。
+//
+// 🔴 **刻意不挂停机闸门**（与另外 8 个写接口不同，是有意的）：
+//    闸门拦的是「维护期间别写入业务数据，避免状态不一致」；而删除是幂等且自包含的
+//    （只删自己那一份，不会破坏全服一致性）。更关键的是：删除权是合规权利，
+//    用「系统维护中」把用户行使删除权挡回来站不住脚。
+//
+// 硬删不可恢复 —— 运维侧靠备份兜底（fa-save-backup.mjs），玩家侧靠前端二次确认。
+app.delete("/api/account", async (req, res) => {
+  // 限流放在身份解析**之前**：这一步不认令牌，无效请求也要算进配额，
+  // 否则可以拿一堆假令牌把删除路径刷爆（云实现每次删除还要多打一次回读）。
+  const limiter = checkRateLimit(`del:${clientIpFromHeaders(req.headers, (req.socket && req.socket.remoteAddress) || req.ip)}`);
+  if (!limiter.allowed) {
+    return res.status(429).json({ error: `请求过于频繁，请 ${limiter.retryAfterSeconds} 秒后再试` });
+  }
+
+  const identity = await requireIdentity(req, res);
+  if (!identity) return;
+
+  try {
+    const result = await identity.store.deleteUser(identity.uid);
+    // 审计线索：注销是合规相关操作，删了谁、删了多少行要留在日志里。
+    console.info(`自助注销：uid=${identity.uid} 删除行数=${JSON.stringify(result.deleted)}`);
+    res.json({
+      data: {
+        userId: result.userId,
+        deleted: result.deleted
+        // 幂等：删第二遍时各表都查不到这个人，计数全 0，仍然 200 ——
+        // 「已经删过了」等同于「删成功了」，不该报 404。
+      }
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
 // ===== 专注会话与奖励结算 =====
 // 服务端记录开始时间，结算时用自己记录的时间推算实际专注时长，
 // 客户端无法凭空声明时长。

@@ -3,6 +3,81 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- ===== 内容安全策略（阶段 1）=====
+
+     为什么保留 unsafe-inline / unsafe-eval：这是单文件应用，内联脚本块有 16 万字符，
+     鱼动画还用 new Function 造执行体（见 FISH_ANIM_SHADOWED）。去掉它们应用当场打挂。
+     所以这一版拿到的**不是「防 XSS」**，而是四件不需要重构就能拿到的事：
+       · connect-src  —— 掐断把数据外发到白名单外的域（真正值钱的一条）
+       · script-src   —— 挡掉外部域脚本（除下面显式放行的 CloudBase SDK）
+       · base-uri     —— 防 base 标签劫持（注入一个 base 就能把所有相对地址导到攻击者域）
+       · object-src / frame-ancestors —— 防插件、防被嵌套
+
+     阶段 2（V1.0 之后）：内联脚本抽成 app.js、样式抽成 app.css，上 nonce/hash 去掉 unsafe-*。
+     那件事要和「动画真沙箱（Worker）」一起做 —— 两者都要动 new Function，一次改完。
+
+     ⚠️ frame-ancestors 写在 meta 里**无效**（该指令只认 HTTP 响应头）。防嵌套必须在
+        CloudBase 控制台的「自定义响应头」里补一条 X-Frame-Options: DENY。
+
+     ⚠️ 本注释里刻意不写字面 script 开标签：api/test/player-profile-ui.test.js 与
+        api/test/player-tank-ui.test.js 用「第一个 script 块」来取主逻辑代码，注释里
+        出现字面开标签会被它们的正则当成真正的脚本起点，断言集体误报。
+
+     ⚠️ 白名单里的域是**实测**出来的，不是猜的：
+        · 签名后的图片/音频走 {env}.api.tcloudbasegateway.com
+        · 账号 SDK 从 static.cloudbase.net 加载，而它内部会连 api.tcloudbasegateway.com
+          与 *.tencentcloudapi.com（含 wss 长连接）—— 漏掉任何一个，登录直接废
+        域里带环境 ID，所以用 *.tcloudbase.com / *.tcloudbasegateway.com 泛匹配，
+        换环境不用改；代价是比写死具体域松一点，仍能挡住任意第三方域。
+
+     ⚠️ img-src 的 data: 是必需的：颗粒纹理 --grain 是内联 data-uri SVG，当 CSS 背景用。 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudbase.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.tcloudbase.com https://*.tcloudbasegateway.com; media-src 'self' https://*.tcloudbase.com https://*.tcloudbasegateway.com; connect-src 'self' https://*.tcloudbase.com https://*.tcloudbasegateway.com https://*.tencentcloudapi.com wss://*.tencentcloudapi.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'">
+
+<!-- ===== 防嵌套兜底（补 frame-ancestors 的缺）=====
+
+     上面 CSP 里的 frame-ancestors 'none' 写在 <meta> 里**浏览器会直接忽略**（该指令只认 HTTP
+     响应头）。而本项目前端托管在静态网站托管（COS + CDN）上，它的安全配置只有防盗链 /
+     IP 黑白名单 / 访问限频三项，**没有「自定义响应头」入口** —— 也就是暂时给不了
+     X-Frame-Options。所以这里用 JS 兜底。
+
+     行为等价于 X-Frame-Options: SAMEORIGIN：
+       · 直接打开 / 被同源页面嵌套 → 放行（控制台预览之类的场景不受影响）
+       · 被**跨域**页面嵌套         → 立刻停掉解析并清空文档
+
+     🔴 必须放在 <head> 里同步执行。主脚本在文档中部（约 16 万字符处），等它跑就太晚了 ——
+        那时页面已经渲染出来，攻击者有一段窗口期可以诱导点击。这里是文档解析到的最早期。
+
+     为什么不用另外两种常见写法：
+       · document.write(...) —— 在解析中的 <head> 里调用只会插进当前位置，body 照样渲染，挡不住。
+       · window.top.location = ...（frame busting）—— 跨域时读/写 top.location 被同源策略拒绝，
+         现代浏览器里基本已失效。
+
+     代价：清空 documentElement 会连这段 CSP 一起删掉，但那时页面已无可加载内容，无影响。 -->
+<script>
+(function () {
+  var topWin = window.top;
+  if (!topWin || topWin === window.self) return;   // 不是被嵌套 → 放行
+  var sameOrigin = false;
+  try {
+    // 同源时能读到 top.location；跨域会抛 SecurityError —— 用「能否读到」判同源，
+    // 与 SAMEORIGIN 的语义一致。
+    sameOrigin = Boolean(topWin.location && topWin.location.href);
+  } catch (_) {
+    sameOrigin = false;
+  }
+  if (sameOrigin) return;                          // 同源嵌套 → 放行
+
+  try {
+    if (window.stop) window.stop();                // 先停掉后续解析与资源加载
+    var root = document.documentElement;
+    while (root.firstChild) root.removeChild(root.firstChild);
+    var body = document.createElement("body");
+    body.setAttribute("style", "margin:0;padding:48px 24px;font:14px/1.8 system-ui,-apple-system,'Microsoft YaHei',sans-serif;color:#22393d;background:#f4f8f9;text-align:center;");
+    body.textContent = "本站不允许被其他网页嵌入显示，请直接在浏览器中打开。";
+    root.appendChild(body);
+  } catch (_) { /* 兜底失败也不能把页面搞崩 */ }
+})();
+</script>
 <title>鱼儿乐水族 · V0.2</title>
 <style>
   /* ===== v3 设计令牌：旧电脑水族馆 × 2D 游戏素材 × 高饱和复古 =====
@@ -522,6 +597,9 @@
 .account-row.gap-top { margin-top: 8px; }
 .account-row button { flex: 1; padding: 7px 0; border: 1px solid rgba(255, 255, 255, 0.5); border-radius: 10px; background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 12px; cursor: pointer; }
 .account-row button:hover { background: rgba(255, 255, 255, 0.2); }
+.account-row button.account-danger { border-color: rgba(255, 176, 176, 0.62); color: #ffd6d6; }
+.account-row button.account-danger:hover { background: rgba(217, 83, 79, 0.3); }
+.account-danger-tip { color: #ffd6d6; }
 .account-tip { margin-top: 8px; font-size: 11px; line-height: 1.5; opacity: 0.75; }
 .account-field { margin-top: 9px; width: 100%; box-sizing: border-box; padding: 8px 9px; border: 1px solid rgba(255, 255, 255, 0.45); border-radius: 10px; background: rgba(0, 0, 0, 0.18); color: #fff; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.45; resize: vertical; }
 .account-note { margin-top: 7px; font-size: 11px; line-height: 1.5; }
@@ -1250,6 +1328,10 @@ body:not(.dev-on) .dev-panel{display:none!important}
 .sync-guide-actions button{border:0;border-radius:12px;padding:10px 18px;font-size:14px;cursor:pointer}
 .sync-guide-go{background:var(--screen-blue-500);color:#fff;box-shadow:0 4px 10px rgba(10,132,255,.3)}
 .sync-guide-skip{background:#e4eeef;color:#48646a}
+.sync-guide-input{width:100%;box-sizing:border-box;margin:0 0 6px;padding:10px 12px;border:1px solid #cfe0e2;border-radius:12px;font-size:14px;background:#fff;color:#22393d}
+.sync-guide-input:focus{outline:2px solid var(--screen-blue-500);outline-offset:1px}
+.sync-guide-danger{background:#d9534f;color:#fff;box-shadow:0 4px 10px rgba(217,83,79,.32)}
+.sync-guide-danger[disabled]{opacity:.45;cursor:not-allowed;box-shadow:none}
 
 /* ⚠️ 响应式覆盖必须放在样式表最后。媒体查询不增加选择器权重，
    同一个类名后写的赢 —— 这两个块原来排在 .v02-topbar / .v02-top-entry / .v02-bubbles
@@ -1306,6 +1388,21 @@ body:not(.dev-on) .dev-panel{display:none!important}
     <div class="sync-guide-actions">
       <button type="button" class="sync-guide-go" id="syncGuideGo">去生成同步码</button>
       <button type="button" class="sync-guide-skip" id="syncGuideSkip">以后再说</button>
+    </div>
+  </div>
+</div>
+
+<!-- 注销二次确认。要求手打「删除」两个字 —— 这是不可恢复的操作，
+     一个「确定/取消」的确认框挡不住误触（尤其是手机上）。 -->
+<div class="sync-guide" id="accountDeleteModal" hidden role="dialog" aria-modal="true" aria-labelledby="accountDeleteTitle">
+  <div class="sync-guide-card">
+    <div class="sync-guide-title" id="accountDeleteTitle">注销账号</div>
+    <p class="sync-guide-text">这会<strong>永久删除</strong>服务器上属于你的全部数据：鱼缸、鱼、泡泡、专注记录、奖励记录。<br><br>删除后无法恢复，你这台设备上的本地存档也会一并清空，相当于回到全新状态。<br><br>确认请输入「删除」两个字：</p>
+    <input type="text" class="sync-guide-input" id="accountDeleteInput" autocomplete="off" spellcheck="false" placeholder="删除" aria-label="输入删除二字以确认">
+    <div class="account-note bad" id="accountDeleteMsg"></div>
+    <div class="sync-guide-actions">
+      <button type="button" class="sync-guide-danger" id="accountDeleteGo" disabled>确认注销</button>
+      <button type="button" class="sync-guide-skip" id="accountDeleteCancel">取消</button>
     </div>
   </div>
 </div>
@@ -1433,6 +1530,10 @@ body:not(.dev-on) .dev-panel{display:none!important}
           <div class="account-tip">恢复后，这台设备现在的进度会被原设备的鱼缸替换。</div>
           <div class="account-row gap-top"><button type="button" id="syncRedeemGo">恢复我的鱼缸</button></div>
           <div class="account-note" id="syncRedeemMsg"></div>
+        </div>
+        <div class="account-tip account-danger-tip">注销会永久删除你的鱼缸、泡泡与专注记录，不可恢复。</div>
+        <div class="account-row gap-top">
+          <button type="button" id="accountDeleteBtn" class="account-danger">注销账号</button>
         </div>
       </div>
       <div class="v02-log" id="eventLogBlock">
@@ -2526,6 +2627,159 @@ body:not(.dev-on) .dev-panel{display:none!important}
   document.getElementById("syncRedeemGo").addEventListener("click",()=>{
     redeemSyncCode().catch(error=>console.warn("[sync] 恢复账号失败：",error.message));
   });
+
+  // ===== 注销账号（自助删除全部数据）=====
+  //
+  // 两段式：先弹二次确认（要手打「删除」两个字），确认后调 DELETE /api/account，
+  // 服务端删成功才清本地 —— 顺序不能反。反过来的话，如果服务端删除失败而本地已清空，
+  // 玩家就陷入「本地没了、云端还在、又没令牌」的夹缝，还得靠同步码才能找回来。
+  //
+  // 🔴 清本地时必须**先清令牌再清别的**：令牌是身份凭证，只要它还在，页面里任何一次
+  //    存档推送都会让服务端 ensureUser 重新建号 —— 等于注销后又长出一个同名空号。
+  const ACCOUNT_DELETE_WORD = "删除";
+  const DELETE_MODAL_ID = "accountDeleteModal";
+
+  // 需要清掉的 localStorage 键。
+  // ⚠️ 音效音量是**动态键**（audioStorageKey = "fishTank_" + key + "Volume"），
+  //    枚举不出来，必须按分类现算，否则注销后音量设置会留在新号上。
+  function localKeysToClear(){
+    const keys = [
+      SAVE_KEY,                 // 本地存档
+      ACCOUNT_TOKEN_KEY,        // 会话令牌（凭证）
+      ACCOUNT_UID_KEY,          // uid（显示用）
+      CLOUD_PUSHED_AT_KEY,      // 上次推送时间戳
+      SYNC_GUIDE_KEY,           // 同步码引导已读
+      EVENT_STORAGE_KEY,        // 事件运行态（冷却 / 每日次数）
+      EVENT_SEEN_KEY,           // 事件上次检查时间
+      EVENT_LOG_KEY,            // 鱼缸大事记
+      GUIDE_SEEN_KEY,           // 新手引导已读
+      OPS_SEEN_KEY              // 运营公告已读
+    ];
+    try { audioCategoryKeys().forEach(key => keys.push(audioStorageKey(key))); }
+    catch(_) { /* 配置还没拉到：动态键这次清不掉，下次打开会重新初始化 */ }
+    return keys;
+  }
+
+  function clearAllLocalData(){
+    const failed = [];
+    localKeysToClear().forEach(key=>{
+      try { localStorage.removeItem(key); }
+      catch(_) { failed.push(key); }
+    });
+    // 清完把内存里的身份也置空 —— 只清 localStorage 的话，当前这次会话仍持有旧令牌，
+    // 下一次自动推送会把刚注销的账号又建回来。
+    ACCOUNT_TOKEN = "";
+    ACCOUNT_UID = "";
+    CLOUD_SYNC_ENABLED = false;
+    lastPushedAt = 0;
+    return failed;
+  }
+
+  // 注销成功后：清本地 → 整页重载。
+  //
+  // 为什么是重载、而不是「就地重置 UI」：PlayerData / AquariumData 都是 **const 引用**，
+  // 鱼缸状态又散在十几个模块级变量里（事件运行态、大事记、专注聚合、商店快照、推送时间戳…），
+  // 逐个重置漏一个就会留下脏状态 —— 最糟的是漏了令牌，下一次自动推送会把刚注销的号建回来。
+  // 重载是唯一能保证「真的回到全新状态」的做法。此时令牌已清，重载后会自动建一个干净的新号。
+  function finishAccountDelete(){
+    clearAllLocalData();
+    location.reload();
+  }
+
+  function deleteModalEls(){
+    return {
+      modal: document.getElementById(DELETE_MODAL_ID),
+      input: document.getElementById("accountDeleteInput"),
+      go: document.getElementById("accountDeleteGo"),
+      msg: document.getElementById("accountDeleteMsg")
+    };
+  }
+
+  function openAccountDelete(){
+    const el = deleteModalEls();
+    if(!el.modal) return;
+    el.input.value = "";
+    el.go.disabled = true;
+    el.go.textContent = "确认注销";
+    el.msg.className = "account-note bad";
+    el.msg.textContent = "";
+    el.modal.hidden = false;
+    el.input.focus();
+  }
+
+  function closeAccountDelete(){
+    const el = deleteModalEls();
+    if(el.modal) el.modal.hidden = true;
+    el.input.value = "";
+    el.go.disabled = true;
+  }
+
+  // 必须**完全一致**才算确认（只容忍首尾空白）—— 这是不可恢复的操作，
+  // 不做模糊匹配、不认近义词，防的就是手滑和肌肉记忆。
+  function deleteConfirmOk(value){
+    return String(value || "").trim() === ACCOUNT_DELETE_WORD;
+  }
+
+  async function deleteAccount(){
+    const el = deleteModalEls();
+    if(!deleteConfirmOk(el.input.value)) return;
+    // 没有令牌 = 本来就没有服务端身份，无从删起，直接清本地即可。
+    if(!ACCOUNT_TOKEN){ finishAccountDelete(); return; }
+
+    el.go.disabled = true;
+    el.go.textContent = "注销中…";
+    el.msg.className = "account-note bad";
+    el.msg.textContent = "";
+    try{
+      const response = await fetch(`${API_BASE}/account`, {
+        method: "DELETE",
+        headers: cloudHeaders(),
+        cache: "no-store"
+      });
+      // 401 = 令牌过期，服务端核不出身份、什么都没删。
+      // 🔴 这里绝不能装作成功 —— 那会让玩家以为数据没了，其实还在库里。
+      if(response.status === 401){
+        el.msg.textContent = "登录状态已过期，没能注销。请刷新页面后重试。";
+        return;
+      }
+      // 503 = 数据层暂时不可用（注意不是停机闸门 —— 注销刻意不受停机影响）。
+      if(!response.ok){
+        el.msg.textContent = `注销失败（HTTP ${response.status}），你的数据没有被删除。`;
+        return;
+      }
+      // 成功：先在弹窗里给一句明确反馈再重载 —— 直接重载会让人以为「卡了一下」。
+      el.msg.className = "account-note ok";
+      el.msg.textContent = "已注销，你的数据已删除。正在重置…";
+      el.go.textContent = "已注销";
+      clearAllLocalData();
+      window.setTimeout(()=>location.reload(), 900);
+    }catch(error){
+      el.msg.textContent = "网络异常，没能注销，你的数据没有被删除。";
+    }finally{
+      // 失败路径要把按钮恢复可点（成功路径已经进重载，恢复也无妨）。
+      if(el.go.textContent === "注销中…"){
+        el.go.textContent = "确认注销";
+        el.go.disabled = !deleteConfirmOk(el.input.value);
+      }
+    }
+  }
+
+  (function wireAccountDelete(){
+    const btn = document.getElementById("accountDeleteBtn");
+    if(btn) btn.addEventListener("click", openAccountDelete);
+    const el = deleteModalEls();
+    if(!el.modal) return;
+    el.input.addEventListener("input", ()=>{ el.go.disabled = !deleteConfirmOk(el.input.value); });
+    el.input.addEventListener("keydown", event=>{
+      if(event.key === "Enter" && deleteConfirmOk(el.input.value)){
+        deleteAccount().catch(error=>console.warn("[account] 注销失败：",error.message));
+      }
+    });
+    el.go.addEventListener("click", ()=>{
+      deleteAccount().catch(error=>console.warn("[account] 注销失败：",error.message));
+    });
+    document.getElementById("accountDeleteCancel").addEventListener("click", closeAccountDelete);
+  })();
 
   function renderBubbles(){ document.getElementById("bubbleDisplay").textContent=`🫧 ${PlayerData.bubbles}`; }
   function renderAquarium(data){

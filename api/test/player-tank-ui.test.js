@@ -21,6 +21,13 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.join(here, "..", "..");
 const source = fs.readFileSync(path.join(projectRoot, "index.html"), "utf8").replace(/\r\n/g, "\n");
 const adminSource = fs.readFileSync(path.join(projectRoot, "admin.html"), "utf8").replace(/\r\n/g, "\n");
+// ⚠️ 提取 script 块前必须先剥掉 HTML 注释：非贪婪正则会命中注释里写的字面开标签
+//    （index.html 头部 CSP 说明那段提到过它），取到空文本 → 后续 match 全部 null 崩掉。
+const sourceNoComments = source.replace(/<!--[\s\S]*?-->/g, "");
+// ⚠️ 取**最长**的那个内联 script 块：head 里还有一小段防嵌套兜底脚本，
+//    按顺序取第一个会拿到它，主逻辑全找不到。
+const mainScript = [...sourceNoComments.matchAll(/<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/g)]
+  .map(m => m[1]).sort((a, b) => b.length - a.length)[0];
 
 let pass = 0;
 let fail = 0;
@@ -137,7 +144,7 @@ console.log("\n--- 4. 状态条位置 ---");
 // ===== 5. 沙子：按高度撑满 =====
 console.log("\n--- 5. 沙子上传图 ---");
 {
-  const script = source.match(/<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/)[1];
+  const script = mainScript;
   const re = script.match(/const IMAGE_SOURCE_RE = .*/)[0];
   const css = extractFunction(script, "cssFromImagePath");
   const api = new Function(`${re}\n${css}\nreturn { cssFromImagePath };`)();
@@ -170,7 +177,7 @@ console.log("\n--- 6. 投喂误触 ---");
 // ===== 7. 蓝尾鱼：旧相对路径不能再当图片插槽 =====
 console.log("\n--- 7. 鱼的资源路径过滤 ---");
 {
-  const script = source.match(/<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/)[1];
+  const script = mainScript;
   const re = script.match(/const IMAGE_SOURCE_RE = .*/)[0];
   const fn = extractFunction(script, "fishPartsFromAssembly");
   const api = new Function(`${re}\n${fn}\nreturn { fishPartsFromAssembly };`)();
