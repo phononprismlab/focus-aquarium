@@ -57,7 +57,7 @@ console.log("\n--- 2. 抬头：logo + 店名 + 英文名 ---");
   const logos = source.match(/<div class="v02-paper-logo">[\s\S]*?<\/div>/g) || [];
   chk("两处各有一组抬头", logos.length, 2);
   chkTrue("每组抬头都有店标", logos.every(b => b.includes('class="v02-paper-mark"')));
-  chkTrue("每组抬头都有中文店名「鱼儿乐水族馆」", logos.every(b => b.includes("鱼儿乐水族馆")));
+  chkTrue("每组抬头都有中文店名「鱼儿乐水族」", logos.every(b => b.includes("鱼儿乐水族")));
   chkTrue("每组抬头都有英文名 FOCUS AQUARIUM", logos.every(b => b.includes("FOCUS AQUARIUM")));
   chkTrue("抬头文字在 CSS 里是居中的三行",
     /\.v02-paper-logo\{[^}]*align-items:center/.test(source) && /\.v02-paper-logo\{[^}]*text-align:center/.test(source));

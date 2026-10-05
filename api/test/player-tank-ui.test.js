@@ -59,7 +59,7 @@ console.log("--- 1. 顶栏 ---");
 {
   const topbar = source.slice(source.indexOf('<div class="v02-topbar">'), source.indexOf('<!-- 音频控件已收进'));
   chkTrue("标题在顶栏里（id 仍是 appTitle，动画/引用不用改）",
-    /<h1 class="v02-brand-title" id="appTitle">鱼儿乐水族馆<\/h1>/.test(topbar));
+    /<h1 class="v02-brand-title" id="appTitle">鱼儿乐水族<\/h1>/.test(topbar));
   chkTrue("缸里的大海报标题已删除", !/<h1 class="poster-title"/.test(source) && !/class="poster-title"/.test(source));
   chkTrue("泡泡数在顶栏右侧、排在「装点」前面",
     /<nav class="v02-topbar-entries">\s*<div class="v02-bubbles" id="bubbleDisplay"[\s\S]{0,200}id="shopOpenBtn"/.test(topbar));
