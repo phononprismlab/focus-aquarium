@@ -60,6 +60,13 @@
 		.badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 		.badge.published { color: #23836e; background: #e7f6ef; }
 		.badge.draft { color: #bf7c27; background: #fff4dd; }
+		/* 反馈状态：new 要显眼（这是待办），done 收敛（已经处理完的不该抢注意力）。 */
+		.badge.new { color: #b3541e; background: #fdeee0; }
+		.badge.read { color: #2b6ea8; background: #e6f0fa; }
+		.badge.done { color: #23836e; background: #e7f6ef; }
+		/* 留言是玩家写的多行文本：保留换行、长串要能断行，否则一条长 URL 会把表格撑爆。 */
+		.feedback-message { white-space: pre-wrap; word-break: break-word; max-width: 460px; line-height: 1.65; }
+		.feedback-contact { word-break: break-all; max-width: 200px; }
 		.actions { display: flex; gap: 8px; }
 		.link-button { border: 0; background: transparent; color: var(--teal); padding: 4px; font-weight: 700; }
 		.link-button:hover { color: var(--coral); }
@@ -240,6 +247,7 @@
 			<button class="nav-item" data-module="ops"><span class="nav-icon">⚙</span>运营</button>
 		<button class="nav-item" data-module="events"><span class="nav-icon">◇</span>事件设置</button>
 		<button class="nav-item" data-module="users"><span class="nav-icon">☷</span>玩家管理</button>
+			<button class="nav-item" data-module="feedback"><span class="nav-icon">✉</span>反馈</button>
 			<button class="nav-item" data-module="payment"><span class="nav-icon">▣</span>付费配置 <span class="reserved">预留</span></button>
 		</nav>
 		<div class="key-section">
@@ -300,7 +308,10 @@
 			ops: null,
 			events: [],
 			users: [],
-			trackSummary: null
+			trackSummary: null,
+			// 玩家反馈（设置 → 关于 → 联系我们）。后台只读 + 标状态 + 删，不改内容。
+			feedback: [],
+			feedbackStatuses: ["new", "read", "done"]
 		};
 		let editingIndex = null;
 		let editingType = null;
@@ -330,6 +341,9 @@
 			events: { query: "", status: "", category: "" }
 		};
 		let usersLoaded = false;
+		// 反馈页的筛选与加载态。
+		let feedbackFilter = { status: "" };
+		let feedbackLoaded = false;
 		const API_BASE = window.FISHTANK_API_BASE || "https://focus-aquarium-api-316509-5-1491495221.sh.run.tcloudbase.com/api";
 
 		const main = document.getElementById("main");
@@ -689,13 +703,14 @@
 			});
 		}
 		function pageHeader(kicker, title, description, action = "") { return `<div class="topbar"><div><div class="eyebrow">${kicker}</div><h2>${title}</h2><p class="subtitle">${description}</p></div>${action}</div>`; }
-		function render() { document.querySelectorAll(".nav-item").forEach(item => item.classList.toggle("active", item.dataset.module === state.module)); renderModule(); if (state.module === "users") refreshUsers(); }
+		function render() { document.querySelectorAll(".nav-item").forEach(item => item.classList.toggle("active", item.dataset.module === state.module)); renderModule(); if (state.module === "users") refreshUsers(); if (state.module === "feedback") refreshFeedback(); }
 		// 单个模块渲染失败不能表现成「点了页签没反应」—— 那是最难查的一类现象：
 		// 页面没变、控制台之外什么都看不到。这里接住并在页面上直接说清是哪个模块坏了。
 		function renderModule() {
 			const renderers = {
 				decorations: renderDecorationList, fish: renderFishList, focus: renderFocus,
-				audio: renderAudio, about: renderAbout, ops: renderOps, events: renderEventList, users: renderUserList, payment: renderPlaceholder
+				audio: renderAudio, about: renderAbout, ops: renderOps, events: renderEventList, users: renderUserList, payment: renderPlaceholder,
+				feedback: renderFeedback
 			};
 			const renderer = renderers[state.module];
 			if (!renderer) return;
@@ -1706,6 +1721,108 @@
 				await loadUsers();
 				renderUserList();
 			};
+		}
+		// ===== 玩家反馈（设置 → 关于 → 联系我们）=====
+		//
+		// 这一页只有三件事：看、标状态、删。**刻意没有「编辑留言」** ——
+		// 反馈是玩家说的话，允许后台改内容，它就失去了作为证据的价值。
+		//
+		// 状态三档：new（还没人看过）/ read（看过了）/ done（处理完了）。
+		// 退回 new 时服务端会把 handled_at 清 0，所以「待办」列表里不会出现
+		// 「未处理但带着处理时间」的怪行。
+		const FEEDBACK_STATUS_LABELS = { new: "待处理", read: "已读", done: "已处理" };
+		const FEEDBACK_STATUS_HINT = {
+			new: "还没人看过",
+			read: "看过了，还没处理",
+			done: "处理完了"
+		};
+
+		async function loadFeedback() {
+			try {
+				const query = feedbackFilter.status ? `?status=${encodeURIComponent(feedbackFilter.status)}` : "";
+				const body = await apiRequest(`/admin/feedback${query}`);
+				state.feedback = body.data.feedback || [];
+				// 状态枚举由服务端下发，别在后台再抄一份（抄了就会漂移）。
+				if (Array.isArray(body.data.statuses) && body.data.statuses.length) state.feedbackStatuses = body.data.statuses;
+				feedbackLoaded = true;
+			} catch (error) {
+				showToast(`反馈加载失败：${error.message}`);
+				state.feedback = [];
+			}
+		}
+		// 切到本页签时调用：先拉数据再渲染。
+		async function refreshFeedback() {
+			await loadFeedback();
+			if (state.module === "feedback") renderFeedback();
+		}
+		function feedbackRowHtml(item) {
+			const status = state.feedbackStatuses.includes(item.status) ? item.status : "new";
+			const contact = item.contact
+				? `<div class="feedback-contact">${esc(item.contact)}</div>`
+				: `<span class="item-id">未留</span>`;
+			const handled = item.handledAt ? `<div class="item-id">${new Date(item.handledAt).toLocaleString()}</div>` : "";
+			// 已处理的行只留「退回未处理」+ 删除：处理完的东西不需要再点一次「已处理」。
+			const actions = status === "done"
+				? `<button class="link-button feedback-status" data-id="${esc(item.id)}" data-status="new">退回未处理</button>`
+				: `<button class="link-button feedback-status" data-id="${esc(item.id)}" data-status="read" ${status === "read" ? "disabled" : ""}>标记已读</button><button class="button publish feedback-status" data-id="${esc(item.id)}" data-status="done">标记已处理</button>`;
+			return `<tr>
+				<td><div class="item-name">${esc(item.nickname || "（未命名）")}</div><div class="item-id">${esc(item.userId)}</div></td>
+				<td><div class="feedback-message">${esc(item.message)}</div></td>
+				<td>${contact}</td>
+				<td><span class="badge ${status}" title="${esc(FEEDBACK_STATUS_HINT[status] || "")}">${esc(FEEDBACK_STATUS_LABELS[status] || status)}</span>${handled}</td>
+				<td>${new Date(item.createdAt || 0).toLocaleString()}</td>
+				<td><div class="actions">${actions}<button class="link-button delete feedback-delete" data-id="${esc(item.id)}">删除</button></div></td>
+			</tr>`;
+		}
+		function renderFeedback() {
+			const statusOptions = [""].concat(state.feedbackStatuses)
+				.map(value => `<option value="${esc(value)}" ${feedbackFilter.status === value ? "selected" : ""}>${value === "" ? "全部状态" : esc(FEEDBACK_STATUS_LABELS[value] || value)}</option>`)
+				.join("");
+			const pending = state.feedback.filter(item => item.status === "new").length;
+			const tableHtml = state.feedback.length
+				? `<div class="table-wrap"><table><thead><tr><th>玩家</th><th>留言</th><th>联系方式</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>${state.feedback.map(feedbackRowHtml).join("")}</tbody></table></div>`
+				: `<div class="empty"><strong>${feedbackLoaded ? "没有反馈" : "加载中…"}</strong>${feedbackLoaded ? (feedbackFilter.status ? "换个状态筛选看看" : "玩家在「设置 → 关于 → 联系我们」提交后会显示在这里") : "正在拉取反馈列表"}</div>`;
+			main.innerHTML = pageHeader("PLAYER FEEDBACK", "反馈", "玩家在应用内「设置 → 关于 → 联系我们」提交的留言。后台只能标记状态与删除，不能修改内容。", `<button class="button secondary" id="refreshFeedback">刷新</button>`)
+				+ `<section class="panel"><div class="panel-head"><div><h3>筛选</h3><p>默认按提交时间从新到旧</p></div></div><div class="filter-row">
+					<label>状态 <select id="filterFeedbackStatus">${statusOptions}</select></label>
+					<span class="count">共 ${state.feedback.length} 条${feedbackFilter.status ? "（已筛选）" : ""} · 待处理 ${pending} 条</span>
+				</div></section>`
+				+ `<section class="panel"><div class="panel-head"><div><h3>留言列表</h3><p>联系方式是玩家自愿留的，可能为空</p></div></div>${tableHtml}</section>`;
+
+			document.getElementById("refreshFeedback").onclick = () => refreshFeedback();
+			document.getElementById("filterFeedbackStatus").onchange = async (event) => {
+				feedbackFilter.status = event.target.value;
+				await refreshFeedback();
+			};
+			document.querySelectorAll(".feedback-status").forEach(button => {
+				button.onclick = async () => {
+					const id = button.dataset.id;
+					const status = button.dataset.status;
+					try {
+						await apiRequest(`/admin/feedback/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify({ status }) });
+						showToast(`已标记为「${FEEDBACK_STATUS_LABELS[status] || status}」`, 1800, "ok");
+						await refreshFeedback();
+					} catch (error) {
+						showToast(`标记失败：${error.message}`);
+					}
+				};
+			});
+			document.querySelectorAll(".feedback-delete").forEach(button => {
+				button.onclick = async () => {
+					// 删除不可恢复，二次确认；文案里带上留言开头，避免删错一条。
+					const id = button.dataset.id;
+					const item = state.feedback.find(row => row.id === id);
+					const preview = item ? String(item.message).slice(0, 20) : "";
+					if (!confirm(`确定删除这条反馈吗？删掉就找不回来了。\n\n${preview}${preview.length >= 20 ? "…" : ""}`)) return;
+					try {
+						await apiRequest(`/admin/feedback/${encodeURIComponent(id)}`, { method: "DELETE" });
+						showToast("已删除", 1800, "ok");
+						await refreshFeedback();
+					} catch (error) {
+						showToast(`删除失败：${error.message}`);
+					}
+				};
+			});
 		}
 		// ===== 发放奖励 =====
 		// 为什么要「预览 → 确认」两步：这是唯一直接改经济数据的后台操作，而且一次可能发给几十个人。

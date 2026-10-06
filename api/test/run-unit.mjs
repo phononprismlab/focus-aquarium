@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const files = ["reward.test.js", "focus-session.test.js", "focus-settle-writeback.test.js", "focus-resume.test.js", "audio-categories.test.js", "shop-sound-items.test.js", "ambient-audio.test.js", "image-upload.test.js", "storage-pg.test.js", "cors.test.js", "health.test.js", "ready.test.js", "bind-failure.test.js", "runtime-guard.test.js", "admin-resolution.test.js",
+const files = ["reward.test.js", "focus-session.test.js", "focus-settle-writeback.test.js", "focus-resume.test.js", "audio-categories.test.js", "shop-sound-items.test.js", "ambient-audio.test.js", "image-upload.test.js", "webp-transform.test.js", "storage-pg.test.js", "cors.test.js", "health.test.js", "ready.test.js", "bind-failure.test.js", "runtime-guard.test.js", "admin-resolution.test.js",
   "seed-migration.test.js",
   "fish-assembly.test.js",
   "fish-animation.test.js",
@@ -21,6 +21,7 @@ const files = ["reward.test.js", "focus-session.test.js", "focus-settle-writebac
   "account.test.js",
   "account-client.test.js",
   "account-delete.test.js",
+  "feedback.test.js",
   "embed-guard.test.js",
   "cloud-save.test.js",
   "player-field-registry.test.js",

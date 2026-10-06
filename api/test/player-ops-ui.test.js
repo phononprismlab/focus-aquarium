@@ -111,9 +111,10 @@ console.log("--- 1. 维护页：层级与默认态 ---");
     /body\.fa-maintenance-on \.app\{pointer-events:none/.test(playerRaw));
 
   // 维护页一开，浮在它上面的抽屉／弹窗必须先收掉，否则玩家看得到却点不动。
+  // 「联系我们」也是全屏遮罩，同样要收 —— 它是后加的，最容易漏。
   const showSrc = extractFunction(playerCode, "showMaintenance");
   chkTrue("开维护页时收掉可能浮在上面的层",
-    /\["infoModal","noticeModal","modal","shopModal","mineDrawer","settingsDrawer"\]\.forEach\(id => \{[\s\S]{0,160}classList\.remove\("show"\)/.test(showSrc));
+    /\["infoModal","noticeModal","contactModal","modal","shopModal","mineDrawer","settingsDrawer"\]\.forEach\(id => \{[\s\S]{0,160}classList\.remove\("show"\)/.test(showSrc));
   chkTrue("维护页带 body 标记（CSS 靠它关交互）",
     /document\.body\.classList\.add\("fa-maintenance-on"\)/.test(showSrc));
   chkTrue("关维护页时撤掉 body 标记",
@@ -327,12 +328,15 @@ console.log("\n--- 6. 公告弹窗：CTA 只放行 http(s) ---");
     openSrc.includes('indexOf("http://")') && openSrc.includes('indexOf("https://")'));
   chkTrue("非法 CTA 时把 href 复位成 #", /cta\.href = "#";/.test(openSrc));
   chkTrue("标题走纯文本（后台填错标签不会带崩版式）", /titleEl\.textContent = /.test(openSrc));
+  chkTrue("公告打开时把卡片滚回顶部", /card\.scrollTop = 0/.test(openSrc));
 
   // 运行时：真按假 DOM 跑一遍
   const box = (() => {
     const code = [
       "const els = {};",
-      'const mk = id => ({ id, hidden: false, className: "", textContent: "", innerHTML: "", href: "#", classList: { add(){}, remove(){} }, setAttribute(){} });',
+      // querySelector 是给「卡片滚动复位」用的：弹窗卡片自己是滚动容器，
+      // 上次看到哪、下次打开就还在哪 —— 打开时必须显式回顶。
+      'const mk = id => ({ id, hidden: false, className: "", textContent: "", innerHTML: "", href: "#", card: { scrollTop: 0 }, querySelector(sel){ return sel === ".info-card" ? this.card : null; }, classList: { add(){}, remove(){} }, setAttribute(){} });',
       'const document = { getElementById: id => (els[id] = els[id] || mk(id)) };',
       "let seen = [];",
       "function markOpsNoticeSeen(id){ seen.push(id); }",
@@ -349,9 +353,11 @@ console.log("\n--- 6. 公告弹窗：CTA 只放行 http(s) ---");
   chk("被拦下时 href 复位", box.els.noticeCta.href, "#");
 
   globalThis.__notice = { id: "n2", title: "公告", body: "<p>正文</p>", ctaUrl: "https://example.com/a", ctaText: "查看详情" };
+  box.els.noticeModal.card.scrollTop = 480; // 上一次看到正文末尾留下的位置
   box.openOpsNotice(globalThis.__notice);
   chk("https CTA 放行", box.els.noticeCta.hidden, false);
   chk("CTA 文案用后台填的", box.els.noticeCta.textContent, "查看详情");
+  chk("打开公告时把卡片滚回顶部（位置跨次保留，不回顶会像内容缺了一半）", box.els.noticeModal.card.scrollTop, 0);
   chk("关闭过一次才算已读", box.seen, ["n1", "n2"]);
 
   globalThis.__notice = { id: "n3", title: "公告", body: "<p>正文</p>" };
@@ -377,7 +383,13 @@ console.log("\n--- 7. 首屏只弹一次，且给引导让位 ---");
   chkTrue("期间公告过期了就不弹", /if\(opsNotice\(\) !== notice\)\{ pendingNotice = null; return; \}/.test(flushSrc));
 
   chkTrue("停机中不引导（维护页已盖住界面，引导会在下面空跑）",
-    /if\(maintenanceOn\) return;\s*\n\s*if\(window\.FISHTANK_DEFAULT_DATA && !guideSeen\(\)\) startGuide\(\);/.test(playerCode));
+    /if\(maintenanceOn\) return false;\s*\n\s*return Boolean\(window\.FISHTANK_DEFAULT_DATA && !guideSeen\(\)\);/.test(playerCode));
+  // 引导会拦点击、还要量真实元素位置 —— 必须等首屏加载页退场之后再跑，
+  // 盖在加载页下面跑一遍等于白跑（用户点不到，聚光洞也照不到东西）。
+  const bootSrc = extractFunction(playerCode, "runBootGate");
+  chkTrue("引导交给首屏加载页，在 bootFinish() 之后才跑",
+    bootSrc.indexOf("bootFinish()") > -1 &&
+    bootSrc.indexOf("if(needGuide) startGuide();") > bootSrc.indexOf("bootFinish()"));
   chkTrue("切回页面时重查（停机／公告都是随时可能开的）",
     /addEventListener\("visibilitychange"[\s\S]{0,160}refreshOps\(\)/.test(playerCode));
   chkTrue("停机中定时重试（维护结束不用手动刷新）",

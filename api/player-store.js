@@ -62,6 +62,14 @@ export const TABLE_TRACKING_EVENTS = "tracking_events";
 // `reason = "event:<id>"`，行数与时间戳就是「今天发过几次、上次什么时候发的」。
 // 因此查询它时必须按 reason 精确匹配（见 queryGrants）。
 export const TABLE_GRANTS = "grants";
+// 玩家反馈（设置里的「联系我们」表单）。**这是玩家自己写的文本，不是配置** ——
+// 后台只读不改（只标记处理状态），所以它属于玩家数据表，不进 fishtank_configs 那张配置单表。
+//
+// 为什么要有 contact 这一列而不是只存正文：玩家往往不留联系方式，但一旦留了，
+// 这条留言的价值就完全不同（能回访）。所以它单独成列，后台列表里能一眼看到。
+// 🔴 这一列是**玩家自己填的、可能包含个人信息的文本** —— 自助注销必须把它一起删掉
+//    （见 deleteUser），否则「删除你的全部数据」这句话不成立。
+export const TABLE_FEEDBACK = "feedback";
 // 用户档案里允许被客户端改的列。白名单写死在数据层：路由层哪怕传了别的键也写不进去，
 // 免得将来有人顺手把 is_supporter / cohort 一起塞进 patch。
 export const UPDATABLE_USER_FIELDS = new Set(["nickname"]);
@@ -178,6 +186,48 @@ export function normalizeSettings(value) {
     if (Number.isFinite(n)) audio[key] = Math.min(100, Math.max(0, n));
   }
   return { ...source, audio };
+}
+
+// ===== 玩家反馈（「联系我们」表单）=====
+// 留言上限。1000 个码点足够把问题说清楚，又不至于让人往库里灌小作文。
+export const FEEDBACK_MESSAGE_MAX = 1000;
+// 联系方式上限。这里刻意不做格式校验（不强制邮箱、不收手机号）——
+// 玩家想留微信号、QQ 号、邮箱、甚至「站内回复就行」都行，是**他选**怎么被联系。
+export const FEEDBACK_CONTACT_MAX = 120;
+// 后台能标记的状态。`new` = 还没人看过；`read` = 看过了；`done` = 处理完了。
+export const FEEDBACK_STATUSES = ["new", "read", "done"];
+// 控制字符会破坏后台列表与日志的可读性，一律剥掉；但 \t(0x09) 与 \n(0x0a) 留着 ——
+// 留言是多行文本框，换行是玩家排版的一部分。
+const stripControlChars = value => String(value == null ? "" : value)
+  .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
+
+// 归一化一条留言。返回 { ok, contact, message } 或 { ok:false, reason }。
+// 只做「形状 + 长度 + 控制字符」三件事，不猜玩家想说什么。
+export function normalizeFeedback({ contact, message } = {}) {
+  // 先卡类型：数字 / 对象进来会一路走到 String() 变成 "[object Object]" 存进库里，
+  // 那种留言后台看不懂、也回访不了，不如在门口拒掉。
+  const rawMessage = message === undefined || message === null ? "" : message;
+  const rawContact = contact === undefined || contact === null ? "" : contact;
+  if (typeof rawMessage !== "string") return { ok: false, reason: "留言内容必须是文本" };
+  if (typeof rawContact !== "string") return { ok: false, reason: "联系方式必须是文本" };
+
+  const cleanMessage = stripControlChars(rawMessage).replace(/\n{4,}/g, "\n\n\n").trim();
+  // 联系方式压成一行：里面混进换行会让后台表格排版崩掉，且联系方式本来就不该多行。
+  const cleanContact = stripControlChars(rawContact).replace(/\s+/g, " ").trim();
+  if (!cleanMessage) return { ok: false, reason: "留言内容不能为空" };
+  if ([...cleanMessage].length > FEEDBACK_MESSAGE_MAX) {
+    return { ok: false, reason: `留言最多 ${FEEDBACK_MESSAGE_MAX} 个字` };
+  }
+  if ([...cleanContact].length > FEEDBACK_CONTACT_MAX) {
+    return { ok: false, reason: `联系方式最多 ${FEEDBACK_CONTACT_MAX} 个字` };
+  }
+  return { ok: true, contact: cleanContact, message: cleanMessage };
+}
+
+// 反馈行 id。与 grants / tracking_events 同一套「应用层生成字符串主键」的理由：
+// 控制台的可视化建表建不出 bigserial。
+export function feedbackId() {
+  return `fb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 // 校验鱼缸布局。
@@ -707,6 +757,7 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
   const focusRecords = new Map();
   const grants = new Map();
   const trackingEvents = [];
+  const feedback = new Map();
   let trackingSeq = 0;
 
   return {
@@ -868,6 +919,49 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
       });
     },
 
+    // ===== 玩家反馈（设置里的「联系我们」）=====
+    // 玩家写、后台读。这里没有 merge / 权威性可言 —— 它不参与经济，改不了任何游戏状态，
+    // 所以整条链路刻意做得很薄：落一行、按状态列出来、标一下状态、能删。
+    async addFeedback({ id, userId = "", nickname = "", contact = "", message = "", at = now() } = {}) {
+      const row = {
+        id,
+        user_id: String(userId || ""),
+        nickname: String(nickname || ""),
+        contact: String(contact || ""),
+        message: String(message || ""),
+        status: "new",
+        created_at: at,
+        handled_at: 0
+      };
+      feedback.set(row.id, row);
+      return { ...row };
+    },
+
+    async listFeedback({ status = "", limit = 200 } = {}) {
+      let list = [...feedback.values()];
+      if (status) list = list.filter(f => f.status === status);
+      list.sort((a, b) => (Number(b.created_at) || 0) - (Number(a.created_at) || 0));
+      return list.slice(0, Math.max(0, limit)).map(f => ({ ...f }));
+    },
+
+    // 标记处理状态。status 回到 "new" 时把 handled_at 清 0 ——
+    // 否则后台「已处理」列表里会出现一条「未处理但带处理时间」的怪行。
+    async setFeedbackStatus(id, status, { at = now() } = {}) {
+      const row = feedback.get(String(id || ""));
+      if (!row) return null;
+      row.status = status;
+      row.handled_at = status === "new" ? 0 : at;
+      return { ...row };
+    },
+
+    async deleteFeedback(ids) {
+      let removed = 0;
+      for (const id of Array.isArray(ids) ? ids : []) {
+        if (feedback.delete(String(id || ""))) removed++;
+      }
+      return removed;
+    },
+
     // 全量存档导出（备份用）。一次给出 users + saves 两份清单，由路由层打包成 JSON。
     // 为什么需要它：个人版没有数据回档，存档在库里被误删 / 实例故障就永久没了 ——
     // 这份导出是唯一能把存档搬出数据库实例的通道。
@@ -1011,7 +1105,7 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
     },
 
     // ===== 自助注销：删掉这个人的全部数据 =====
-    // 5 张表按 user_id 全删。
+    // 6 张表按 user_id 全删。
     //
     // 为什么是硬删而不是标个 deleted 字段：隐私政策写的是「删除」，数据留在库里
     // 只改个标记，严格说不构成删除。而这些表里没有需要留档的东西（无交易、无支付），
@@ -1023,18 +1117,21 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
     // 幂等：删第二遍时各表都查不到这个人，计数全 0，仍然返回成功。
     async deleteUser(uid) {
       const id = String(uid || "").trim();
-      const deleted = { users: 0, saves: 0, focus_records: 0, tracking_events: 0, grants: 0 };
+      const deleted = { users: 0, saves: 0, focus_records: 0, tracking_events: 0, grants: 0, feedback: 0 };
       if (!id) return { userId: "", deleted };
 
       if (users.delete(id)) deleted.users++;
       if (saves.delete(id)) deleted.saves++;
 
-      // focusRecords 与 grants 都是「按行 id 索引」的 Map，只能逐条比对 user_id。
+      // focusRecords / grants / feedback 都是「按行 id 索引」的 Map，只能逐条比对 user_id。
       for (const [key, row] of [...focusRecords]) {
         if (row && row.user_id === id) { focusRecords.delete(key); deleted.focus_records++; }
       }
       for (const [key, row] of [...grants]) {
         if (row && row.user_id === id) { grants.delete(key); deleted.grants++; }
+      }
+      for (const [key, row] of [...feedback]) {
+        if (row && row.user_id === id) { feedback.delete(key); deleted.feedback++; }
       }
 
       // trackingEvents 是数组，且可能有别的闭包持有同一引用 → 原地过滤，别重新赋值。
@@ -1054,7 +1151,7 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
     },
 
     // 仅供测试观察
-    _sizes: () => ({ users: users.size, saves: saves.size, focusRecords: focusRecords.size, grants: grants.size, trackingEvents: trackingEvents.length })
+    _sizes: () => ({ users: users.size, saves: saves.size, focusRecords: focusRecords.size, grants: grants.size, trackingEvents: trackingEvents.length, feedback: feedback.size })
   };
 }
 
@@ -1321,6 +1418,57 @@ export function createCloudbasePlayerStore(db, { now = () => Date.now() } = {}) 
       });
     },
 
+    // ===== 玩家反馈（设置里的「联系我们」）=====
+    // 与内存实现同一套语义，不重复注释理由。
+    // 排序同样在 JS 侧做（理由见 listGrants：order 的实际行为没在线上验证过）。
+    async addFeedback({ id, userId = "", nickname = "", contact = "", message = "", at = now() } = {}) {
+      const row = {
+        id: id,
+        user_id: String(userId || ""),
+        nickname: String(nickname || ""),
+        contact: String(contact || ""),
+        message: String(message || ""),
+        status: "new",
+        created_at: at,
+        handled_at: 0
+      };
+      await db.from(TABLE_FEEDBACK).insert([row], { defaultToNull: false }).throwOnError();
+      return { ...row };
+    },
+
+    async listFeedback({ status = "", limit = 200 } = {}) {
+      let q = db.from(TABLE_FEEDBACK).select("*");
+      if (status) q = q.eq("status", status);
+      const { data } = await q.throwOnError();
+      return (data || [])
+        .slice()
+        .sort((a, b) => (Number(b.created_at) || 0) - (Number(a.created_at) || 0))
+        .slice(0, Math.max(0, limit));
+    },
+
+    // 🔴 这个 SDK 的 update 不回传影响行数，所以「行不存在」只能靠先查一次判断，
+    //    写完再回读一次把真实落库值返回（后台据此刷新列表，不靠本地拼的对象）。
+    async setFeedbackStatus(id, status, { at = now() } = {}) {
+      const before = await selectOne(TABLE_FEEDBACK, "id", id);
+      if (!before) return null;
+      await db.from(TABLE_FEEDBACK).update({ status: status, handled_at: status === "new" ? 0 : at })
+        .eq("id", id).throwOnError();
+      return (await selectOne(TABLE_FEEDBACK, "id", id)) || null;
+    },
+
+    // 删除同样要回读确认 —— 与 deleteUser 同一个坑（delete 不报错 ≠ 真的删掉了）。
+    async deleteFeedback(ids) {
+      let removed = 0;
+      for (const id of Array.isArray(ids) ? ids : []) {
+        const before = await selectOne(TABLE_FEEDBACK, "id", id);
+        if (!before) continue;
+        await db.from(TABLE_FEEDBACK).delete().eq("id", id).throwOnError();
+        const after = await selectOne(TABLE_FEEDBACK, "id", id);
+        if (!after) removed++;
+      }
+      return removed;
+    },
+
     // 全量存档导出（备份用）。两趟查询拿全 users + saves，字段裁剪与列名映射都在 JS 侧
     // 做（同 listUsers 的取舍：只用线上验证过的 select("*") 面貌，不做列名列表 select）。
     // 用户量级（几百）下这两次全表扫描的开销可忽略；真要上万再谈分页导出。
@@ -1495,14 +1643,14 @@ export function createCloudbasePlayerStore(db, { now = () => Date.now() } = {}) 
     },
 
     // ===== 自助注销：删掉这个人的全部数据 =====
-    // 与内存实现同一套语义（硬删、5 张表、uid 非空、幂等），不重复注释理由。
+    // 与内存实现同一套语义（硬删、6 张表、uid 非空、幂等），不重复注释理由。
     //
     // 🔴 这个 SDK 的 delete 不回传影响行数，「delete 不报错」不等于「真的删掉了」——
     //    和 claimPendingGrants 同一个坑。所以删完回读一次，报的是**实际清掉的行数**，
     //    而不是「发出了几次删除」。注销是低频操作，多打一次查询不值得优化。
     async deleteUser(uid) {
       const id = String(uid || "").trim();
-      const deleted = { users: 0, saves: 0, focus_records: 0, tracking_events: 0, grants: 0 };
+      const deleted = { users: 0, saves: 0, focus_records: 0, tracking_events: 0, grants: 0, feedback: 0 };
       if (!id) return { userId: "", deleted };
 
       const tables = [
@@ -1510,7 +1658,9 @@ export function createCloudbasePlayerStore(db, { now = () => Date.now() } = {}) 
         ["saves", TABLE_SAVES],
         ["focus_records", TABLE_FOCUS_RECORDS],
         ["tracking_events", TABLE_TRACKING_EVENTS],
-        ["grants", TABLE_GRANTS]
+        ["grants", TABLE_GRANTS],
+        // 反馈里有玩家自己填的联系方式 —— 这一张尤其不能漏。
+        ["feedback", TABLE_FEEDBACK]
       ];
       for (const [name, table] of tables) {
         const before = await db.from(table).select("*").eq("user_id", id).throwOnError();

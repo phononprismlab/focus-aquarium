@@ -394,12 +394,42 @@ export async function resolveCloudUrl(ref) {
   return ref;
 }
 
+// 图片统一切成 WebP 再下发（2026-10-06）。
+//
+// 起因：素材是直接从设计工具导出的 PNG，几张背景图用 PNG 装了照片级内容
+// （每像素 0.49~0.52 字节），单张 758~803KB；而同样 1536×1024 的图存 JPEG 只要 52KB
+// —— 差 15 倍。玩家进页面时多张图并发到达、谁先到谁先画，看起来就是「素材一栏一栏冒出来」。
+//
+// CloudBase 云存储自带 imageMogr2 图片处理，**在签名 URL 上同样生效**（实测 200，
+// content-type 变 image/webp、magic 是 RIFF）。所以不用重传素材、不用装转码依赖、
+// 原图也不动，只在下发时挂一个参数：
+//     background004  803KB → 242KB
+//     sand001        175KB →  34KB（透明通道保留，VP8X flags=0x10）
+//     decoration001  264KB → 209KB（透明通道保留）
+//
+// 尺寸刻意不缩：thumbnail/1280x 实测反而把 decoration001 从 209KB 顶到 217KB
+// （重采样引入更多细节），而且缸在 2x 屏上要 2560 宽，缩了会糊。
+//
+// 排除两类：SVG（矢量转位图会失真）、GIF（会被压成单帧，动画没了）。
+// 出问题可以用环境变量 FISHTANK_IMAGE_WEBP=0 一键关掉，不用改代码。
+const WEBP_SOURCE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".bmp", ".avif"];
+const WEBP_TRANSFORM_ENABLED = process.env.FISHTANK_IMAGE_WEBP !== "0";
+
+export function withWebpTransform(url) {
+  if (!WEBP_TRANSFORM_ENABLED) return url;
+  if (typeof url !== "string" || !/^https?:/i.test(url)) return url;
+  if (url.includes("imageMogr2")) return url;   // 已经带过参数，别叠
+  const pathname = url.split("?")[0].toLowerCase();
+  if (!WEBP_SOURCE_EXTENSIONS.some(ext => pathname.endsWith(ext))) return url;
+  return url + (url.includes("?") ? "&" : "?") + "imageMogr2/format/webp/quality/80";
+}
+
 // 把配置里的云存储引用换成可播放 / 可显示的链接，其它值原样返回。
 export async function resolveAudioPaths(value) {
   if (typeof value === "string") {
     if (!value.startsWith(PG_REF_SCHEME) && !value.startsWith("cloud://")) return value;
     try {
-      return await resolveCloudUrl(value);
+      return withWebpTransform(await resolveCloudUrl(value));
     } catch (error) {
       console.warn("云存储链接解析失败：", messageOf(error));
       return value;

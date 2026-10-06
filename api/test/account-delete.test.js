@@ -2,7 +2,7 @@
 //
 // 这个文件盯的是**删除的正确性与边界**，不是「接口能返回 200」。五件事：
 //   1) 只删自己：A 的令牌删不到 B 的数据（越权）—— 这是本接口唯一的高危面。
-//   2) 五张表都删干净：users / saves / focus_records / tracking_events / grants。
+//   2) 六张表都删干净：users / saves / focus_records / tracking_events / grants / feedback。
 //   3) 🔴 空 uid 不删任何东西 —— focus_records.user_id 有默认值 ''（未登录也能专注），
 //      空串 uid 会把**所有未登录玩家**的专注记录一起删掉。
 //   4) 幂等：删第二遍计数全 0，仍然 200，不报 404。
@@ -37,9 +37,9 @@ function chkTrue(name, condition, detail = "") {
 const { createMemoryPlayerStore, createCloudbasePlayerStore } = await import("../player-store.js");
 
 const NOW = 1_760_000_000_000;
-const ZERO = { users: 0, saves: 0, focus_records: 0, tracking_events: 0, grants: 0 };
+const ZERO = { users: 0, saves: 0, focus_records: 0, tracking_events: 0, grants: 0, feedback: 0 };
 
-// 给某个 uid 造齐五张表的数据。
+// 给某个 uid 造齐六张表的数据。
 async function seedPerson(store, uid) {
   await store.ensureUser(uid, { at: NOW });
   await store.putSave(uid, {
@@ -54,10 +54,12 @@ async function seedPerson(store, uid) {
   });
   await store.addTrackingEvent({ userId: uid, event: "open", at: NOW });
   await store.addGrants([{ id: `${uid}-grant-1`, user_id: uid, bubbles: 50, items: [], reason: "测试", created_at: NOW }]);
+  // 反馈里可能有玩家自己填的联系方式 —— 注销必须把它一起清掉。
+  await store.addFeedback({ id: `${uid}-fb-1`, userId: uid, nickname: "小鱼", contact: "a@b.c", message: "测试留言", at: NOW });
 }
 
 // ===== 1. 内存实现：删除语义 =====
-console.log("\n--- 1. 内存实现：五张表全删、只删自己 ---");
+console.log("\n--- 1. 内存实现：六张表全删、只删自己 ---");
 {
   const store = createMemoryPlayerStore({ now: () => NOW });
   await seedPerson(store, "u_a");
@@ -66,15 +68,17 @@ console.log("\n--- 1. 内存实现：五张表全删、只删自己 ---");
   const before = store._sizes();
   chk("准备：两个人各有存档", [before.users, before.saves, before.focusRecords, before.grants], [2, 2, 2, 2]);
   chk("准备：两条埋点", before.trackingEvents, 2);
+  chk("准备：两条反馈", before.feedback, 2);
 
   const result = await store.deleteUser("u_a");
   chk("返回的 userId 是传入的 uid", result.userId, "u_a");
-  chk("五张表各删 1 行", result.deleted, { users: 1, saves: 1, focus_records: 1, tracking_events: 1, grants: 1 });
+  chk("六张表各删 1 行", result.deleted, { users: 1, saves: 1, focus_records: 1, tracking_events: 1, grants: 1, feedback: 1 });
 
   chk("A 的用户行没了", await store.getUser("u_a"), null);
   chk("A 的存档没了", await store.getSave("u_a"), null);
   chk("A 的专注记录没了", (await store.stats("u_a")).focusCount, 0);
   chk("A 的奖励记录没了", await store.listGrants({ userId: "u_a" }), []);
+  chk("🔴 A 的反馈没了（联系方式一起清掉）", (await store.listFeedback({})).map(f => f.user_id), ["u_b"]);
 
   // 越权的另一半：别人的数据必须完好无损
   chkTrue("🔴 B 的用户行还在", (await store.getUser("u_b")) !== null);
@@ -84,6 +88,7 @@ console.log("\n--- 1. 内存实现：五张表全删、只删自己 ---");
   const after = store._sizes();
   chk("删完只剩 B 的四类数据", [after.users, after.saves, after.focusRecords, after.grants], [1, 1, 1, 1]);
   chk("埋点只剩 B 那条", after.trackingEvents, 1);
+  chk("🔴 反馈只剩 B 那条", after.feedback, 1);
 
   // 幂等
   const second = await store.deleteUser("u_a");
@@ -132,14 +137,15 @@ console.log("\n--- 1c. trackingEvents 是数组，必须原地过滤 ---");
 }
 
 // ===== 2. CloudBase 桩：查询面貌 =====
-console.log("\n--- 2. CloudBase 桩：五张表都按 user_id 删、报实际行数 ---");
+console.log("\n--- 2. CloudBase 桩：六张表都按 user_id 删、报实际行数 ---");
 {
   const state = {
     users: [{ user_id: "u_1", nickname: "甲" }, { user_id: "u_2", nickname: "乙" }],
     saves: [{ user_id: "u_1", data: "{}" }, { user_id: "u_2", data: "{}" }],
     focus_records: [{ id: "f1", user_id: "u_1" }, { id: "f2", user_id: "" }, { id: "f3", user_id: "u_2" }],
     tracking_events: [{ id: 1, user_id: "u_1" }, { id: 2, user_id: "u_2" }],
-    grants: [{ id: "g1", user_id: "u_1" }, { id: "g2", user_id: "u_2" }]
+    grants: [{ id: "g1", user_id: "u_1" }, { id: "g2", user_id: "u_2" }],
+    feedback: [{ id: "fb1", user_id: "u_1" }, { id: "fb2", user_id: "u_2" }]
   };
   const calls = [];
   const stubDb = {
@@ -165,17 +171,17 @@ console.log("\n--- 2. CloudBase 桩：五张表都按 user_id 删、报实际行
   const store = createCloudbasePlayerStore(stubDb, { now: () => NOW });
 
   const result = await store.deleteUser("u_1");
-  chk("报的是实际删掉的行数", result.deleted, { users: 1, saves: 1, focus_records: 1, tracking_events: 1, grants: 1 });
+  chk("报的是实际删掉的行数", result.deleted, { users: 1, saves: 1, focus_records: 1, tracking_events: 1, grants: 1, feedback: 1 });
 
   const deletedTables = calls.filter(c => c.op === "delete").map(c => c.table).sort();
-  chk("五张表都发了 delete", deletedTables, ["focus_records", "grants", "saves", "tracking_events", "users"]);
+  chk("六张表都发了 delete", deletedTables, ["feedback", "focus_records", "grants", "saves", "tracking_events", "users"]);
   chkTrue("select 用的是 select(\"*\")（列裁剪交给 JS）", calls.filter(c => c.op === "select").every(c => c.cols === "*"));
 
   chk("🔴 空串 uid 的记录没被误伤（focus_records 还剩 2 条）", state.focus_records.length, 2);
   chkTrue("🔴 空串那条还在", state.focus_records.some(r => r.user_id === ""));
-  chk("u_2 的数据没动", [state.users.length, state.saves.length, state.grants.length], [1, 1, 1]);
+  chk("u_2 的数据没动", [state.users.length, state.saves.length, state.grants.length, state.feedback.length], [1, 1, 1, 1]);
 
-  // 幂等：已经删干净的人再删一次 → 不该再发 delete（省掉 5 次空写）
+  // 幂等：已经删干净的人再删一次 → 不该再发 delete（省掉 6 次空写）
   calls.length = 0;
   const again = await store.deleteUser("u_1");
   chk("重复删除：计数全 0", again.deleted, ZERO);
@@ -274,6 +280,14 @@ await call("POST", "/api/game/focus/complete", { token: bob.token, body: { sessi
 const aliceMeBefore = await call("GET", "/api/game/me", { token: alice.token });
 chkTrue("准备：A 有专注记录", aliceMeBefore.body.data.focusCount >= 1);
 chkTrue("准备：A 有存档", (await call("GET", "/api/game/save", { token: alice.token })).body.data.exists === true);
+// A 留一条反馈（带联系方式）。注销之后后台不该还能查到它。
+const aliceFeedback = await call("POST", "/api/feedback", {
+  token: alice.token,
+  body: { contact: "alice@example.com", message: "鱼缸里的鱼不见了" }
+});
+chk("准备：A 提交反馈 → 201", aliceFeedback.status, 201);
+const feedbackBefore = await call("GET", "/api/admin/feedback", { adminKey: ADMIN_KEY });
+chkTrue("准备：后台能看到 A 的反馈", feedbackBefore.body.data.feedback.some(f => f.userId === alice.uid));
 
 // A 主动注销
 const deleted = await call("DELETE", "/api/account", { token: alice.token });
@@ -282,7 +296,11 @@ chk("返回的 userId 是 A 的 uid", deleted.body.data.userId, alice.uid);
 chkTrue("users 删了 1 行", deleted.body.data.deleted.users === 1);
 chkTrue("saves 删了 1 行", deleted.body.data.deleted.saves === 1);
 chkTrue("focus_records 删了 ≥1 行", deleted.body.data.deleted.focus_records >= 1);
-chkTrue("deleted 结构齐全", ["users", "saves", "focus_records", "tracking_events", "grants"].every(k => k in deleted.body.data.deleted));
+chkTrue("🔴 feedback 删了 1 行（联系方式是个人信息，必须一起清）", deleted.body.data.deleted.feedback === 1);
+chkTrue("deleted 结构齐全", ["users", "saves", "focus_records", "tracking_events", "grants", "feedback"].every(k => k in deleted.body.data.deleted));
+
+const feedbackAfter = await call("GET", "/api/admin/feedback", { adminKey: ADMIN_KEY });
+chkTrue("🔴 注销后后台查不到 A 的反馈", !feedbackAfter.body.data.feedback.some(f => f.userId === alice.uid));
 
 // 🔴 越权：B 的一切必须原封不动
 const bobSave = await call("GET", "/api/game/save", { token: bob.token });
@@ -291,7 +309,7 @@ chk("🔴 B 的泡泡没被动（222）", bobSave.body.data.save.PlayerData.bubb
 const bobMe = await call("GET", "/api/game/me", { token: bob.token });
 chkTrue("🔴 B 的专注记录还在", bobMe.body.data.focusCount >= 1);
 
-// A 的五张表确实清了
+// A 的六张表确实清了
 const aliceSave = await call("GET", "/api/game/save", { token: alice.token });
 chk("A 的存档 → exists:false", aliceSave.body.data.exists, false);
 const aliceMe = await call("GET", "/api/game/me", { token: alice.token });

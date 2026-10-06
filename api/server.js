@@ -19,6 +19,7 @@ import { isMaintenanceBlocked } from "./ops-guard.js";
 import {
   createPlayerStore, mergeSaveForWrite, planPurchase, planSettlement, normalizeBubbles, normalizeNickname, ARCHIVE_VERSION,
   applyGrants, normalizeGrantItems, parseGrantItems, serializeGrantItems, startOfTodayMs,
+  normalizeFeedback, feedbackId, FEEDBACK_STATUSES,
   GRANT_BUBBLES_MAX, GRANT_REASON_MAX_LENGTH, INVENTORY_CATEGORIES
 } from "./player-store.js";
 
@@ -595,6 +596,79 @@ app.post("/api/admin/grants", async (req, res) => {
   } catch (error) { sendError(res, error); }
 });
 
+// ===== 玩家反馈（后台侧：查看 / 标记 / 删除）=====
+//
+// 玩家端只有「提交」一个动作（POST /api/feedback），剩下全在这里。
+// 后台**不能改留言内容** —— 只读 + 标记处理状态。理由：反馈是玩家说的话，
+// 允许编辑就等于我们能把他说过的话改掉，那样它作为证据的价值就没了。
+//
+// ⚠️ 与 grants 同理：必须注册在 `app.post("/api/admin/:type")` 与
+//    `app.delete("/api/admin/:type/:id")` 之前，否则会被那两条通配路由截走。
+const FEEDBACK_LIST_LIMIT_MAX = 500;
+function mapFeedbackRow(row) {
+  return {
+    id: row.id,
+    userId: row.user_id || "",
+    nickname: row.nickname || "",
+    contact: row.contact || "",
+    message: row.message || "",
+    status: row.status || "new",
+    createdAt: Number(row.created_at) || 0,
+    handledAt: Number(row.handled_at) || 0
+  };
+}
+
+app.get("/api/admin/feedback", async (req, res) => {
+  try {
+    const rawStatus = typeof req.query.status === "string" ? req.query.status.trim() : "";
+    if (rawStatus && !FEEDBACK_STATUSES.includes(rawStatus)) {
+      return res.status(400).json({ error: `status 只能是 ${FEEDBACK_STATUSES.join(" / ")}` });
+    }
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0
+      ? Math.min(FEEDBACK_LIST_LIMIT_MAX, Math.floor(rawLimit))
+      : 200;
+    const store = await getPlayerStore();
+    const rows = await store.listFeedback({ status: rawStatus, limit });
+    res.json({
+      data: {
+        feedback: rows.map(mapFeedbackRow),
+        count: rows.length,
+        // 前端不必把状态枚举抄一遍（抄了就会和这里漂移）。
+        statuses: FEEDBACK_STATUSES
+      }
+    });
+  } catch (error) { sendError(res, error); }
+});
+
+app.put("/api/admin/feedback/:id", async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ error: "缺少反馈 id" });
+    const status = String((req.body && req.body.status) || "").trim();
+    if (!FEEDBACK_STATUSES.includes(status)) {
+      return res.status(400).json({ error: `status 只能是 ${FEEDBACK_STATUSES.join(" / ")}` });
+    }
+    const store = await getPlayerStore();
+    const row = await store.setFeedbackStatus(id, status, { at: Date.now() });
+    if (!row) return res.status(404).json({ error: "这条反馈不存在（可能已被删除）" });
+    res.json({ data: { feedback: mapFeedbackRow(row) } });
+  } catch (error) { sendError(res, error); }
+});
+
+app.delete("/api/admin/feedback/:id", async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ error: "缺少反馈 id" });
+    const store = await getPlayerStore();
+    const removed = await store.deleteFeedback([id]);
+    // 删一个不存在的 id 返回 404 而不是「成功删 0 条」：
+    // 后台是人在点删除，点了个已经被别人删掉的东西应该被告知，而不是静默无事发生。
+    if (!removed) return res.status(404).json({ error: "这条反馈不存在（可能已被删除）" });
+    res.json({ data: { deleted: removed } });
+  } catch (error) { sendError(res, error); }
+});
+
 for (const type of types) {
   app.get(`/api/admin/${type}`, async (req, res) => {
     try {
@@ -799,6 +873,56 @@ app.delete("/api/account", async (req, res) => {
   } catch (error) {
     sendError(res, error);
   }
+});
+
+// ===== 玩家反馈（设置 → 关于 → 联系我们）=====
+//
+// 玩家在网页里填的表单落到这里，后台「反馈」页读。只做三件事：
+// 归一化（长度 / 控制字符）、挂上 uid 与昵称、落一行。
+//
+// 三条边界：
+//   ① **要身份**：没有令牌一律 401。留言会挂到 uid 上，uid 是后台唯一的回访线索；
+//      同时它也是限流键的来源 —— 不认身份就没法区分「谁在刷」。
+//   ② **限流放在身份解析之前**：无效令牌也要占配额，否则拿一堆假令牌就能把写路径刷爆。
+//   ③ 🔴 **刻意不挂停机闸门**（与 DELETE /api/account 同理）：
+//      反馈是自包含的（只写自己那一行，不碰任何共享状态），而「维护中连问题都报不了」
+//      恰恰是最糟的体验 —— 维护窗口里玩家最想说的就是「你们挂了」。
+//
+// 昵称由服务端从用户档案里读，**不接受客户端提交** —— 否则这就是个匿名的改名口子
+// （别人看到的会是后台列表里那个昵称）。
+app.post("/api/feedback", async (req, res) => {
+  const limiter = checkRateLimit(`fb:${clientIpFromHeaders(req.headers, (req.socket && req.socket.remoteAddress) || req.ip)}`);
+  if (!limiter.allowed) {
+    return res.status(429).json({ error: `提交过于频繁，请 ${limiter.retryAfterSeconds} 秒后再试` });
+  }
+
+  const identity = await requireIdentity(req, res);
+  if (!identity) return;
+
+  const body = req.body && typeof req.body === "object" ? req.body : {};
+  const check = normalizeFeedback({ contact: body.contact, message: body.message });
+  if (!check.ok) return res.status(400).json({ error: check.reason });
+
+  try {
+    // 昵称取服务端档案里的那份，读不到就留空（不因为这一跳失败就拒绝玩家的留言）。
+    let nickname = "";
+    try {
+      const user = await identity.store.getUser(identity.uid);
+      nickname = (user && user.nickname) || "";
+    } catch (error) {
+      console.warn(`读取昵称失败，反馈照常落库：${error.message}`);
+    }
+    const at = Date.now();
+    const row = await identity.store.addFeedback({
+      id: feedbackId(),
+      userId: identity.uid,
+      nickname,
+      contact: check.contact,
+      message: check.message,
+      at
+    });
+    res.status(201).json({ data: { id: row.id, createdAt: Number(row.created_at) || at } });
+  } catch (error) { sendError(res, error); }
 });
 
 // ===== 专注会话与奖励结算 =====

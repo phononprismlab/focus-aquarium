@@ -252,7 +252,11 @@ console.log("\n--- 层级：盖住鱼缸，但不能盖住配置出错提示 ---
   chkTrue("hidden 时真的不显示", /\.guide\[hidden\]\{display:none\}/.test(source));
 }
 chkTrue("配置没拉到时不引导（先让玩家看见提示条）",
-  /if\(window\.FISHTANK_DEFAULT_DATA && !guideSeen\(\)\) startGuide\(\);/.test(source));
+  /return Boolean\(window\.FISHTANK_DEFAULT_DATA && !guideSeen\(\)\);/.test(source));
+// 引导会拦点击、还要量真实元素位置 —— 必须等首屏加载页退场之后再跑，
+// 盖在加载页下面跑一遍等于白跑（用户点不到，聚光洞也照不到东西）。
+chkTrue("引导交给首屏加载页，等它退场后才跑",
+  /if\(needGuide\) startGuide\(\);/.test(source));
 
 // 上面都是源码结构断言。引导是个状态机，光看源码看不出「第三步按钮到底变没变」，
 // 所以这里用零依赖假 DOM 把整段引导代码跑一遍（不引 jsdom，项目一直是零依赖）。
@@ -404,7 +408,103 @@ return renderSettlement;
 chkTrue("差额行有独立样式（标红）", /\.v02-settlement\.short\{/.test(source));
 chkTrue("结算行有 aria-live（读屏会播报）", /id="shopSettlement" aria-live="polite"/.test(source));
 
-// ===== 4. 三项都不能把原有行为弄坏 =====
+// ===== 4. 设置抽屉：缸顶灯光开关 + 「关于」弹窗关闭方式统一 + 联系我们 =====
+console.log("\n--- 设置：缸顶灯光开关 ---");
+{
+  chkTrue("设置抽屉里有开关（真的 checkbox，键盘 Tab/空格都能用）",
+    /<input type="checkbox" id="lightFlowToggle" checked>/.test(source));
+  chkTrue("开关有标签与说明（不是光秃秃一个拨钮）",
+    /settings-row-label">缸顶灯光</.test(source) && /settings-row-hint"/.test(source));
+  // 「自由开关」= 整块收掉，连静态的光一起；不是 prefers-reduced-motion 那种「减弱动效」。
+  chkTrue("关掉是整块隐藏（连静态的光一起收掉，不是只停动画）",
+    /body\.light-off \.light-flow \{ display: none; \}/.test(source));
+  chkTrue("关灯没有走「停动画但留静态光」那条路",
+    !/body\.light-off[\s\S]{0,200}animation:\s*none/.test(source));
+
+  const apply = extractFunction(source, "applyLightFlowPref");
+  chkTrue("applyLightFlowPref 切 body 上的 light-off 类", /classList\.toggle\("light-off"/.test(apply));
+  chkTrue("applyLightFlowPref 同步勾选状态（跨设备拉回后 UI 要跟上）", /\.checked = on/.test(apply));
+  // 🔴 现查 DOM、不闭包引用外层 const：applyCloudSave 定义在那个 const 之前，
+  //    闭包引用会在初始化前踩 TDZ。
+  chkTrue("applyLightFlowPref 每次现查 DOM（避开 applyCloudSave 的 TDZ）",
+    /document\.getElementById\("lightFlowToggle"\)/.test(apply));
+
+  const enabled = extractFunction(source, "lightFlowEnabled");
+  chkTrue("缺字段 = 默认开（老存档升级后不会突然变暗）", /light === false/.test(enabled));
+
+  const cloud = extractFunction(source, "applyCloudSave");
+  chkTrue("拉回云存档后重算灯光偏好", /applyLightFlowPref\(\)/.test(cloud));
+  chkTrue("Settings 整包照旧写进 SaveData", /SaveData\.Settings\s*=\s*save\.Settings/.test(cloud));
+
+  chkTrue("勾选变化写进 Settings.light", /SaveData\.Settings\.light = lightFlowToggle\.checked/.test(source));
+  chkTrue("勾选变化会落盘并排云推送（走 saveGame，不是只写 localStorage）",
+    /SaveData\.Settings\.light = lightFlowToggle\.checked;[\s\S]{0,200}saveGame\(\);/.test(source));
+  chkTrue("偏好没进签名范围（签名只覆盖 bubbles/isMember/inventory）",
+    !/light/.test(source.slice(source.indexOf("function computeSaveSignature"), source.indexOf("function computeSaveSignature") + 400)));
+}
+
+console.log("\n--- 「关于」弹窗：只有内容末尾居中的「知道了」---");
+{
+  chk("index.html 里没有 infoClose 引用", /infoClose/.test(source), false);
+  chk("index.html 里没有 noticeClose 引用", /noticeClose/.test(source), false);
+  chk("没有 .info-close 样式残留（右上角那个 × 已下线）", /\.info-close/.test(source), false);
+  chk("没有「关闭」字样的悬浮按钮", /class="info-close/.test(source), false);
+  chkTrue("标题不再为右上角按钮留 padding-right",
+    !/\.info-title \{[^}]*padding-right/.test(source));
+  chkTrue("按钮行居中（唯一的关闭入口要一眼能找到）",
+    /\.info-actions \{[^}]*justify-content: center/.test(source));
+  chkTrue("卡片自身可滚（长内容在卡片内部滚，不是整页滚）",
+    /\.info-card \{[^}]*overflow-y: auto/.test(source));
+  chkTrue("卡片有高度上限（否则长协议会把整页撑开）",
+    /\.info-card \{[^}]*max-height/.test(source));
+  // 结构：卡片先开、按钮在后 → 按钮就在卡片里，天然随内容滚动。
+  const cardAt = source.indexOf('class="modal-card info-card"');
+  const okAt = source.indexOf('id="infoOk"');
+  const contactAt = source.indexOf('id="contactModal"');
+  chkTrue("「知道了」在卡片内部（跟着内容一起滚到最底）", cardAt > -1 && cardAt < okAt && okAt < contactAt);
+  chkTrue("公告弹窗也是同一套（同一套 .info-card 结构）",
+    /id="noticeModal"[\s\S]{0,400}class="modal-card info-card"/.test(source));
+  chkTrue("公告的「知道了」也在卡片内部", /id="noticeModal"[\s\S]{0,600}id="noticeOk">知道了/.test(source));
+  // 🔴 这三个弹窗是从设置抽屉里打开的，抽屉是 z-index 2000，.modal 默认 1001 → 卡片右缘会被切。
+  chkTrue("信息弹窗压在抽屉之上", /class="modal modal-over-drawer" id="infoModal"/.test(source));
+  chkTrue("公告弹窗压在抽屉之上", /class="modal modal-over-drawer" id="noticeModal"/.test(source));
+  chkTrue("联系我们弹窗压在抽屉之上", /class="modal modal-over-drawer" id="contactModal"/.test(source));
+  chkTrue("只给这三个提层，没有全局改 .modal（专注确认框不需要压抽屉）",
+    !/^\.modal \{[^}]*z-index: 2500/m.test(source));
+}
+
+console.log("\n--- 联系我们：玩家填表 → 后台 ---");
+{
+  chkTrue("设置抽屉里有入口", /<button type="button" class="about-row" id="about-contact"><span>联系我们<\/span>/.test(source));
+  chkTrue("入口在「关于」列表里（与协议/隐私同级）",
+    /class="about-list">[\s\S]*?id="about-contact"/.test(source));
+  chkTrue("有独立的表单弹窗", /id="contactModal"/.test(source));
+  chkTrue("表单是 <form>（回车能提交，不是只有按钮）", /<form id="contactForm"/.test(source));
+  chkTrue("联系方式字段存在且标了选填", /id="contactContact"[\s\S]{0,200}contact-optional/.test(source.replace(/\n/g, " ")) || /contact-optional">（选填）/.test(source));
+  chkTrue("留言字段是 textarea（多行留言）", /<textarea class="contact-textarea" id="contactMessage"/.test(source));
+  chkTrue("两个输入框都带 maxlength（服务端也有一道，这里是第一道）",
+    /id="contactContact" maxlength="120"/.test(source) && /id="contactMessage" maxlength="1000"/.test(source));
+  chkTrue("有字数提示", /id="contactCount"/.test(source));
+  chkTrue("打开时把光标落进留言框", /contactMessageInput\.focus\(\)/.test(source));
+  chkTrue("会提示带上哪个昵称（昵称由服务端从档案读，不在这里提交）",
+    /会带上你的昵称/.test(source));
+  chkTrue("没登录就不发请求（说清楚，别发一个必然 401 的请求）",
+    /if\(!\(CLOUD_SYNC_ENABLED && ACCOUNT_TOKEN\)\)/.test(source));
+  chkTrue("提交打到 /feedback", /fetch\(`\$\{API_BASE\}\/feedback`/.test(source));
+  chkTrue("带上会话令牌（走 cloudHeaders）", /fetch\(`\$\{API_BASE\}\/feedback`[\s\S]{0,120}cloudHeaders\(\)/.test(source));
+  chkTrue("服务端报错原样转述（400 的文案比前端自己编的准）", /setContactStatus\(\(body && body\.error\)/.test(source));
+  chkTrue("成功后清空输入（避免重开一次误发第二遍）",
+    /contactMessageInput\.value = "";[\s\S]{0,200}updateContactCount\(\);/.test(source));
+  chkTrue("有「取消」按钮（表单不能只给一条路）", /id="contactCancel"/.test(source));
+  chkTrue("点遮罩能关（与关于弹窗一致）",
+    /if\(event\.target === contactModal\) closeContact\(\)/.test(source));
+  chkTrue("联系我们也是全屏遮罩，事件提示要排在它后面",
+    /eventOverlayBusy\(\)\{[\s\S]{0,400}"contactModal"/.test(source));
+  chkTrue("停机时会把它一起收掉（否则浮在维护页上面）",
+    /\["infoModal","noticeModal","contactModal","modal","shopModal","mineDrawer","settingsDrawer"\]/.test(source));
+}
+
+// ===== 5. 三项都不能把原有行为弄坏 =====
 console.log("\n--- 不回归：原有能力仍在 ---");
 chkTrue("滚轮监听仍在（桌面端习惯没丢）", /timeEl\.addEventListener\("wheel"/.test(source));
 chkTrue("商店预览图仍带 loading=lazy", /class="v02-preview-img"[^>]*loading="lazy"/.test(source));

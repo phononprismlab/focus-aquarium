@@ -232,6 +232,23 @@ chkTrue("有连接状态卡 DOM（connDot / connTitle / connToggle / connMeta）
 chkTrue("连接成功后收起密钥输入（collapseConnBody）", /function collapseConnBody\(\)/.test(scriptSource));
 chkTrue("启动时探 /health 读环境（不要求密钥）", /refreshConnEnv[\s\S]{0,400}\/health/.test(scriptSource));
 
+// ===== 7. 反馈页 =====
+console.log("\n--- 7. 反馈页（玩家「联系我们」的收件箱）---");
+chkTrue("侧栏有入口", /class="nav-item" data-module="feedback"/.test(adminHtml));
+chkTrue("renderModule 里挂上了渲染器", /feedback: renderFeedback/.test(scriptSource));
+chkTrue("切到该页签会先拉数据（不会闪一下空白）", /if \(state\.module === "feedback"\) refreshFeedback\(\)/.test(scriptSource));
+chkTrue("列表接口是 /admin/feedback", /apiRequest\(`\/admin\/feedback\$\{query\}`\)/.test(scriptSource));
+chkTrue("状态枚举由服务端下发，后台不抄一份", /body\.data\.statuses/.test(scriptSource));
+chkTrue("标记走 PUT（不是把整行写回去）",
+  /apiRequest\(`\/admin\/feedback\/\$\{encodeURIComponent\(id\)\}`, \{ method: "PUT"/.test(scriptSource));
+chkTrue("删除走 DELETE 且有二次确认（不可恢复）",
+  /feedback-delete[\s\S]{0,600}confirm\(/.test(scriptSource));
+chkTrue("🔴 没有「编辑留言内容」的入口：PUT 的 body 只带 status",
+  !/method: "PUT"[\s\S]{0,120}message/.test(scriptSource));
+chkTrue("留言单元格保留换行（多行文本不能被压成一行）", /\.feedback-message \{ white-space: pre-wrap/.test(adminHtml));
+chkTrue("状态有独立配色（new 显眼、done 收敛）",
+  /\.badge\.new \{/.test(adminHtml) && /\.badge\.done \{/.test(adminHtml));
+
 console.log("----");
 console.log(`admin-pages-ux.test: PASS=${pass} FAIL=${fail}`);
 if (fail > 0) process.exit(1);

@@ -161,6 +161,84 @@
       linear-gradient(to bottom, transparent 65%, rgba(83,142,130,.10));
   }
 
+  /* 缸顶流动光（dominik 2026-10-06：形态 = A 水面波光 + C 顶部呼吸，位置 = 缸顶，向下渐弱）。
+     三条设计约束：
+       ① **向下渐弱** —— 整层套一条纵向 mask，光只活在缸的上半段、底边彻底化开，
+          绝不在沙面或中段切出一条能看见的横线；
+       ② **不要硬边** —— 一律用大半径 radial-gradient（透明停在 70% 以后），
+          坚决不用 repeating-* 渐变（那玩意儿天生带条纹边）；
+       ③ **要「流动」不要「闪」** —— 波光靠 transform 横移（只走合成，不 repaint），
+          呼吸靠 opacity；节拍 11s / 13s，与圆泡的 bubbleFloat(4s) 互质，不会同拍。
+     层级 40：在鱼(5)之上（光要落在鱼身上）、毛玻璃罩(50)之下（没专注时被糊住，不抢戏）。
+     强度整体压得很低（最亮处 ~0.30 alpha）：这是「空气感」，不是一盏灯。 */
+  .light-flow {
+    position: absolute; inset: 0; z-index: 40;
+    pointer-events: none;
+    overflow: hidden;
+    /* 光要「加」上去、不是「盖」上去 —— 否则浅色背景上会变成一层白雾。 */
+    mix-blend-mode: screen;
+    /* ⚠️ 顶栏是 fixed 的、盖住缸顶约 52px（≈6.5%）→ 光斑的「最亮处」不能停在
+       y=0，否则整条光带最亮的那一截全被顶栏吃掉了，露出来的只剩尾巴。
+       所以纵向位置整体下移到 7%~14%，峰值正好落在顶栏下沿。 */
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0,0,0,.86) 12%, rgba(0,0,0,.58) 32%, rgba(0,0,0,.30) 54%, rgba(0,0,0,.12) 74%, transparent 92%);
+    mask-image: linear-gradient(to bottom, #000 0%, rgba(0,0,0,.86) 12%, rgba(0,0,0,.58) 32%, rgba(0,0,0,.30) 54%, rgba(0,0,0,.12) 74%, transparent 92%);
+  }
+
+  /* A｜水面波光：一层比缸宽 2 倍的柔光斑整体横移 —— 像水面被灯照着缓缓荡开。
+     用 translateX 而不是 background-position：前者只走合成，后者每帧 repaint。
+     几何是算过的：层 left:-50% / width:200% → 缸的可见区 = 层内 25%~75%。
+     所以光斑全部落在层内 32%~69.5%（= 缸的 14%~89%），左右各留 14% / 11% 空白，
+     横移 ±4%（层宽，= ±8% 缸宽）时斑也不会从缸边「跳」出来。
+     斑与斑横向重叠约一半（半轴 7% 层宽 vs 间距 7.5%）→ 连成一条有起伏的带，
+     看得见「在动」，但看不出「几个球」。纵向位置刻意错开，避免排成一条直线。 */
+  .light-shimmer {
+    position: absolute; top: 0; left: -50%; width: 200%; height: 100%;
+    background:
+      radial-gradient(ellipse 7%   4.4% at 32%   8%,  rgba(255,255,255,.24), transparent 78%),
+      radial-gradient(ellipse 5.5% 3.6% at 39.5% 13%, rgba(255,255,255,.18), transparent 78%),
+      radial-gradient(ellipse 7.5% 4.6% at 47%   7%,  rgba(226,248,255,.22), transparent 80%),
+      radial-gradient(ellipse 5.8% 3.8% at 54.5% 14%, rgba(255,255,255,.17), transparent 78%),
+      radial-gradient(ellipse 7.2% 4.4% at 62%   9%,  rgba(226,248,255,.21), transparent 80%),
+      radial-gradient(ellipse 6%   4%   at 69.5% 13%, rgba(255,255,255,.17), transparent 78%);
+    animation: lightDrift 11s linear infinite alternate;
+  }
+  @keyframes lightDrift {
+    from { transform: translateX(-4%); }
+    to   { transform: translateX(4%); }
+  }
+
+  /* A2｜第二组波光，**反方向、更慢**（17s）。
+     只有一组斑在动时，眼睛很容易把它看成「一块雾在平移」；
+     两组速度不同、方向相反的光斑叠在一起，互相错开又重合 ——
+     这才是水面的感觉（真实的波光就是好几层不同节奏的水纹叠出来的）。
+     周期 11 / 13 / 17 两两互质，也都不与圆泡的 4s 同拍。 */
+  .light-shimmer.alt {
+    background:
+      radial-gradient(ellipse 6.2% 3.8% at 34%   11%, rgba(255,255,255,.16), transparent 80%),
+      radial-gradient(ellipse 8%   4.2% at 43%   6%,  rgba(226,248,255,.15), transparent 80%),
+      radial-gradient(ellipse 5.4% 3.4% at 52%   12%, rgba(255,255,255,.14), transparent 80%),
+      radial-gradient(ellipse 7.6% 4.4% at 61%   7%,  rgba(226,248,255,.15), transparent 80%),
+      radial-gradient(ellipse 5.8% 3.6% at 68%   12%, rgba(255,255,255,.13), transparent 80%);
+    animation: lightDriftAlt 17s linear infinite alternate;
+  }
+  @keyframes lightDriftAlt {
+    from { transform: translateX(4%); }
+    to   { transform: translateX(-4%); }
+  }
+
+  /* C｜顶部呼吸：一团从缸顶往下漫开的白光，整层明暗起伏。
+     径向中心放在 50% 2%（几乎就在缸沿上）→ 缸顶最亮、往下自然衰减，没有起止边。 */
+  .light-breath {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 84% 62% at 50% 2%, rgba(255,255,255,.30), rgba(196,238,255,.14) 50%, transparent 84%);
+    animation: lightBreath 13s ease-in-out infinite;
+  }
+  @keyframes lightBreath {
+    0%, 100% { opacity: .55; }
+    50%      { opacity: 1; }
+  }
+
   /* 未专注时的毛玻璃罩。z-index 50 是算过的：压住鱼(5)/气泡(4)/水草(3)/沙(2)/背景(0)，
      但让开海报标题(100)与计时器(1000) —— 该清楚的是字，该朦胧的是缸。
      pointer-events:none：罩子不抢"点水面投喂""点鱼加速"的手势。 */
@@ -516,18 +594,88 @@
   .about-row .chev { color: var(--text-on-water-dim); font-size: 13px; }
   .about-note { font-size: 11px; color: var(--text-on-water-dim); margin-top: 10px; line-height: 1.6; }
 
+  /* ===== 设置项：开关行 ===== */
+  .settings-block { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--shell-border); }
+  .settings-block-title { font-size: 12px; letter-spacing: .12em; color: var(--text-on-water-dim); margin-bottom: 6px; }
+  .settings-row { display: flex; align-items: center; gap: 12px; padding: 10px 2px; cursor: pointer; }
+  .settings-row-text { flex: 1 1 auto; min-width: 0; }
+  .settings-row-label { display: block; font-size: 14px; color: var(--text-on-water); }
+  .settings-row-hint { display: block; margin-top: 2px; font-size: 11px; line-height: 1.5; color: var(--text-on-water-dim); }
+  /* 开关本体：真的 <input type="checkbox">（键盘 Tab / 空格都能用），轨道与圆点用 span 画。 */
+  .switch { position: relative; flex: 0 0 auto; width: 44px; height: 26px; }
+  .switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+  .switch-track {
+    position: absolute; inset: 0; border-radius: 999px; pointer-events: none;
+    background: rgba(255,255,255,.16); border: 1px solid var(--shell-border);
+    transition: background-color .2s ease, border-color .2s ease;
+  }
+  .switch-track::after {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+    border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(10,40,50,.35);
+    transition: transform .2s ease;
+  }
+  .switch input:checked + .switch-track { background: var(--screen-blue-500); border-color: var(--screen-blue-500); }
+  .switch input:checked + .switch-track::after { transform: translateX(18px); }
+  .switch input:focus-visible + .switch-track { outline: 2px solid var(--screen-blue-500); outline-offset: 2px; }
+  /* 关掉缸顶灯光：整块隐藏（连静态的光一起）—— 这是「自由开关」，不是「减弱动效」。 */
+  body.light-off .light-flow { display: none; }
+
   /* ===== 通用信息弹窗（「关于」各条目共用）===== */
+  /* 关掉它的方式只有一种：内容末尾那个居中的「知道了」。
+     以前右上角还挂着一个悬浮的 ×，和「知道了」功能完全重复，而且它固定在卡片角上、
+     不随内容滚动 —— 内容长的时候会同时出现两个语义相同的关闭入口，读起来很乱（dominik 2026-10-06）。
+     现在「知道了」跟在内容后面一起滚，滚到底就能关。 */
   .info-card { text-align: left; max-width: min(460px, calc(100vw - 40px)); max-height: 82vh; overflow-y: auto; position: relative; }
-  .info-close { position: absolute; top: 12px; right: 14px; width: 30px; height: 30px; border: 0; border-radius: 50%; background: rgba(10,132,255,0.10); color: var(--text-on-water); font-size: 20px; line-height: 1; cursor: pointer; }
-  .info-close:hover { background: rgba(10,132,255,0.20); }
-  .info-title { font-size: 18px; font-weight: 800; margin-bottom: 12px; padding-right: 30px; }
+  .info-title { font-size: 18px; font-weight: 800; margin-bottom: 12px; }
   .info-body { font-size: 14px; line-height: 1.75; color: #34484b; }
   .info-body p { margin: 0 0 10px; }
   .info-body h4 { margin: 16px 0 6px; font-size: 14px; }
   .info-body img { display: block; max-width: 100%; margin: 14px auto; border-radius: 14px; }
   .info-body .qr-hint { text-align: center; font-size: 12px; color: var(--paper-ink-dim); margin-top: -4px; }
-  .info-actions { margin-top: 18px; text-align: right; }
+  /* 居中：弹窗里唯一的关闭入口，位置要一眼能找到。flex 是为了「公告」那种
+     同时有 CTA 链接 + 知道了 的情况也能居中对齐。 */
+  .info-actions { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; }
   .info-ok { background: var(--screen-blue-500); color: #fff; border: 0; border-radius: 11px; padding: 10px 22px; font: 700 14px inherit; cursor: pointer; }
+
+  /* 🔴 「关于」类小弹窗是从**设置抽屉里**打开的，而抽屉是 z-index 2000。
+     .modal 默认的 1001 只够压住其它 .modal，不够压抽屉 —— 1280px 宽的屏幕上
+     居中的卡片右缘会被 440px 的抽屉切掉约 30px（实测）。所以这几个弹窗单独提上去。
+     只给信息/公告/联系我们三个加，不全局改 .modal：专注结束确认框（#modal）
+     不需要压抽屉，乱提层只会给以后留坑。 */
+  .modal.modal-over-drawer { z-index: 2500; }
+
+  /* ===== 「联系我们」表单 ===== */
+  /* 这是全站唯一一处玩家直接写给我们的话，所以版式按「一封信」来排：
+     先一句话说明它通向哪里，再是字段，最后才是按钮。 */
+  .contact-intro { margin: 0 0 14px; font-size: 13px; line-height: 1.75; color: #5a7378; }
+  .contact-field { display: block; margin-bottom: 12px; }
+  .contact-label { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; letter-spacing: .04em; color: #435b60; }
+  .contact-optional { font-weight: 400; color: #8aa0a4; }
+  .contact-input, .contact-textarea {
+    display: block; width: 100%; box-sizing: border-box;
+    padding: 10px 12px; border: 1px solid rgba(90, 115, 120, .28); border-radius: 11px;
+    background: #fff; color: #101b1e; font: 400 14px/1.6 inherit;
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  .contact-textarea { min-height: 108px; resize: vertical; }
+  .contact-input:focus, .contact-textarea:focus {
+    outline: none; border-color: var(--screen-blue-500);
+    box-shadow: 0 0 0 3px rgba(10, 132, 255, .14);
+  }
+  .contact-input::placeholder, .contact-textarea::placeholder { color: #9db1b4; }
+  .contact-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: -2px 0 10px; }
+  .contact-who { font-size: 11px; color: #8aa0a4; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .contact-count { flex: 0 0 auto; font-size: 11px; color: #8aa0a4; font-variant-numeric: tabular-nums; }
+  .contact-count.over { color: #c0392b; font-weight: 700; }
+  .contact-status { margin-bottom: 10px; font-size: 12px; line-height: 1.6; }
+  .contact-status:empty { display: none; }
+  .contact-status.ok { color: #1a7f52; }
+  .contact-status.bad { color: #c0392b; }
+  .contact-cancel {
+    background: var(--screen-blue-50); color: var(--screen-blue-700);
+    border: 0; border-radius: 11px; padding: 10px 22px; font: 700 14px inherit; cursor: pointer;
+  }
+  .info-ok[disabled], .contact-cancel[disabled] { opacity: .55; cursor: default; }
 
   .completion-flash {
     position:absolute; left:50%; top:53%; z-index:1100;
@@ -1439,10 +1587,70 @@ body:not(.dev-on) .dev-panel{display:none!important}
     .plant{height:20%}
   }
 
+  /* ===== 首屏加载页 =====
+     云托管缩容到 0 之后，冷启动是真实存在的等待（几秒到十几秒），素材本身也有体积。
+     这层的作用是「告知」而不是「掩盖」—— 没有它，用户看到的是「先用内置数据渲染一次、
+     配置到了再重渲染」的中间态，也就是素材一栏一栏往外冒。
+     三条约束：
+       ① 绝不把用户永远挡在门外：配置/素材超时都放行，离线也能用。
+       ② 最短显示 450ms —— 服务已经热了的时候不要「闪一下」。
+       ③ 35s 自动淡出兜底：万一 JS 报错，加载页绝不能永久驻留（页面本身坏了，但别让
+          用户对着一个转圈的壳子猜发生了什么）。
+     层级 9000：压住顶栏通知(5000)/小票(3200)/抽屉(2000)，但让开维护页(9999) —— 停机时
+     维护页必须能盖住它，否则用户只看到「一直在唤醒」而不知道是停服。 */
+  .boot-gate{
+    position:fixed; inset:0; z-index:9000;
+    display:flex; align-items:center; justify-content:center;
+    background:linear-gradient(to bottom,#8bcbd9 0%,#9dd4dc 66%,#a9d6ce 100%);
+    transition:opacity .45s ease, visibility .45s ease;
+    animation:bootGateFallback 0s linear 35s forwards;
+  }
+  .boot-gate.is-done{opacity:0; visibility:hidden; pointer-events:none}
+  @keyframes bootGateFallback{to{opacity:0; visibility:hidden; pointer-events:none}}
+  .boot-scene{text-align:center; padding:24px}
+  .boot-bubbles{position:relative; width:60px; height:60px; margin:0 auto 16px}
+  .boot-bubbles i{
+    position:absolute; bottom:0; left:50%; width:9px; height:9px; margin-left:-4.5px;
+    border-radius:50%; background:rgba(255,255,255,.78);
+    animation:bootBubble 2.8s ease-in infinite;
+  }
+  .boot-bubbles i:nth-child(2){left:32%; width:6px; height:6px; margin-left:-3px; animation-delay:.7s}
+  .boot-bubbles i:nth-child(3){left:68%; width:7px; height:7px; margin-left:-3.5px; animation-delay:1.5s}
+  @keyframes bootBubble{
+    0%{transform:translateY(0) scale(.5); opacity:0}
+    22%{opacity:.9}
+    100%{transform:translateY(-58px) scale(1.05); opacity:0}
+  }
+  .boot-text{margin:0 0 14px; font-size:15px; font-weight:500; color:#101b1e}
+  .boot-track{width:min(220px,60vw); height:4px; margin:0 auto; border-radius:999px; background:rgba(16,27,30,.14); overflow:hidden}
+  .boot-fill{display:block; width:0; height:100%; border-radius:999px; background:#101b1e; transition:width .35s ease}
+  .boot-hint{margin:14px 0 0; font-size:12px; color:rgba(16,27,30,.6); min-height:1.2em}
+  @media (prefers-reduced-motion:reduce){
+    .boot-gate{transition:none}
+    .boot-bubbles i{animation:none; opacity:.55}
+    .boot-fill{transition:none}
+    /* 缸顶流动光：留着静态的光（它是布景的一部分），但停掉波光横移与呼吸。
+       呼吸停在偏亮的中间档，别停在 .55 —— 那会让缸顶看起来是暗的。 */
+    .light-shimmer{animation:none}
+    .light-shimmer.alt{animation:none}
+    .light-breath{animation:none; opacity:.85}
+  }
+
 </style>
 </head>
 
 <body>
+
+<!-- 首屏加载页：云服务冷启动 + 素材下载期间盖住整屏。默认可见，就绪后由 JS 淡出并移除；
+     万一 JS 报错，CSS 里挂了 35s 自动淡出兜底（见 .boot-gate 的 bootGateFallback）。 -->
+<div class="boot-gate" id="bootGate" role="status" aria-live="polite">
+  <div class="boot-scene">
+    <div class="boot-bubbles" aria-hidden="true"><i></i><i></i><i></i></div>
+    <p class="boot-text" id="bootText">正在唤醒鱼缸…</p>
+    <div class="boot-track" aria-hidden="true"><span class="boot-fill" id="bootFill"></span></div>
+    <p class="boot-hint" id="bootHint">首次访问需要唤醒服务，通常几秒</p>
+  </div>
+</div>
 
 <div class="config-notice" id="configNotice" role="status" aria-live="polite" hidden>
   <span class="config-notice-text" id="configNoticeText"></span>
@@ -1480,6 +1688,13 @@ body:not(.dev-on) .dev-panel{display:none!important}
 <main class="tank" id="tank">
   <div class="tank-bg" id="tankBg" aria-hidden="true"></div>
   <div class="water-glow"></div>
+  <!-- 缸顶流动光：纯装饰（A 水面波光 + C 顶部呼吸），不参与状态、不吃手势。
+       层级 40 —— 在鱼之上、毛玻璃罩之下。 -->
+  <div class="light-flow" aria-hidden="true">
+    <div class="light-shimmer"></div>
+    <div class="light-shimmer alt"></div>
+    <div class="light-breath"></div>
+  </div>
   <!-- 两侧透视虚化：纯装饰（backdrop-filter 糊身后的缸体），不参与状态、不吃手势。 -->
   <div class="tank-edge left" aria-hidden="true"></div>
   <div class="tank-edge right" aria-hidden="true"></div>
@@ -1623,7 +1838,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
   <div class="v02-shop-card">
     <div class="v02-shop-header">
       <div class="v02-shop-head">
-        <div><div class="v02-shop-title">设置</div><div class="v02-shop-sub">声音大小与静音</div></div>
+        <div><div class="v02-shop-title">设置</div><div class="v02-shop-sub">声音、画面与关于</div></div>
         <button type="button" class="v02-close" data-close-drawer="settingsDrawer" aria-label="关闭设置" title="关闭">×</button>
       </div>
     </div>
@@ -1636,6 +1851,19 @@ body:not(.dev-on) .dev-panel{display:none!important}
       <!-- 滑块按后台配置的音效分类动态生成，分类可增删，这里不再写死 -->
       <div id="audioSliders"></div>
     </div>
+      <div class="settings-block">
+        <div class="settings-block-title">画面</div>
+        <label class="settings-row" for="lightFlowToggle">
+          <span class="settings-row-text">
+            <span class="settings-row-label">缸顶灯光</span>
+            <span class="settings-row-hint">水面的波光与呼吸。关掉后缸顶恢复静止。</span>
+          </span>
+          <span class="switch">
+            <input type="checkbox" id="lightFlowToggle" checked>
+            <span class="switch-track" aria-hidden="true"></span>
+          </span>
+        </label>
+      </div>
       <div class="about-block">
         <div class="about-title">关于</div>
         <div class="about-list">
@@ -1644,6 +1872,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
           <button type="button" class="about-row" id="about-story"><span>品牌故事</span><span class="chev">›</span></button>
           <button type="button" class="about-row" id="about-tip"><span>打赏支持</span><span class="chev">›</span></button>
           <button type="button" class="about-row" id="about-filing"><span>备案信息</span><span class="chev">›</span></button>
+          <button type="button" class="about-row" id="about-contact"><span>联系我们</span><span class="chev">›</span></button>
         </div>
         <div class="about-note">鱼儿乐水族 · 把爸妈水族馆里那些鱼，留在网上。</div>
       </div>
@@ -1750,24 +1979,53 @@ body:not(.dev-on) .dev-panel{display:none!important}
   </div>
 </div>
 
-<div class="modal" id="infoModal" aria-hidden="true">
+<div class="modal modal-over-drawer" id="infoModal" aria-hidden="true">
   <div class="modal-card info-card">
-    <button type="button" class="info-close" id="infoClose" aria-label="关闭">×</button>
     <div class="info-title" id="infoTitle"></div>
     <div class="info-body" id="infoBody"></div>
     <div class="info-actions"><button type="button" class="info-ok" id="infoOk">知道了</button></div>
   </div>
 </div>
 
-<div class="modal" id="noticeModal" aria-hidden="true">
+<div class="modal modal-over-drawer" id="noticeModal" aria-hidden="true">
   <div class="modal-card info-card">
-    <button type="button" class="info-close" id="noticeClose" aria-label="关闭">×</button>
     <div class="info-title" id="noticeTitle"></div>
     <div class="info-body" id="noticeBody"></div>
     <div class="info-actions">
       <a class="info-ok notice-cta" id="noticeCta" href="#" hidden target="_blank" rel="noopener noreferrer"></a>
       <button type="button" class="info-ok" id="noticeOk">知道了</button>
     </div>
+  </div>
+</div>
+
+<!-- 联系我们：全站唯一一处玩家直接写给我们的地方。
+     它自己不是「信息弹窗」（不能只有一个知道了），所以独立成一个表单弹窗，
+     但关闭方式与「关于」各条目保持一致 —— 内容末尾居中的按钮，没有右上角的 ×。 -->
+<div class="modal modal-over-drawer" id="contactModal" aria-hidden="true">
+  <div class="modal-card info-card">
+    <div class="info-title">联系我们</div>
+    <p class="contact-intro">用着哪里不对劲、想要什么功能，或者只是想说说——都写在这里。留言会直接进后台，我会看到。</p>
+    <form id="contactForm" novalidate>
+      <label class="contact-field" for="contactContact">
+        <span class="contact-label">联系方式 <span class="contact-optional">（选填）</span></span>
+        <input class="contact-input" type="text" id="contactContact" maxlength="120" autocomplete="off"
+               placeholder="邮箱 / 微信 / QQ，方便回复你">
+      </label>
+      <label class="contact-field" for="contactMessage">
+        <span class="contact-label">留言内容</span>
+        <textarea class="contact-textarea" id="contactMessage" maxlength="1000"
+                  placeholder="发生了什么、你希望它变成什么样"></textarea>
+      </label>
+      <div class="contact-foot">
+        <span class="contact-who" id="contactWho"></span>
+        <span class="contact-count" id="contactCount">0 / 1000</span>
+      </div>
+      <div class="contact-status" id="contactStatus"></div>
+      <div class="info-actions">
+        <button type="button" class="contact-cancel" id="contactCancel">取消</button>
+        <button type="submit" class="info-ok" id="contactSubmit">发送</button>
+      </div>
+    </form>
   </div>
 </div>
 
@@ -1915,7 +2173,10 @@ body:not(.dev-on) .dev-panel{display:none!important}
     // 只 catch 失败是不够的：接口「挂住」（既不返回也不报错）时这个 Promise 永远 pending，
     // Promise.all 就永远不 resolve —— 首屏一直转圈、商店点不开，而且没有任何提示。
     // 所以再加一道超时：超时按失败处理，走下面的 .catch → null，降级提示照常生效。
-    const CONFIG_FETCH_TIMEOUT_MS = 8000;
+    // 🔴 2026-10-06 由 8s 放宽到 20s：云托管缩容到 0 之后，**第一个请求要等容器冷启动**
+    // （几秒到十几秒），8s 会把「正在启动」误判成「拉不到配置」→ 玩家看到降级提示条 +
+    // 内置默认素材。现在有首屏加载页兜着，等待是可见的，不怕放宽。
+    const CONFIG_FETCH_TIMEOUT_MS = 20000;
     const safeFetch = path => {
       const controller = typeof AbortController === "function" ? new AbortController() : null;
       const timer = controller ? setTimeout(() => controller.abort(), CONFIG_FETCH_TIMEOUT_MS) : null;
@@ -2383,6 +2644,8 @@ body:not(.dev-on) .dev-panel{display:none!important}
     if(save.AquariumData) replaceContents(AquariumData,save.AquariumData);
     if(save.Settings) SaveData.Settings=save.Settings;
     ensureInventory();
+    // 设置也是跨设备同步的：别的设备关过灯，这边拉回存档后要立刻跟上（反之亦然）。
+    if(typeof applyLightFlowPref === "function") applyLightFlowPref();
     return true;
   }
 
@@ -3418,8 +3681,10 @@ body:not(.dev-on) .dev-panel{display:none!important}
   }
 
   // 有别的弹窗开着时先不弹事件提示，排队等它关掉 —— 避免两层遮罩叠在一起。
+  // 信息 / 公告 / 联系我们都是全屏遮罩（跟商店、小票同级），漏掉它们会让事件卡
+  // 直接叠在用户协议正文上面。
   function eventOverlayBusy(){
-    return ["shopModal", "mineDrawer", "settingsDrawer", "purchaseReceipt", "completionFlash", "focusShopBlocker", "modal", "eventModal"].some(id => {
+    return ["shopModal", "mineDrawer", "settingsDrawer", "purchaseReceipt", "completionFlash", "focusShopBlocker", "modal", "eventModal", "infoModal", "noticeModal", "contactModal"].some(id => {
       const el = document.getElementById(id);
       return Boolean(el && el.classList.contains("show"));
     });
@@ -4928,6 +5193,10 @@ function categoryScale(key){
   function showInfo(title, bodyHTML) {
     document.getElementById("infoTitle").textContent = title;
     document.getElementById("infoBody").innerHTML = bodyHTML;
+    // 每次都从顶部开始看。卡片自己是滚动容器，滚动位置会跨次保留 ——
+    // 先看完用户协议滚到底、再点隐私政策，会直接落在正文末尾，像是内容缺了一半。
+    const card = infoModal.querySelector(".info-card");
+    if(card) card.scrollTop = 0;
     infoModal.classList.add("show");
     infoModal.setAttribute("aria-hidden", "false");
   }
@@ -4935,7 +5204,6 @@ function categoryScale(key){
     infoModal.classList.remove("show");
     infoModal.setAttribute("aria-hidden", "true");
   }
-  document.getElementById("infoClose").onclick = hideInfo;
   document.getElementById("infoOk").onclick = hideInfo;
   // 点背景关闭（点卡片内部不关）
   infoModal.addEventListener("click", (e) => { if (e.target === infoModal) hideInfo(); });
@@ -5029,12 +5297,13 @@ function categoryScale(key){
 <p>对本协议有任何疑问，请通过 【待填：联系邮箱】 与我们联系。</p>
 ` },
     privacy:{ title: "隐私政策", bodyHtml: `
-<p><strong>一句话版：</strong>我们不用手机号、不用邮箱、不要实名，账号是自动生成的匿名 ID；你填的昵称是你唯一能写的个人信息，且随时可清空。我们不接第三方统计、不投广告、不卖数据。</p>
+<p><strong>一句话版：</strong>我们不用手机号、不用邮箱、不要实名，账号是自动生成的匿名 ID；你主动填的只有昵称和「联系我们」里的留言（联系方式选填），都随时可清空。我们不接第三方统计、不投广告、不卖数据。</p>
 
 <h4>一、我们收集哪些信息</h4>
 <ul>
 <li><strong>账号标识</strong>：服务端自动生成的随机 ID、创建时间、最近活跃时间。用途：识别你的账号、跨设备同步。</li>
 <li><strong>昵称</strong>：你在「我的」中自行填写，最多 12 个字符。自愿填写、可留空。用途：个人资料展示。</li>
+<li><strong>反馈留言</strong>：你在「设置 → 关于 → 联系我们」里主动提交的留言内容，以及你<strong>选填</strong>的联系方式（邮箱 / 微信 / QQ 等，留什么由你决定）。用途：回复你、改进产品。只有你主动提交时才会产生这条数据。</li>
 <li><strong>游戏存档</strong>：泡泡余额、已获得的鱼与装饰、鱼缸布置、应用设置。用途：保存并同步你的进度。</li>
 <li><strong>专注记录</strong>：计划时长、计入时长、开始与结算时间、是否自然走完。用途：结算泡泡奖励、统计你的专注数据。</li>
 <li><strong>使用事件</strong>：打开应用、开始专注、完成专注、应用内购买。用途：了解功能使用情况、改进产品。</li>
@@ -5066,6 +5335,7 @@ function categoryScale(key){
 <li>结算专注奖励与统计你的专注数据；</li>
 <li>保障服务安全：识别并拦截异常请求、限制访问频率；</li>
 <li>了解功能使用情况，以决定后续改什么、不做什么；</li>
+<li>阅读并回复你主动提交的反馈留言；</li>
 <li>向你推送应用内公告（如停机维护通知）。</li>
 </ul>
 
@@ -5148,6 +5418,102 @@ function categoryScale(key){
   }
   loadAboutConfig();
 
+  // ===== 「联系我们」：玩家填表 → POST /api/feedback → 后台「反馈」页 =====
+  //
+  // 这是全站唯一一条「玩家主动说话」的通道，所以两端都要克制：
+  //   客户端只做体验（字数提示、按钮禁用、把服务端的报错原样说出来），
+  //   长度与控制字符的规则一律以服务端为准（player-store.js 的 normalizeFeedback）。
+  // 昵称不由这里提交 —— 服务端从档案里读，这里只是**提前告诉玩家**会带上谁的名字。
+  const CONTACT_MESSAGE_MAX = 1000;
+  const contactModal = document.getElementById("contactModal");
+  const contactForm = document.getElementById("contactForm");
+  const contactMessageInput = document.getElementById("contactMessage");
+  const contactContactInput = document.getElementById("contactContact");
+  const contactStatusEl = document.getElementById("contactStatus");
+  const contactSubmitBtn = document.getElementById("contactSubmit");
+  const contactCountEl = document.getElementById("contactCount");
+
+  function setContactStatus(text, kind){
+    if(!contactStatusEl) return;
+    contactStatusEl.textContent = text || "";
+    contactStatusEl.className = "contact-status" + (kind ? " " + kind : "");
+  }
+  function updateContactCount(){
+    if(!contactCountEl || !contactMessageInput) return;
+    const used = [...contactMessageInput.value].length;
+    contactCountEl.textContent = `${used} / ${CONTACT_MESSAGE_MAX}`;
+    contactCountEl.classList.toggle("over", used > CONTACT_MESSAGE_MAX);
+  }
+  function openContact(){
+    if(!contactModal) return;
+    setContactStatus("", "");
+    updateContactCount();
+    const who = document.getElementById("contactWho");
+    if(who) who.textContent = myProfile.nickname ? `会带上你的昵称：${myProfile.nickname}` : "";
+    contactModal.classList.add("show");
+    contactModal.setAttribute("aria-hidden", "false");
+    // 光标直接落进留言框：这一层只有一个目的，不该让人先找一遍输入位置。
+    setTimeout(() => { if(contactMessageInput) contactMessageInput.focus(); }, 60);
+  }
+  function closeContact(){
+    if(!contactModal) return;
+    contactModal.classList.remove("show");
+    contactModal.setAttribute("aria-hidden", "true");
+  }
+  async function submitContact(){
+    if(!contactMessageInput) return;
+    const message = contactMessageInput.value.trim();
+    if(!message){
+      setContactStatus("写点什么再发送吧。", "bad");
+      contactMessageInput.focus();
+      return;
+    }
+    if(!(CLOUD_SYNC_ENABLED && ACCOUNT_TOKEN)){
+      // 没有账号令牌就没有可回访的对象，服务端也会 401 —— 直接说清楚，别发一个必然失败的请求。
+      setContactStatus("现在没连上账号（可能离线）。留言没发出去，稍后再试。", "bad");
+      return;
+    }
+    if(contactSubmitBtn) contactSubmitBtn.disabled = true;
+    setContactStatus("发送中…", "");
+    try{
+      const response = await fetch(`${API_BASE}/feedback`, {
+        method: "POST",
+        headers: cloudHeaders(),
+        body: JSON.stringify({ contact: contactContactInput ? contactContactInput.value : "", message })
+      });
+      const body = await response.json().catch(() => null);
+      if(!response.ok){
+        // 服务端的 400 文案（「留言最多 1000 个字」这类）比这里自己编的更准，原样转述。
+        setContactStatus((body && body.error) || "没发出去，稍后再试。", "bad");
+        return;
+      }
+      // 成功后先清空再关窗：不然重开一次还留着上一条，很容易误发第二遍。
+      contactMessageInput.value = "";
+      if(contactContactInput) contactContactInput.value = "";
+      updateContactCount();
+      setContactStatus("收到了，谢谢你说这些。", "ok");
+      setTimeout(closeContact, 900);
+    }catch(_){
+      setContactStatus("网络不太好，留言没发出去。稍后再试。", "bad");
+    }finally{
+      if(contactSubmitBtn) contactSubmitBtn.disabled = false;
+    }
+  }
+
+  {
+    const aboutContactBtn = document.getElementById("about-contact");
+    if(aboutContactBtn) aboutContactBtn.onclick = openContact;
+    if(contactForm) contactForm.addEventListener("submit", event => { event.preventDefault(); void submitContact(); });
+    const cancelBtn = document.getElementById("contactCancel");
+    if(cancelBtn) cancelBtn.onclick = closeContact;
+    // 点遮罩关闭（点卡片内部不关）。与「关于」弹窗一致。
+    if(contactModal) contactModal.addEventListener("click", event => { if(event.target === contactModal) closeContact(); });
+    if(contactMessageInput) contactMessageInput.addEventListener("input", updateContactCount);
+    // 重新敲字就把上一次的失败提示擦掉，别让它挂在那里误导人。
+    if(contactContactInput) contactContactInput.addEventListener("input", () => setContactStatus("", ""));
+    updateContactCount();
+  }
+
   // ===== 运营配置：停机维护页 + 顶栏公告 =====
   //
   // 停机是**服务端闸门**（写接口直接 503），前端只负责把它说成人话。两处入口：
@@ -5187,7 +5553,7 @@ function categoryScale(key){
       etaEl.hidden = !eta;
     }
     // 维护页盖住整个界面，正在开的抽屉 / 弹窗先收掉，否则它们会浮在维护页上面。
-    ["infoModal","noticeModal","modal","shopModal","mineDrawer","settingsDrawer"].forEach(id => {
+    ["infoModal","noticeModal","contactModal","modal","shopModal","mineDrawer","settingsDrawer"].forEach(id => {
       const el = document.getElementById(id);
       if(el) el.classList.remove("show");
     });
@@ -5241,6 +5607,9 @@ function categoryScale(key){
     titleEl.textContent = notice.title || "公告";
     // 正文与「关于」一样是后台富文本；标题走纯文本，避免后台填错标签把版式带崩。
     bodyEl.innerHTML = notice.body || "";
+    // 同 showInfo：卡片自己是滚动容器，位置会跨次保留，每次都要从头看。
+    const card = modal.querySelector(".info-card");
+    if(card) card.scrollTop = 0;
     if(cta){
       const url = String(notice.ctaUrl || "").trim();
       // 只放行 http(s)：后台配错成 javascript: 时不能原样塞进 href，
@@ -5271,9 +5640,8 @@ function categoryScale(key){
   const opsNoticeBtn = document.getElementById("opsNoticeBtn");
   if(opsNoticeBtn) opsNoticeBtn.onclick = () => openOpsNotice(opsNotice(), { keepUnseen: true });
   const opsNoticeModal = document.getElementById("noticeModal");
-  const opsNoticeClose = document.getElementById("noticeClose");
   const opsNoticeOk = document.getElementById("noticeOk");
-  if(opsNoticeClose) opsNoticeClose.onclick = closeOpsNotice;
+  // 唯一的关闭入口：内容末尾那个居中的「知道了」（右上角的 × 已下线，见 .info-card 注释）。
   if(opsNoticeOk) opsNoticeOk.onclick = closeOpsNotice;
   if(opsNoticeModal) opsNoticeModal.addEventListener("click", event => { if(event.target === opsNoticeModal) closeOpsNotice(); });
   const opsRetryBtn = document.getElementById("maintenanceRetry");
@@ -5739,6 +6107,33 @@ const elemToRemove = nearest.el;
 
   // 滑块的事件绑定在 renderAudioSliders() 里按分类动态挂，这里不再逐个写死。
 
+  // ===== 缸顶灯光开关（设置抽屉）=====
+  // 偏好落在 SaveData.Settings.light —— 与 audio 同一个整包，早就在云存档里来回同步，
+  // 因此**不需要**动 PLAYER_FIELDS、也不需要升签名版本（签名只覆盖 bubbles / isMember / inventory）。
+  // 语义是「自由开关」而非「减弱动效」：关掉就整块 .light-flow 隐藏，连静态的光一起收掉。
+  const lightFlowToggle = document.getElementById("lightFlowToggle");
+  function lightFlowEnabled(){
+    // 缺字段 = 默认开（老存档没有 light，升级后应保持原样，不能突然变暗）。
+    return !(SaveData && SaveData.Settings && SaveData.Settings.light === false);
+  }
+  // 🔴 这里每次都现查 DOM，不闭包引用上面的 const：applyCloudSave 会在云端拉回存档后调它，
+  //    而 applyCloudSave 定义在这个 const 之前 —— 闭包引用会在初始化前触发 TDZ 报错。
+  function applyLightFlowPref(){
+    const on = lightFlowEnabled();
+    document.body.classList.toggle("light-off", !on);
+    const toggle = document.getElementById("lightFlowToggle");
+    if(toggle) toggle.checked = on;
+  }
+  if(lightFlowToggle){
+    lightFlowToggle.addEventListener("change", function(){
+      SaveData.Settings = SaveData.Settings || {};
+      SaveData.Settings.light = lightFlowToggle.checked;
+      applyLightFlowPref();
+      saveGame(); // 本地先落盘，云端异步跟上；推送失败不影响本地
+    });
+  }
+  applyLightFlowPref();
+
   // ===== 三步新手引导 =====
   // 之前完全没有引导：新用户进来只看到一个圆泡和三个按钮，不知道先干什么。
   // 三步对应「设时长 → 开始专注 → 用泡泡买鱼」，也就是第一次能走通的最短闭环。
@@ -5864,13 +6259,104 @@ const elemToRemove = nearest.el;
     // 因为首次进入是「只记录不判定」，得先让 lastSeenAt 有值。
     // async（泡泡要等服务端落账），这里不阻塞后面的渲染。
     void checkOfflineEvents().then(() => flushPendingEvents());
-    // 新手引导放在最后：页面已经渲染完，聚光洞才能量到正确位置。
-    // 配置没拉到时不引导 —— 那时候先把提示条给玩家看，别用引导盖住它。
-    // 停机中不引导：维护页已经盖住整个界面，引导会在它下面空跑一遍。
-    if(maintenanceOn) return;
-    if(window.FISHTANK_DEFAULT_DATA && !guideSeen()) startGuide();
+    // 新手引导原来在这里直接 startGuide()，现在改成只返回「该不该引导」：
+    // 引导会拦截点击、还要量真实元素位置，必须等首屏加载页退场之后再跑 ——
+    // 盖在加载页下面跑一遍等于白跑（用户点不到，聚光洞也照不到东西）。
+    // 由 runBootGate() 在 bootFinish() 之后调用。
+    if(maintenanceOn) return false;
+    return Boolean(window.FISHTANK_DEFAULT_DATA && !guideSeen());
   }
-  bootstrapConfig();
+
+  // ===== 首屏加载页 =====
+  // 云托管缩容到 0 之后，冷启动是真实存在的等待（几秒到十几秒）；素材本身也有体积。
+  // 这层的作用是「告知」，不是「掩盖」：没有它，用户看到的是「先用内置数据渲染一次 →
+  // 配置到了再重渲染」的中间态，也就是素材一栏一栏往外冒。
+  // 任何一步失败都放行 —— 离线也要能用，绝不把用户永远挡在门外。
+  const BOOT_MIN_SHOW_MS = 450;          // 服务已经热了时别「闪一下」
+  const BOOT_ASSET_TIMEOUT_MS = 12000;   // 单张图上限，超时按加载完处理
+  const BOOT_READY_HOLD_MS = 200;        // 让 100% 和「准备好了」有机会被看见
+
+  const bootGateEl = document.getElementById("bootGate");
+  const bootTextEl = document.getElementById("bootText");
+  const bootFillEl = document.getElementById("bootFill");
+  const bootHintEl = document.getElementById("bootHint");
+
+  function bootStage(text, percent, hint){
+    if(!bootGateEl) return;
+    if(text) bootTextEl.textContent = text;
+    if(typeof percent === "number") bootFillEl.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+    if(typeof hint === "string") bootHintEl.textContent = hint;
+  }
+
+  function bootFinish(){
+    if(!bootGateEl || bootGateEl.classList.contains("is-done")) return;
+    bootGateEl.classList.add("is-done");
+    // 淡出 .45s，留够再摘节点（摘早了会看到「啪」地消失）。
+    setTimeout(() => { if(bootGateEl.parentNode) bootGateEl.parentNode.removeChild(bootGateEl); }, 700);
+  }
+
+  // 从 DOM 里读「当前缸真正在用的素材」，而不是重算一遍「哪些素材被装备了」——
+  // 后者的规则会随版本变（背景/沙/装饰/鱼插槽各有各的取图逻辑），前者永远和眼睛看到的一致。
+  // 只收 http(s) 与站内相对路径：data: URI 是内联的，本来就不需要下载。
+  function collectAquariumAssetUrls(){
+    const urls = new Set();
+    const bgTargets = [".tank-bg", ".sand", ".aq-plant-image", ".aq-plant-layer"];
+    for(const selector of bgTargets){
+      for(const el of document.querySelectorAll(selector)){
+        const value = getComputedStyle(el).backgroundImage || "";
+        const tokens = value.match(/url\((["']?)([^"')]+)\1\)/g) || [];
+        for(const token of tokens){
+          const url = token.replace(/^url\((["']?)/, "").replace(/(["']?)\)$/, "").trim();
+          if(url && !url.startsWith("data:")) urls.add(url);
+        }
+      }
+    }
+    for(const img of document.querySelectorAll("img.fish-img-part")){
+      const src = img.currentSrc || img.src;
+      if(src && !src.startsWith("data:")) urls.add(src);
+    }
+    return [...urls];
+  }
+
+  function preloadOneImage(url){
+    return new Promise(resolve => {
+      const image = new Image();
+      let settled = false;
+      const done = () => { if(settled) return; settled = true; resolve(); };
+      const timer = setTimeout(done, BOOT_ASSET_TIMEOUT_MS);
+      image.onload = () => { clearTimeout(timer); done(); };
+      image.onerror = () => { clearTimeout(timer); done(); };   // 死链不该卡住首屏
+      image.src = url;
+    });
+  }
+
+  async function runBootGate(){
+    const startedAt = Date.now();
+    bootStage("正在唤醒鱼缸…", 12, "首次访问需要唤醒服务，通常几秒");
+    // 这一步同时承担两件事：等云托管冷启动（第一个请求会把它叫醒），以及把配置换成线上那份。
+    const needGuide = await bootstrapConfig();
+
+    bootStage("正在注水…", 58, "");
+    const urls = collectAquariumAssetUrls();
+    if(urls.length){
+      let loaded = 0;
+      await Promise.all(urls.map(async url => {
+        await preloadOneImage(url);
+        loaded += 1;
+        bootStage(null, 58 + Math.round((loaded / urls.length) * 38));
+      }));
+    }
+
+    bootStage("准备好了", 100, "");
+    await new Promise(r => setTimeout(r, BOOT_READY_HOLD_MS));
+    const elapsed = Date.now() - startedAt;
+    if(elapsed < BOOT_MIN_SHOW_MS) await new Promise(r => setTimeout(r, BOOT_MIN_SHOW_MS - elapsed));
+    bootFinish();
+
+    if(needGuide) startGuide();
+  }
+
+  runBootGate();
 
   // ===== 账号与云存档：给这台设备一个稳定 uid，并让存档能跨设备 =====
   // 账号 = uid（标识）+ 会话令牌（凭证）。uid 会出现在 localStorage、浏览器网络面板、

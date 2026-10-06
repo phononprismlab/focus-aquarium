@@ -1,7 +1,7 @@
 -- 鱼儿乐水族 · 业务表结构（CloudBase PostgreSQL）
 --
 -- 为什么要有这个文件：
---   这 5 张表原来只写在交付文档里，靠人在控制台手工建。结果是
+--   这 6 张表原来只写在交付文档里，靠人在控制台手工建。结果是
 --   ① 换环境（或本地起一个）没法一键重建；② 表结构没有任何版本记录，
 --   代码加了列、线上却没加，只有跑到那条 SQL 才 500。
 --   现在这里是唯一权威，`test/schema.test.js` 会盯着它和代码别走偏。
@@ -123,9 +123,35 @@ CREATE TABLE IF NOT EXISTS public.grants (
 -- 结算要按 user_id 捞「未领取」（claimed_at = 0）的行，后台列表也按 user_id 过滤。
 CREATE INDEX IF NOT EXISTS idx_grants_user ON public.grants (user_id, claimed_at);
 
+-- ===== 6. 玩家反馈（设置 → 关于 → 联系我们）=====
+-- 玩家自己写的文本，**不是配置** —— 所以它在这里，不在 fishtank_configs 那张配置单表里。
+-- 后台只读不改（只能标记处理状态 / 删除），因此没有 publishedData 那一套发布语义。
+--
+-- 🔴 `contact` 是玩家自愿填的联系方式（邮箱 / 微信 / QQ，随便什么），**可能包含个人信息**：
+--    自助注销（DELETE /api/account）必须把这张表一起清掉，否则隐私政策里
+--    「删除你的全部数据」不成立。见 player-store.js 的 deleteUser。
+-- 🔴 `message` 必须是 text：留言是多行文本，varchar 会按字节截断中文。
+-- `status` 只有 new / read / done 三个值，由 FEEDBACK_STATUSES 白名单校验（不在库里加 CHECK，
+-- 与其它表一致：约束放应用层，改起来不用动线上表结构）。
+-- `handled_at = 0` 表示还没处理过。
+CREATE TABLE IF NOT EXISTS public.feedback (
+  id         varchar(36) NOT NULL,
+  user_id    varchar(32) NOT NULL DEFAULT '',
+  nickname   varchar(32) NOT NULL DEFAULT '',
+  contact    varchar(160) NOT NULL DEFAULT '',
+  message    text        NOT NULL DEFAULT '',
+  status     varchar(16) NOT NULL DEFAULT 'new',
+  created_at bigint      NOT NULL DEFAULT 0,
+  handled_at bigint      NOT NULL DEFAULT 0,
+  PRIMARY KEY (id)
+);
+
+-- 后台默认按「未处理」筛选、按时间倒序看，这条索引对上这个查法。
+CREATE INDEX IF NOT EXISTS idx_feedback_status ON public.feedback (status, created_at);
+
 -- ===== 自检 =====
--- 建完跑一下，应该看到 5 行：
+-- 建完跑一下，应该看到 6 行：
 --   SELECT table_name FROM information_schema.tables
 --   WHERE table_schema = 'public'
---     AND table_name IN ('users','saves','focus_records','tracking_events','grants')
+--     AND table_name IN ('users','saves','focus_records','tracking_events','grants','feedback')
 --   ORDER BY table_name;
