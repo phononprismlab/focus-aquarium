@@ -816,9 +816,9 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
     async settleFocusRecord(id, { countedMinutes, reward, natural, settledAt = now() }) {
       const row = focusRecords.get(id);
       if (!row) return null;
-      // ⚠️ 注意：这里**不能**因为 settled_at 非 0 就提前返回 alreadySettled ——
-      // claimFocusSession 已经把它置成哨兵值了，真正的写入还在后面。
-      const wasSettled = row.settled_at && row.settled_at > 0;
+      // ⚠️ 判据必须是 `> 0`：claimFocusSession 已经把 settled_at 置成**负数**哨兵了，
+      //    那是「已认领、还没写结算结果」，不是「已结算」—— 写成「非 0 就返回」会把补写拦掉。
+      const wasSettled = Number(row.settled_at) > 0;
       if (wasSettled) return { ...row, alreadySettled: true };
       Object.assign(row, { counted_minutes: countedMinutes, reward, natural, settled_at: settledAt });
       return { ...row, alreadySettled: false };
@@ -835,12 +835,13 @@ export function createMemoryPlayerStore({ now = () => Date.now() } = {}) {
       const row = focusRecords.get(id);
       if (!row) return false;
       if (row.settled_at) return false;
-      row.settled_at = -1; // 哨兵：非 0 即"已被认领"，稍后由 settleFocusRecord 写真实值
+      row.settled_at = -1; // 负数哨兵：与 cloud 版一致（见那边 claimFocusSession 的说明）
       return true;
     },
 
     async stats(uid) {
-      const rows = [...focusRecords.values()].filter(r => r.user_id === uid && r.settled_at);
+      // 与 cloud 版 aggregateFocusStats 同一判据（`> 0` = 真正结算过），负数哨兵不算。
+      const rows = [...focusRecords.values()].filter(r => r.user_id === uid && Number(r.settled_at) > 0);
       return aggregateFocusStats(rows, now);
     },
 
@@ -1247,7 +1248,9 @@ export function createCloudbasePlayerStore(db, { now = () => Date.now() } = {}) 
     async settleFocusRecord(id, { countedMinutes, reward, natural, settledAt = now() }) {
       const row = await selectOne(TABLE_FOCUS_RECORDS, "id", id);
       if (!row) return null;
-      // settled_at 非 0 表示已经结算过。防重放：同一个 sessionId 只能换一次奖励。
+      // ⚠️ 判据是 `> 0`（**真正结算过**），不是「非 0」—— claimFocusSession 写进去的是
+      //    **负数**哨兵，必须放它过去，把 counted_minutes / reward / natural 补上。
+      //    防重放由 claimFocusSession 的 CAS 负责；这里再拦一道只会把补写拦掉（2026-10-06 的线上 bug）。
       if (Number(row.settled_at) > 0) return { ...row, alreadySettled: true };
       await db.from(TABLE_FOCUS_RECORDS).update({
         counted_minutes: countedMinutes,
@@ -1264,16 +1267,22 @@ export function createCloudbasePlayerStore(db, { now = () => Date.now() } = {}) 
       return selectOne(TABLE_FOCUS_RECORDS, "id", id);
     },
 
-    // 🔴 抢占会话：把 settled_at 从 0 改成非 0，条件写在 WHERE 里。
+    // 🔴 抢占会话：把 settled_at 从 0 改成**负数哨兵**，条件写在 WHERE 里。
     //    云开发 RDB 的 update 不回传影响行数（实测拿不到 count），所以抢完必须回读确认 ——
     //    「update 不报错」和「真的改到了」是两件事。
     //    返回 false = 这行不存在，或已经被别的实例/请求抢走了（防重放的关键一步）。
+    //
+    // 🔴🔴 哨兵**必须是负数**（线上 bug，2026-10-06）：settleFocusRecord 用 `settled_at > 0`
+    //    判「已经真正结算过」，看到正数就提前返回。以前这里用 now()（正数）当哨兵 →
+    //    刚抢到的哨兵被紧随其后的补写误判成「重复结算」→ counted_minutes / reward / natural
+    //    **永远写不进去** → 玩家看到「专注次数 +1、累计时长 +0」。
+    //    内存版用的是 -1，一直是对的 —— 这就是两个 store 的实现漂移。
+    //    取 `-now()` 而不是固定 -1：并发两次认领时，回读要能区分「是不是我写的」。
     async claimFocusSession(id) {
       const row = await selectOne(TABLE_FOCUS_RECORDS, "id", id);
       if (!row) return false;
       if (Number(row.settled_at) > 0) return false;
-      // 哨兵值用当前时间：非 0 即"已认领"。随后 settleFocusRecord 会写真正的 settled_at。
-      const claimedAt = now();
+      const claimedAt = -now();
       await db.from(TABLE_FOCUS_RECORDS).update({ settled_at: claimedAt })
         .eq("id", id).eq("settled_at", 0).throwOnError();
       const after = await selectOne(TABLE_FOCUS_RECORDS, "id", id);

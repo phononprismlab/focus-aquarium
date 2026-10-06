@@ -149,8 +149,13 @@ chkTrue("🔴 抢占用 CAS：WHERE 里带 settled_at = 0（只有未被领走�
   /\.eq\("settled_at",\s*0\)/.test(storeSrc));
 chkTrue("抢占后回读确认（RDB 不回传影响行数）",
   /Number\(after\.settled_at\)\s*===\s*claimedAt/.test(storeSrc));
-chkTrue("🔴 哨兵值约定：claim 写非 0，settle 用 > 0 判已结算（写 0 会被判成未结算）",
+chkTrue("🔴 哨兵值约定：claim 写**负数**，settle 用 > 0 判已结算",
   /Number\(row\.settled_at\)\s*>\s*0\)\s*return\s*\{\s*\.\.\.row,\s*alreadySettled:\s*true\s*\}/.test(storeSrc));
+// 🔴 2026-10-06 线上 bug：云版哨兵写成 now()（正数）→ settleFocusRecord 的 `> 0` 把它
+//    判成「已结算」→ counted_minutes / reward 永远补写不进去（次数+1、时长+0）。
+//    哨兵必须是负数：既不会被 `> 0` 误判，`-now()` 又能让并发回读区分「是不是我写的」。
+chkTrue("🔴 云版 claim 的哨兵必须带负号（写成 now() 会让时长永远统计不到）",
+  /const claimedAt = -now\(\);/.test(storeSrc));
 
 // ===== 9. 诊断探针的门禁 =====
 console.log("\n--- 9. 诊断探针：单门禁（FISHTANK_DIAG=1 才注册）---");

@@ -56,6 +56,13 @@ CREATE TABLE IF NOT EXISTS public.saves (
 
 -- ===== 3. 专注记录 =====
 -- `settled_at = 0` 表示「已开始、未结算」，所以这张表同时兼作会话表。
+-- 🔴 `settled_at` 有三种状态，别只记「非 0 就是已结算」：
+--      0        = 已开始、未结算
+--      **负数**  = 已被某次请求抢占（防重放 CAS 的哨兵），结算结果还没补写
+--      正数     = 真正结算完成（= 结算时刻的毫秒时间戳）
+--    统计只认 `settled_at > 0`。哨兵必须是负数：写成正数（比如 now()）会让补写
+--    被自己的 `> 0` 判据误判成「重复结算」→ counted_minutes 永远写不进去
+--    → 玩家看到「专注次数 +1、累计时长 +0」（2026-10-06 线上 bug）。
 -- `natural` = 是否自然走完（服务端按真实耗时判定，不采信客户端声明）。
 CREATE TABLE IF NOT EXISTS public.focus_records (
   id              varchar(36) NOT NULL,
