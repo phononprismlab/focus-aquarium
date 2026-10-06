@@ -178,18 +178,22 @@ console.log("\n--- 4. 状态类只由 running 决定 ---");
   const fn = extractFunction(source, "syncFocusRunningClass");
   chkTrue("往 body 上打 focus-running", /document\.body\.classList\.toggle\("focus-running", running\)/.test(fn));
   // 只有一个出口：改 running 的地方必须跟着调它，否则罩子会和计时器状态对不上。
+  // 2026-10-06 起有 3 处赋值：开始专注 / 恢复上次没做完的专注 / 复位。
+  // 后两处分别走 enterFocusRunningUI() 与 syncFocusRunningClass()（前者内部也会调后者）。
   const assignments = [...source.matchAll(/running = (true|false);\s*\n/g)];
-  chk("running 的赋值点只有 2 处（开始 / 复位）", assignments.length, 2);
-  chkTrue("每处赋值后面都跟着 syncFocusRunningClass()",
+  chk("running 的赋值点有 3 处（开始 / 恢复上次专注 / 复位）", assignments.length, 3);
+  chkTrue("每处赋值后面都跟着 syncFocusRunningClass()（或 enterFocusRunningUI —— 它内部会调）",
     assignments.every(m => {
-      const after = source.slice(m.index + m[0].length, m.index + m[0].length + 260);
-      return /syncFocusRunningClass\(\);/.test(after);
+      const after = source.slice(m.index + m[0].length, m.index + m[0].length + 500);
+      return /syncFocusRunningClass\(\);/.test(after) || /enterFocusRunningUI\(\);/.test(after);
     }));
+  chkTrue("enterFocusRunningUI 自己也要对一次状态类（恢复路径靠它）",
+    /function enterFocusRunningUI\(\)\{[\s\S]*?syncFocusRunningClass\(\);/.test(compact));
   chkTrue("启动时显式对一次初始状态（不指望 CSS 的 :not() 兜住所有入口）",
     /\n  syncTimeStepButtons\(\);\n  \/\/[^\n]*\n  syncFocusRunningClass\(\);/.test(source));
-  // 反向：如果谁在别处偷偷改 running 而不调它，上面那条"赋值点只有 2 处"就会失败。
+  // 反向：如果谁在别处偷偷改 running 而不调它，上面那条"赋值点只有 3 处"就会失败。
   // （`let … running = false, …` 那行是声明，不算赋值点。）
-  chk("没有第三处 running 赋值", (source.match(/\n\s+running\s*=\s*(true|false);/g) || []).length, 2);
+  chk("没有第四处 running 赋值", (source.match(/\n\s+running\s*=\s*(true|false);/g) || []).length, 3);
 }
 
 console.log(`\n===== 景深与毛玻璃测试：${pass} 通过 / ${fail} 失败 =====`);

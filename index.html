@@ -4331,13 +4331,23 @@ body:not(.dev-on) .dev-panel{display:none!important}
       const id = body && body.data && body.data.sessionId;
       if(typeof id === "string" && id) focusSessionId = id;
     }catch(_){ focusSessionId = null; }
+    // 会话 id 是异步才拿到的，而"开始"那一刻已经落过一份快照（那时 id 还是 null）。
+    // 这里补一次，免得玩家开了几秒就关掉、恢复时因为没有 id 而只能走本地兜底。
+    if(running) persistFocusSnapshot(true);
   }
 
   // 返回 { reward, source }：source 为 "server" 表示服务端结算，"local" 表示离线兜底。
-  async function settleFocusReward(localReward){
+  //
+  // elapsedSeconds（可选）= **真正专注过的秒数**。重开页面恢复专注时，中间"关掉页面"的
+  // 那段时间不算专注，所以要把有效秒数报给服务端（服务端只往下夹，谎报没收益）。
+  // 不传 = 服务端按真实流逝算（老行为）。
+  async function settleFocusReward(localReward, elapsedSeconds){
     if(!focusSessionId) return { reward: localReward, source: "local" };
     const sessionId = focusSessionId;
     focusSessionId = null; // 一次性使用，防止重复提交刷奖励
+    const payload = Number.isFinite(elapsedSeconds)
+      ? { sessionId, elapsedSeconds: Math.max(0, Math.round(elapsedSeconds)) }
+      : { sessionId };
     try{
       const controller = typeof AbortController === "function" ? new AbortController() : null;
       const timer = controller ? setTimeout(() => controller.abort(), 3000) : null;
@@ -4345,7 +4355,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
         method:"POST",
         // 同上：带令牌，服务端才会把结算结果写回 focus_records。
         headers: cloudHeaders(),
-        body: JSON.stringify({ sessionId }),
+        body: JSON.stringify(payload),
         signal: controller ? controller.signal : undefined
       });
       if(timer) clearTimeout(timer);
@@ -4362,6 +4372,108 @@ body:not(.dev-on) .dev-panel{display:none!important}
     }catch(_){
       return { reward: localReward, source: "local" };
     }
+  }
+
+  // ===== 专注进度快照：关掉网页 / 刷新 / 崩溃后那一轮不白费 =====
+  //
+  // 问题：专注状态原来只活在内存里（running / startedAt / durationSeconds），
+  // 一不小心关掉标签页就全没了 —— 服务端 focus_records 里那一行还挂着"未结算"，
+  // 但前端再也找不回来，等于白专注。
+  //
+  // 做法：专注中每 15 秒把进度写进 localStorage，重开页面时捡回来接着跑。
+  //
+  // 🔴 口径：**关掉页面那段时间不算专注**。恢复时用"最后一次快照的进度"当起点，
+  //    不按真实流逝补时间。否则"开专注 → 关掉 → 挂 25 分钟 → 打开"就能白拿奖励，
+  //    那是新的作弊面。（注意：页面开着挂机本来就能拿奖励，这个改动没有让它更容易。）
+  //    这条口径靠结算时上报 elapsedSeconds 落到服务端（见 settleFocusReward）。
+  //
+  // 只写 localStorage、不发请求：服务端不需要知道"上次心跳"，它只在结算时收一个有效时长。
+  const FOCUS_SNAPSHOT_KEY = "fishtank_focus_session";
+  const FOCUS_SNAPSHOT_INTERVAL_MS = 15000;
+  let focusSnapshotAt = 0;
+
+  function persistFocusSnapshot(force){
+    if(!running) return;
+    const at = Date.now();
+    if(!force && at - focusSnapshotAt < FOCUS_SNAPSHOT_INTERVAL_MS) return;
+    focusSnapshotAt = at;
+    try{
+      localStorage.setItem(FOCUS_SNAPSHOT_KEY, JSON.stringify({
+        sessionId: focusSessionId,
+        plannedMinutes: Math.round(durationSeconds / 60),
+        isMember: sessionIsMember,
+        // 夹一下：计时器到点后到 resetFocus 之间有一小段，别把进度写成超过计划值。
+        progressSeconds: Math.max(0, Math.min(Math.round(durationSeconds / 60) * 60, Math.round((at - startedAt) / 1000))),
+        savedAt: at
+      }));
+    }catch(_){ /* 隐私模式 / 配额满：快照失败不能影响专注本身 */ }
+  }
+
+  function clearFocusSnapshot(){
+    focusSnapshotAt = 0;
+    try{ localStorage.removeItem(FOCUS_SNAPSHOT_KEY); }catch(_){}
+  }
+
+  function readFocusSnapshot(){
+    try{
+      const raw = localStorage.getItem(FOCUS_SNAPSHOT_KEY);
+      if(!raw) return null;
+      const data = JSON.parse(raw);
+      if(!data || typeof data !== "object") return null;
+      const plannedMinutes = Number(data.plannedMinutes);
+      const progressSeconds = Number(data.progressSeconds);
+      if(!Number.isFinite(plannedMinutes) || plannedMinutes <= 0) return null;
+      if(!Number.isFinite(progressSeconds) || progressSeconds < 0) return null;
+      return {
+        sessionId: typeof data.sessionId === "string" && data.sessionId ? data.sessionId : null,
+        plannedMinutes,
+        isMember: data.isMember === true,
+        progressSeconds,
+        savedAt: Number(data.savedAt) || 0
+      };
+    }catch(_){ return null; }
+  }
+
+  // 重开页面时把上次没做完的专注捡回来。返回 true = 接上了一轮专注（继续跑或补结算）。
+  //
+  // 旧快照直接丢弃：服务端会话的 TTL 也是 6 小时，超过就结算不上了 ——
+  // 那种情况下"恢复"出来只会是一枚永远发不出奖励的假计时器，不如当它没发生过。
+  const FOCUS_SNAPSHOT_TTL_MS = 6 * 60 * 60 * 1000;
+  function restoreFocusSession(){
+    const saved = readFocusSnapshot();
+    if(!saved) return false;
+    // 无论走哪条路，这份快照只消费一次 —— 否则每次刷新都会重复"恢复"。
+    clearFocusSnapshot();
+    if(Date.now() - saved.savedAt > FOCUS_SNAPSHOT_TTL_MS) return false;
+
+    const plannedSeconds = Math.round(saved.plannedMinutes * 60);
+    const progressSeconds = Math.min(saved.progressSeconds, plannedSeconds);
+
+    // 共用同一套状态：分钟数、时长、会员标记、会话 id 都必须跟"上一轮"一致，
+    // 否则结算时用的奖励档位/会话会对不上。
+    minutes = saved.plannedMinutes;
+    durationSeconds = plannedSeconds;
+    sessionIsMember = saved.isMember;
+    focusSessionId = saved.sessionId;
+
+    if(progressSeconds >= plannedSeconds){
+      // 上次其实已经跑满了，只是没来得及结算（比如到点那一瞬间关了页面）。
+      // 直接补一次结算 —— 结算时把有效时长报上去，服务端才不会把"关掉页面那段时间"也算进来。
+      remaining = 0;
+      // silent：恢复出来的结算发生在页面加载瞬间，还没有任何用户手势 ——
+      // 这时播完成音只会被浏览器拦成静默（还会在控制台留一条 AudioContext 警告），不如不播。
+      resetFocus(true, { silent: true });
+      return true;
+    }
+
+    // 还没跑完：从上次的进度接着跑（关闭期间的时间不计入）。
+    // startedAt 反推成"进度对应的那个时间点"，这样后面 remaining / 结算口径全都自洽。
+    running = true;
+    startedAt = Date.now() - progressSeconds * 1000;
+    remaining = plannedSeconds - progressSeconds;
+    renderTime();
+    enterFocusRunningUI();
+    return true;
   }
 
 
@@ -4734,36 +4846,36 @@ function categoryScale(key){
   // 显式对一次初始状态：默认（未专注）就是毛玻璃罩着，别指望 CSS 的 :not() 兜住所有入口。
   syncFocusRunningClass();
 
-  startBtn.onclick = () => {
-    unlockAudio(); ensureAudio(); playStartSound();
-    if (timerFrame) clearTimeout(timerFrame);
-    running = true; 
-    startedAt = Date.now(); 
-    durationSeconds = minutes * 60;
-    syncFocusRunningClass();
-    updateDevStatus();
-    syncTimeStepButtons();
-    // 按文档：会员状态以点击“开始专注”瞬间为准。
-    sessionIsMember = PlayerData.isMember;
-    // 向服务端登记本次专注，结束时由服务端结算奖励（失败则本地兜底）。
-    beginServerFocusSession(minutes, sessionIsMember);
-
+  // 把界面切到「专注中」并启动计时循环。
+  // 抽出来是因为有两条入口：点「开始」（startBtn.onclick）和重开页面恢复上次没做完的专注
+  // （restoreFocusSession）—— 两条路必须落到完全一样的状态，否则恢复出来的界面会是半截的。
+  function enterFocusRunningUI(){
     // 标题在顶栏里，专注时只做一次「暗下去」的呼吸，不位移也不隐藏 ——
     // 顶栏是固定导航，标题消失会在栏上留个空洞（原来是缸中央大海报时才适合消散）。
     appTitle.classList.remove("bubble-appear");
     appTitle.classList.add("bubble-dissolve");
 
-    modeEl.textContent = "专注中"; 
+    modeEl.textContent = "专注中";
     hintEl.textContent = "点击水面投喂，点击鱼儿加速";
-    startBtn.style.display = "none"; 
+    startBtn.style.display = "none";
     // 圆形泡泡按钮靠 flex 把 ▶ / ■ 摆正；写成 inline-block 会让图标贴到顶边。
     endBtn.style.display = "inline-flex";
 
+    syncFocusRunningClass();
+    updateDevStatus();
+    syncTimeStepButtons();
+    startTimerLoop();
+  }
+
+  function startTimerLoop(){
+    if (timerFrame) clearTimeout(timerFrame);
     const loop = () => {
       if (!running) return;
       remaining = Math.max(0, Math.ceil(durationSeconds - (Date.now() - startedAt) / 1000));
       renderTime();
       updateFocusProgress();
+      // 顺带写一次进度快照（内部按 15 秒节流），关掉页面后还能捡回来。
+      persistFocusSnapshot();
       if (remaining > 0) {
         timerFrame = setTimeout(loop, document.hidden ? 1000 : 250);
       } else {
@@ -4771,7 +4883,30 @@ function categoryScale(key){
       }
     };
     loop();
+  }
+
+  startBtn.onclick = () => {
+    unlockAudio(); ensureAudio(); playStartSound();
+    running = true;
+    startedAt = Date.now();
+    durationSeconds = minutes * 60;
+    // 按文档：会员状态以点击“开始专注”瞬间为准。
+    sessionIsMember = PlayerData.isMember;
+    // 上一轮的会话 id 必须清掉，否则新专注会拿着旧 id 去结算。
+    focusSessionId = null;
+    // 向服务端登记本次专注，结束时由服务端结算奖励（失败则本地兜底）。
+    beginServerFocusSession(minutes, sessionIsMember);
+    enterFocusRunningUI();
+    // 立刻落一份快照：万一开了几秒就关掉，下一轮至少知道"有过一轮专注"。
+    persistFocusSnapshot(true);
   };
+
+  // 切到后台 / 关页面时立刻补一次快照。
+  // 定时器在后台会被节流（移动端甚至冻住），只靠 loop 里的节流写入可能丢掉最后一段进度。
+  // pagehide 覆盖"关标签页 / 前进后退缓存"，visibilitychange 覆盖"切到别的 App"。
+  const snapshotOnHide = () => { if(document.visibilityState === "hidden") persistFocusSnapshot(true); };
+  document.addEventListener("visibilitychange", snapshotOnHide);
+  window.addEventListener("pagehide", () => persistFocusSnapshot(true));
 
   endBtn.onclick = () => modal.classList.add("show");
   continueBtn.onclick = () => modal.classList.remove("show");
@@ -5219,7 +5354,12 @@ function categoryScale(key){
   // 停机中每 60 秒自己试一次：维护结束时玩家不用手动刷新页面。
   setInterval(() => { if(maintenanceOn) refreshOps({ force: true }); }, OPS_RECHECK_MS);
 
-function resetFocus(completed) {
+// options.silent：页面加载瞬间"恢复出来的补结算"不该播完成音（那时还没有任何用户手势，
+// 播了也只会被浏览器拦成静默，还会在控制台留一条 AudioContext 警告）。
+// ⚠️ 签名里**不要写解构**（`{ silent } = {}`）：25 个单测靠 `extractFunction` 按花括号配平
+// 抽函数体，参数里的 `{}` 会让它提前收尾、把整个函数抽歪。
+function resetFocus(completed, options) {
+    const silent = Boolean(options && options.silent);
     // 在重置 remaining 之前计算实际已专注时间。
     const elapsedSeconds = Math.max(
       0,
@@ -5232,6 +5372,8 @@ function resetFocus(completed) {
       clearTimeout(timerFrame);
       timerFrame = 0;
     }
+    // 这一轮结束了，进度快照没用了 —— 不清的话下次打开会凭空"恢复"出一轮假专注。
+    clearFocusSnapshot();
     syncFocusRunningClass();
     updateDevStatus();
     syncTimeStepButtons();
@@ -5256,7 +5398,7 @@ function resetFocus(completed) {
     const localMinutes = completed ? Math.floor(durationSeconds / 60) : elapsedMinutes;
     const localReward = focusRewardMinutes(localMinutes, sessionIsMember);
 
-    playCompleteSound();
+    if(!silent) playCompleteSound();
     if (completed) timer.classList.remove("complete-pulse");
     completionFlash.classList.add("show");
     completionFlash.setAttribute("aria-hidden","false");
@@ -5279,7 +5421,7 @@ function resetFocus(completed) {
         ? `本次专注获得了 ${granted} 泡泡 🫧`
         : "这次没攒够时长，没有泡泡。下次专注满 25 分钟就有啦 🫧";
     };
-    settleFocusReward(localReward).then(
+    settleFocusReward(localReward, elapsedSeconds).then(
       settlement => {
         const detail = settlement.detail || {};
         if(settlement.source === "server" && detail.granted){
@@ -5305,6 +5447,10 @@ function resetFocus(completed) {
   rebuildFishFromData(AquariumData);
   renderBubbles();
   renderAquarium(AquariumData);
+
+  // 上次专注到一半关掉了页面？把它捡回来接着跑（进度快照存在 localStorage 里）。
+  // 放在初始化最末尾：它可能直接走到结算流程，那时计时器、鱼缸、存档都必须已经就绪。
+  restoreFocusSession();
 
   // 水底 = 缸高 81%（沙面在 80%，留 1% 让饲料落在沙面上、鱼不钻沙）。
   // 沙图规约是「整图 = 整缸高、沙画在图片底部 20%」，所以这个比例永远和素材对齐 ——

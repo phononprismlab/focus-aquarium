@@ -408,7 +408,9 @@ chkTrue("结算行有 aria-live（读屏会播报）", /id="shopSettlement" aria
 console.log("\n--- 不回归：原有能力仍在 ---");
 chkTrue("滚轮监听仍在（桌面端习惯没丢）", /timeEl\.addEventListener\("wheel"/.test(source));
 chkTrue("商店预览图仍带 loading=lazy", /class="v02-preview-img"[^>]*loading="lazy"/.test(source));
-chkTrue("专注奖励仍只走服务端结算", /settleFocusReward\(localReward\)\.then\(/.test(source));
+// 第二个参数是「有效专注秒数」（关掉页面那段时间不算专注，结算时上报给服务端），
+// 断言的本意不变：奖励仍然只由服务端结算。
+chkTrue("专注奖励仍只走服务端结算", /settleFocusReward\(localReward,\s*elapsedSeconds\)\.then\(/.test(source));
 chkTrue("商店「装扮中」禁用逻辑未动", /data-preview-action="\$\{item\.id\}" \$\{equipped\?'disabled':''\}/.test(source));
 
 console.log("\n----");

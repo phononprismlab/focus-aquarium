@@ -852,6 +852,20 @@ async function resolveServerMembership(auth) {
   }
 }
 
+// 客户端上报的「有效专注秒数」→ 毫秒。
+//
+// 用途：玩家专注到一半关掉网页，重开页面时前端把上次的进度捡回来接着跑，
+// 「关掉页面那段时间」不该算专注 —— 结算时前端把真正专注过的秒数报上来。
+//
+// 🔴 安全边界在 settleSession 里：只往下夹（min(上报值, 真实流逝)），所以谎报没有收益。
+// 这里只做格式归一：非法值一律**当没传**（退回"按真实流逝算"），不报错 ——
+// 专注结算是核心动作，不该因为一个可选字段的格式问题整个失败。
+function normalizeEffectiveElapsedMs(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value < 0) return null;
+  return Math.round(value * 1000);
+}
+
 app.post("/api/game/focus/start", async (req, res) => {
   // 维护中不让开新专注：会话要落 focus_records，等于在维护窗口里改玩家数据。
   if (await blockIfMaintenance(res, uidOfRequest(req))) return;
@@ -910,7 +924,8 @@ app.post("/api/game/focus/complete", async (req, res) => {
     // 会话归属校验在 settle 内部做（库里有 user_id）。未登录请求传 uid=null，
     // 对未登录会话不校验；若会话本身绑了账号而请求者不是他，settle 会返回归属错误。
     const settlement = await focusSessions.settle(sessionId, focusConfig, {
-      uid: auth.error ? null : auth.uid
+      uid: auth.error ? null : auth.uid,
+      effectiveElapsedMs: normalizeEffectiveElapsedMs(req.body && req.body.elapsedSeconds)
     });
     if (!settlement) return res.status(404).json({ error: "专注会话不存在或已过期" });
     if (settlement.error) return res.status(403).json({ error: settlement.error, code: settlement.code });

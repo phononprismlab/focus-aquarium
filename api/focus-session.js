@@ -21,8 +21,19 @@ export const COMPLETION_TOLERANCE_MS = 5000;
 // 依据「开始时间 + 计划时长 + 会员标记」算出结算结果。
 // 抽成纯函数是因为有两个来源（数据库 / 内存），两条路径必须得出完全一样的结果 ——
 // 同一个会话在「库挂了」前后算出不同奖励，那种不一致比算错更难查。
-export function settleSession({ startedAt, plannedMinutes, isMember = false, settledAt, focusConfig }) {
-  const elapsedMs = Math.max(0, settledAt - startedAt);
+//
+// `effectiveElapsedMs`（可选）= 客户端上报的「真正专注了多久」。
+// 场景：玩家专注到一半关掉了网页，重开页面时前端把上次的进度捡回来接着跑，
+// 「关掉页面那段时间」不该算进专注。此时客户端在结算时把有效秒数报上来。
+//
+// 🔴 只允许**往下夹**：min(上报值, 真实流逝)。这样谎报大值毫无收益 ——
+//    最多拿到真实流逝（那跟「开着页面挂机」等价，不是新增的作弊面）；
+//    谎报小值只会让自己少拿。不传 = 老行为（按真实流逝算）。
+export function settleSession({ startedAt, plannedMinutes, isMember = false, settledAt, focusConfig, effectiveElapsedMs = null }) {
+  const rawElapsedMs = Math.max(0, settledAt - startedAt);
+  const elapsedMs = effectiveElapsedMs === null || effectiveElapsedMs === undefined
+    ? rawElapsedMs
+    : Math.min(Math.max(0, Number(effectiveElapsedMs) || 0), rawElapsedMs);
   const elapsedMinutes = Math.floor(elapsedMs / 60000);
   const maxMinutes = resolveMaxMinutes(focusConfig);
 
@@ -93,7 +104,9 @@ export function createFocusSessionStore({
     //   · 内存有库没有 → 未登录会话 / 落库失败，用内存的
     //   · 内存没有库里有 → 多实例或重启后的正常情况，用库里的 ← 这就是本次要修的场景
     //   · 查库本身抛错（不是"没查到"）→ 完全退回内存，不让数据库抖动影响发奖
-    async settle(sessionId, focusConfig, { uid = null } = {}) {
+    //
+    // effectiveElapsedMs：客户端上报的「有效专注时长」（见 settleSession 的说明）。
+    async settle(sessionId, focusConfig, { uid = null, effectiveElapsedMs = null } = {}) {
       prune();
       const memorySession = sessions.get(sessionId);
 
@@ -152,7 +165,8 @@ export function createFocusSessionStore({
         plannedMinutes: source.plannedMinutes,
         isMember: memberForReward,
         settledAt,
-        focusConfig
+        focusConfig,
+        effectiveElapsedMs
       });
 
       if (persistence) {

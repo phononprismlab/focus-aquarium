@@ -116,7 +116,9 @@ console.log("\n--- 6. T2-7：专注会话跨实例靠库，不靠内存 Map ---"
 chkTrue("focus-session 定义了 persistence 接口约定",
   /findSession\(id\)\s*\/\s*consumeSession\(id\)\s*\/\s*settleSession\(id, patch\)/.test(read("focus-session.js").replace(/\s+/g, " ")),
   "注释里的接口约定");
-chkTrue("settle 是 async（要查库）", /async settle\(sessionId, focusConfig, \{ uid = null \} = \{\}\)/.test(sessionSrc));
+// 第二个参数 effectiveElapsedMs = 客户端上报的「有效专注秒数」（重开页面恢复专注时用），
+// 只允许往下夹 —— 断言的本意不变：settle 要查库，所以必须是 async。
+chkTrue("settle 是 async（要查库）", /async settle\(sessionId, focusConfig, \{ uid = null, effectiveElapsedMs = null \} = \{\}\)/.test(sessionSrc));
 chkTrue("先查库（权威源）", /await persistence\.findSession\(sessionId\)/.test(sessionSrc));
 chkTrue("库查不到才回退内存", /if \(!source && memorySession\) source = memorySession;/.test(sessionSrc));
 chkTrue("🔴 归属校验：会话有主人，别人的令牌领不走",
