@@ -141,7 +141,7 @@ console.log("\n--- 4. 状态条位置 ---");
   chkTrue("没有残留 top（top 会盖掉 bottom）", !/(^|[;{])top:/.test(focus));
 }
 
-// ===== 5. 沙子：按高度撑满 =====
+// ===== 5. 沙子：贴底 + 与界面左右对齐 + 不平铺 =====
 console.log("\n--- 5. 沙子上传图 ---");
 {
   const script = mainScript;
@@ -150,13 +150,16 @@ console.log("\n--- 5. 沙子上传图 ---");
   const api = new Function(`${re}\n${css}\nreturn { cssFromImagePath };`)();
   const url = "https://cdn.example.com/a/sand.png";
   const sand = api.cssFromImagePath(url, "sand");
-  chkTrue("沙子按高度撑满（auto 100%）", /\/ auto 100%/.test(sand));
-  chkTrue("沙子横向平铺（图比屏窄时不露底）", /repeat-x/.test(sand));
+  chkTrue("沙子按宽度撑满（100% auto，不是 auto 100%）", /\/ 100% auto/.test(sand));
+  chkTrue("沙子不平铺（新规约：与界面下缘/左右对齐，不重复）", !/repeat-x/.test(sand));
   chkTrue("沙子贴底（沙层在底部，不是居中）", /center bottom/.test(sand));
   chkTrue("沙子不再用 cover（cover 会把透明区铺满可见区域 → 沙子看不见）", !/cover/.test(sand));
-  chkTrue("背景仍然 cover、装饰仍然 contain（没被误伤）",
+  chkTrue("背景仍然 cover、contain 兜底 fit 未被波及",
     /\/ cover/.test(api.cssFromImagePath(url, "cover")) && /\/ contain/.test(api.cssFromImagePath(url, "contain")));
-  chkTrue("沙子单独一档 fit", /const fit = category === "sands" \? "sand" : \(field === "css" \? "cover" : "contain"\)/.test(script));
+  chkTrue("装饰上传图与沙子摆法一致（同一种 fit 输出）",
+    api.cssFromImagePath(url, "decor-image") === api.cssFromImagePath(url, "sand"));
+  chkTrue("沙子与装饰各自走 category 分支，但产出 CSS 相同",
+    /category === "sands" \? "sand"\s*:\s*category === "decorations" \? "decor-image"\s*:\s*\(field === "css" \? "cover" : "contain"\)/.test(script));
   chkTrue("上传沙子图时整层拉到整缸高", /\.sand\.sand-image \{ height: 100%; \}/.test(source));
   chkTrue("渲染时按有无上传图切换 class",
     /sandEl\.classList\.toggle\("sand-image", Boolean\(sandVisual\.image\)\)/.test(script));

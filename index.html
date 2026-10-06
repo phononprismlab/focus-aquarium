@@ -428,12 +428,14 @@
   .start-glyph { font-size: 22px; }
   /* 停止方块视觉密度大，单独略小一点保持与播放三角形的视觉重量平衡 */
   .end-glyph { font-size: 18px; line-height: 0.9; }
-  /* 专注进度行：只在专注中出现，说清「进行了多久 + 结束能拿多少泡泡」。 */
+  /* 专注进度行：只在专注中出现，说清「进行了多久 + 结束能拿多少泡泡」。
+     字色必须用**深色** —— 这行直接画在 .timer 圆泡里（260px 白色 + 蓝绿玻璃渐变），
+     原来用 var(--text-on-water-dim)（浅蓝白 rgba(238,246,255,.74)）几乎看不到
+     （dominik 2026-10-06 实测反馈），改用与 .mode 标题同档的深灰 #435b60。 */
   .focus-progress {
     margin-bottom: 3px;
     font-size: 11px; font-weight: 600; letter-spacing: .04em; line-height: 1.4;
-    /* 顶栏 modeEl 已经写过「专注中」，这行只是补充进度/收益信息，不再用重点色 */
-    color: var(--text-on-water-dim);
+    color: #435b60;
     max-width: 92%;
     /* 这句话在计时器圆里放不下会折成两行。balance 让两行长度接近，
        否则会在「预计获得」中间断开，第二行只剩「得 25 泡泡」几个字。 */
@@ -1065,6 +1067,18 @@ body.fa-maintenance-on .app{pointer-events:none;}
   pointer-events:none;
   transform:none!important;
 }
+/* 后台上传了图的水草层 —— 与沙子摆法一致：
+   铺满整缸、底边对齐、左右对齐；z-index:3 浮于沙子之上（z:2），物理上"水草长在沙子上"。
+   透明区让背景或下层透过来（图必须是透明底）。 */
+.aq-plant-image{
+  left:0;
+  right:0;
+  top:0;
+  bottom:0;
+  width:100%;
+  height:100%;
+  z-index:3;
+}
 .aq-plant i{
   position:absolute;
   bottom:0;
@@ -1072,12 +1086,15 @@ body.fa-maintenance-on .app{pointer-events:none;}
   transform-origin:bottom;
   border-radius:90% 10% 90% 10%;
 }
-/* 后台上传的装饰件图片：按上传顺序叠层，后面的盖在前面的上面（前景压后景）。 */
+/* 后台上传的装饰件图片：按上传顺序叠层，后面的盖在前面的上面（前景压后景）。
+   摆放规约与沙子相同（图大小可能与背景同）：100% 宽（与界面对齐）+ 底边对齐 + 不平铺。 */
 .aq-plant-layer{
   position:absolute;
   inset:0;
   display:block;
   background-repeat:no-repeat;
+  background-size:100% auto;
+  background-position:center bottom;
 }
 .aq-plant-green i:nth-child(1){left:17px;width:9px;height:62px;background:#477c5c;transform:rotate(-18deg)}
 .aq-plant-green i:nth-child(2){left:31px;width:10px;height:77px;background:#6a986c;transform:rotate(2deg)}
@@ -2054,17 +2071,17 @@ body:not(.dev-on) .dev-panel{display:none!important}
   //      后台上传走云存储，返回的都是带签名的 https 链接，不会误伤。
   const IMAGE_SOURCE_RE = /^https?:\/\/.+\.(png|jpe?g|gif|webp|avif|svg|bmp)(?:[?#].*)?$/i;
   // 路径转成 CSS background。
-  //   backgrounds → cover（铺满整缸）
-  //   decorations → contain（完整不裁切，贴底）
-  //   sands       → auto 100% + repeat-x（**按高度撑满**，左右可裁切/平铺）
-  // 沙子为什么不能用 cover：dominik 上传的是「透明底 PNG，沙子只占图片高度约 20%」。
-  // 一个近似方形的图走 cover 时缩放比由宽高里较大的那个决定，结果整张图按 1:1 铺进
-  // 只有 19% 高的 .sand 里，居中的透明区正好填满可见区域 → **沙子完全不显示**（线上实测）。
-  // 改成按高度撑满后：图片高度 = 容器高度，沙子条带落在底部 20%，透明区让背景透出来。
+  //   backgrounds  → cover（铺满整缸）
+  //   sands        → 贴底 + 横向撑满 + 不平铺（与界面下缘对齐、与界面左右对齐）
+  //   decorations  → 与沙子完全相同的摆放规约（鱼缸中"水草长在沙子上"）；
+  //                  要求装饰图也是**透明底**：透明让背景/下层透过来。
+  // 旧实现 sands = `auto 100% repeat-x`：图按高度撑满、宽度不足横向平铺，
+  // 在宽屏或图宽比容器窄时出现"两端重复"。新规约改成 `100% auto no-repeat`：
+  // 图按容器宽度 100% 缩放、按比例缩放高度、底边对齐；不平铺、左右不裁切。
   function cssFromImagePath(path, fit){
     const src = String(path || "").trim();
     if(!src || !IMAGE_SOURCE_RE.test(src)) return "";
-    if(fit === "sand") return `url("${src.replace(/["\\]/g, "")}") center bottom / auto 100% repeat-x`;
+    if(fit === "sand" || fit === "decor-image") return `url("${src.replace(/["\\]/g, "")}") center bottom / 100% auto no-repeat`;
     const size = fit === "contain" ? "center bottom / contain" : "center / cover";
     return `url("${src.replace(/["\\]/g, "")}") ${size} no-repeat`;
   }
@@ -2078,8 +2095,11 @@ body:not(.dev-on) .dev-panel{display:none!important}
     const override = item && typeof item.visual === "string" ? item.visual.trim() : "";
     const field = VISUAL_FIELD_BY_CATEGORY[category];
     // 装饰件按 class 渲染，图片走独立的 images 列表（可多层：后景 + 前景）。
-    // 沙子单独一档 fit：透明底 PNG 必须按高度撑满才看得见（见 cssFromImagePath 的注释）。
-    const fit = category === "sands" ? "sand" : (field === "css" ? "cover" : "contain");
+    // 沙子与上传的装饰件走"贴底 + 横向撑满 + 不平铺"（同一种摆放规约）；
+    // 背景 cover；其他兜底 contain。
+    const fit = category === "sands" ? "sand"
+      : category === "decorations" ? "decor-image"
+      : (field === "css" ? "cover" : "contain");
     visual.images = itemImagePaths(item).map(path => cssFromImagePath(path, fit)).filter(Boolean);
     // image   = 可直接当 CSS background 用的值（url("…") center / cover no-repeat）
     // imageUrl = **裸地址**，给 <img src> 用。两者不能混用：把 image 塞进 src 会被浏览器
@@ -2808,9 +2828,18 @@ body:not(.dev-on) .dev-panel{display:none!important}
     const plantId=data.decoration;
     const deco=visualForItem("decorations", plantId);
     if(deco.images && deco.images.length){
-      // 后台上传了图：按上传顺序叠层（第 1 张后景、第 2 张前景），不再画 CSS 水草。
-      aqPlant.className="aq-plant";
-      aqPlant.innerHTML=deco.images.map(src=>`<span class="aq-plant-layer" style="background:${src}"></span>`).join("");
+      // 后台上传了图：与沙子摆放相同（铺满整缸、底边对齐、左右对齐），物理上"水草长在沙子上"。
+      aqPlant.className="aq-plant aq-plant-image";
+      // 🔴 不能用字符串拼接写 inline background —— url("") 的内层双引号会和
+      //    HTML style 属性的外层双引号冲突，整段 style 被截断 → 图片 URL 整个丢掉。
+      //    改用 DOM API 直接 set CSS（绕过 HTML 属性解析），实测修好后装饰图正常显示。
+      aqPlant.replaceChildren();
+      deco.images.forEach(src => {
+        const layer = document.createElement("span");
+        layer.className = "aq-plant-layer";
+        layer.style.background = src;
+        aqPlant.appendChild(layer);
+      });
     }else{
       aqPlant.className="aq-plant "+(deco.class||"");
       aqPlant.innerHTML="<i></i><i></i><i></i>";
