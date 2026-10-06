@@ -131,28 +131,28 @@ console.log("\n--- 2. 反向：不该铺的一律不铺 ---");
     s.visualForItem("backgrounds", "bg001").css, "red");
 }
 
-console.log("\n--- 3. 底砂：按高度撑满（固定占缸底 20%）+ 贴底居中 + 不平铺 ---");
+console.log("\n--- 3. 底砂：cover 铺满整缸（固定占缸底 20%）+ 贴底居中 + 不平铺 ---");
 {
-  // 2026-10-06 定稿：素材按「整图 = 整缸高、沙画在图片底部 20%」绘制。
-  // 所以渲染必须是 `auto 100%`（高撑满、宽按比例）—— 图高 = 缸高，沙条带正好占缸底 20%；
-  // 图一般比缸宽，`center` 让超宽部分从中轴线往两边裁掉。
-  // ⚠️ 曾经用过 `100% auto`（按宽度撑满）：图高 = 缸宽 × 图高宽比，沙条带只有 18%，
-  //    比素材画的低 —— 这就是「饲料落点远低于绘图位置」的根因，别再写回去。
+  // 2026-10-06 定稿：素材按「整图 = 整缸大小、沙画在图片底部 20%」绘制。
+  // 渲染用 `cover`（取宽/高两方向更大的缩放比）—— 图永远盖满整缸，超出部分以中轴裁掉。
+  // 常规 16:10 缸里按高度撑满 → 沙条带正好占缸底 20%；超宽屏按宽度撑满 → 底边对齐沙完整。
+  // ⚠️ 曾经用过 `auto 100%`（只按高度撑满）：缸比素材宽时图比缸窄 → 两端露白（10-06 修）。
+  //    也用过 `100% auto`（只按宽度撑满）：图高 = 缸宽 × 图高宽比，沙条带只有 18%，别再写回去。
   // 要求图是透明 PNG；不透明的话上方区域会遮挡背景。
   const s = build([{ id: "sand001", category: "sands", previewImage: "https://cdn/sand.png" }]);
-  chk("底砂吃上传的图，按高度撑满 + 贴底居中 + 不平铺",
+  chk("底砂吃上传的图，cover 铺满整缸 + 贴底居中 + 不平铺",
     s.visualForItem("sands", "sand001").css,
-    'url("https://cdn/sand.png") center bottom / auto 100% no-repeat');
+    'url("https://cdn/sand.png") center bottom / cover no-repeat');
   chk("沙子 fit 由 category 单独判定",
     s.cssFromImagePath("https://cdn/sand.png", "sand"),
-    'url("https://cdn/sand.png") center bottom / auto 100% no-repeat');
+    'url("https://cdn/sand.png") center bottom / cover no-repeat');
   chk("背景仍走 cover（不受沙子改动影响）",
     s.cssFromImagePath("https://cdn/bg.png", "cover"),
     'url("https://cdn/bg.png") center / cover no-repeat');
   // 装饰上传图与沙图摆法完全相同 —— "decor-image" 是上传装饰图的专用 fit。
-  chk("装饰上传图与沙图摆法一致（按高度撑满 + 贴底居中 + 不平铺）",
+  chk("装饰上传图与沙图摆法一致（cover 铺满整缸 + 贴底居中 + 不平铺）",
     s.cssFromImagePath("https://cdn/deco.png", "decor-image"),
-    'url("https://cdn/deco.png") center bottom / auto 100% no-repeat');
+    'url("https://cdn/deco.png") center bottom / cover no-repeat');
   // contain 仍保留作兜底 fit（没有 visual 字段就回退 contain，比如鱼），未受波及。
   chk("contain 兜底 fit 未受影响",
     s.cssFromImagePath("https://cdn/deco.png", "contain"),
@@ -186,8 +186,8 @@ console.log("\n--- 6. 装饰件：上传的图也要显示在鱼缸里（与沙�
   const s = build([{ id: "deco001", category: "decorations", resourcePath: ["https://cdn/back.png", "https://cdn/front.png"] }]);
   const v = s.visualForItem("decorations", "deco001");
   chk("两张图都留着（后景 + 前景）", v.images.length, 2);
-  chkTrue("装饰用 auto 100% 按高度撑满 + 贴底居中 + 不平铺（与沙图完全一致）",
-    v.images[0].includes("center bottom / auto 100% no-repeat"));
+  chkTrue("装饰用 cover 铺满整缸 + 贴底居中 + 不平铺（与沙图完全一致）",
+    v.images[0].includes("center bottom / cover no-repeat"));
   chkTrue("前景排在后景之后（叠上去盖住）", v.images[1].includes("front.png"));
 }
 {
@@ -202,7 +202,7 @@ console.log("\n--- 6. 装饰件：上传的图也要显示在鱼缸里（与沙�
   const s = build([{ id: "deco001", category: "decorations", resourcePath: ["罗莎奸笑搓手.jpg"], previewImage: "https://cdn/real.png" }]);
   chk("资源位是无效文件名时，预览图顶上",
     s.visualForItem("decorations", "deco001").images,
-    ['url("https://cdn/real.png") center bottom / auto 100% no-repeat']);
+    ['url("https://cdn/real.png") center bottom / cover no-repeat']);
 }
 
 console.log(`\n===== 背景图片测试：${pass} 通过 / ${fail} 失败 =====`);

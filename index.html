@@ -176,6 +176,32 @@
   /* 只有正在专注时才揭开毛玻璃 —— 想看清自己的鱼缸，就去开计时。 */
   body:not(.focus-running) .tank-frost { opacity: 1; }
 
+  /* 鱼缸两侧的透视虚化：模拟隔着缸壁看边缘时的失焦/变形（dominik 2026-10-06）。
+     做法：backdrop-filter 把"身后已经画好的"东西糊掉（背景 / 鱼 / 沙 / 水草 / 气泡 / 毛玻璃罩），
+     再用 mask 让模糊从中轴向两侧渐强 —— 中间清楚、两端虚，缸里不会出现一条硬邦邦的竖缝。
+     层级 60：在毛玻璃罩(50)之上（罩子是整缸均匀糊，边缘要更糊），
+     但在饲料(99)与计时器(1000)之下 —— 那两样必须清楚。
+     ⚠️ mask 只裁这一层自己的绘制区（连同它的 backdrop-filter 结果），不影响别的层。
+     参数是量出来的：清晰处条纹对比度 70，这档在 2px 处 0、100px 处 ~46、160px 处 ~61，
+     即"最外侧糊透、到缸宽 16% 处恢复清晰"（曾试 20%/blur7px，糊到 20% 才恢复，太像梦幻滤镜）。 */
+  .tank-edge {
+    position: absolute; top: 0; bottom: 0; width: 16%;
+    z-index: 60;
+    pointer-events: none;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    mask-image: linear-gradient(to right, rgba(0,0,0,.92) 0%, rgba(0,0,0,.5) 30%, rgba(0,0,0,.2) 65%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, rgba(0,0,0,.92) 0%, rgba(0,0,0,.5) 30%, rgba(0,0,0,.2) 65%, transparent 100%);
+  }
+  .tank-edge.left { left: 0; }
+  /* 右侧把渐变方向翻过来。不写 transform:scaleX(-1) —— backdrop-filter 与 transform 叠在一起
+     在部分浏览器上会坐标错位，直接换一个方向的渐变最稳。 */
+  .tank-edge.right {
+    right: 0;
+    mask-image: linear-gradient(to left, rgba(0,0,0,.92) 0%, rgba(0,0,0,.5) 30%, rgba(0,0,0,.2) 65%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to left, rgba(0,0,0,.92) 0%, rgba(0,0,0,.5) 30%, rgba(0,0,0,.2) 65%, transparent 100%);
+  }
+
   /* ===== 环境气泡（原型 ui-prototype-v10.html 保留项）=====
      纯装饰：不进状态、不参与存档，只是让水看起来是活的。
      z-index 4 → 从水草(3)之上、鱼(5)之下穿过，不抢戏。 */
@@ -251,9 +277,10 @@
       #dfcb92;
     background-size: 38px 31px, 47px 39px, auto;
   }
-  /* 用后台上传的沙子图时整层拉到整缸高：图按**高度撑满**（JS 写 inline background）。
-     规约（2026-10-06 定稿）：素材按「整图 = 整缸高、沙画在图片底部 20%」绘制，
-     所以图高 = 缸高时，沙子条带正好落在缸底 20% 处；图比缸宽，超宽部分从中轴线往两边裁掉。
+  /* 用后台上传的沙子图时整层拉到整缸大小：图按 `cover` 铺满（JS 写 inline background）。
+     规约（2026-10-06 定稿）：素材按「整图 = 整缸大小、沙画在图片底部 20%」绘制，
+     `cover` 保证图永远盖满整缸（取宽/高两方向更大的缩放比），超出的部分以中轴为基准裁掉。
+     常规 16:10 缸里按高度撑满 → 沙条带正好落在缸底 20%；超宽屏按宽度撑满 → 底边对齐沙完整。
      上方透明区让水色/背景透出来。层级不变（z-index:2）—— 在背景层之上、装饰层之下。 */
   .sand.sand-image { height: 100%; }
 
@@ -370,6 +397,29 @@
     background: rgba(255, 255, 255, 0.65);
     transform: rotate(-35deg);
     pointer-events: none;
+  }
+
+  /* 气泡计时器底下的半透明光晕：让这枚白玻璃圆泡从水里"浮"出来，而不是硬贴在水面上。
+     为什么单独做一层、不用 .timer::after：.timer 自己有 z-index，会建立层叠上下文，
+     伪元素即使写负 z-index 也只会画在圆泡**背景之上、文字之下**，到不了"泡底下"。
+     层级 999：在毛玻璃罩(50)与两侧虚化(60)之上（跟计时器一样不被边缘虚化波及），
+     在计时器(1000)之下 —— 光晕永远在泡背后。
+     动画与圆泡共用 bubbleFloat 且同时启动 → 两者始终同拍，光晕不会从泡上"掉下来"。
+     尺寸在下面的媒体查询里跟着 .timer 一起收（大约 1.39 倍）。 */
+  .timer-halo {
+    position: absolute; left: 50%; top: 53%; z-index: 999;
+    width: min(360px, 96vw);
+    height: min(360px, 96vw);
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: radial-gradient(circle,
+      rgba(255, 255, 255, 0.50) 0%,
+      rgba(228, 246, 251, 0.30) 38%,
+      rgba(190, 232, 240, 0.12) 58%,
+      rgba(190, 232, 240, 0) 72%);
+    filter: blur(18px);
+    pointer-events: none;
+    animation: bubbleFloat 4s ease-in-out infinite alternate;
   }
 
   @keyframes bubbleFloat {
@@ -1086,14 +1136,14 @@ body.fa-maintenance-on .app{pointer-events:none;}
   border-radius:90% 10% 90% 10%;
 }
 /* 后台上传的装饰件图片：按上传顺序叠层，后面的盖在前面的上面（前景压后景）。
-   摆放规约与沙子完全相同：图按**高度撑满**整缸（auto 100%）、底边对齐、水平居中，
-   超宽部分从中轴线往两边裁掉；不平铺。装饰图必须是透明底，透明区让沙色与背景透出来。 */
+   摆放规约与沙子完全相同：`cover` 铺满整缸、底边对齐、水平居中，超出部分以中轴为基准裁掉；不平铺。
+   装饰图必须是透明底，透明区让沙色与背景透出来。 */
 .aq-plant-layer{
   position:absolute;
   inset:0;
   display:block;
   background-repeat:no-repeat;
-  background-size:auto 100%;
+  background-size:cover;
   background-position:center bottom;
 }
 .aq-plant-green i:nth-child(1){left:17px;width:9px;height:62px;background:#477c5c;transform:rotate(-18deg)}
@@ -1357,6 +1407,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
   @media (max-width:520px) {
     .v02-brand-title{font-size:14px;letter-spacing:.08em;min-width:0;overflow:hidden;text-overflow:ellipsis}
     .timer{width:min(230px,62vw);height:min(230px,62vw)}
+    .timer-halo{width:min(320px,86vw);height:min(320px,86vw)}
     /* 泡泡数搬进顶栏后不能再在小屏上藏起来（否则手机端根本看不到自己有多少泡泡）：
        改成整体收紧，让它和标题、三个入口挤在同一行。
        标题允许被压缩（min-width:0）—— flex 子项默认 min-width:auto，不放开的话
@@ -1375,6 +1426,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
     .v02-bubbles{font-size:12px}
     .v02-top-entry{padding:4px 10px;font-size:12px}
     .timer{width:min(196px,54vh);height:min(196px,54vh);top:50%;padding:12px}
+    .timer-halo{width:min(272px,75vh);height:min(272px,75vh);top:50%}
     .mode{font-size:11px;margin-bottom:2px}
     .focus-progress{font-size:10px;margin-bottom:2px}
     .time{font-size:clamp(22px,7vh,32px)}
@@ -1428,6 +1480,9 @@ body:not(.dev-on) .dev-panel{display:none!important}
 <main class="tank" id="tank">
   <div class="tank-bg" id="tankBg" aria-hidden="true"></div>
   <div class="water-glow"></div>
+  <!-- 两侧透视虚化：纯装饰（backdrop-filter 糊身后的缸体），不参与状态、不吃手势。 -->
+  <div class="tank-edge left" aria-hidden="true"></div>
+  <div class="tank-edge right" aria-hidden="true"></div>
   <div class="bubbles" id="bubbles" aria-hidden="true"></div>
   <div class="v02-topbar">
     <h1 class="v02-brand-title" id="appTitle">鱼儿乐水族</h1>
@@ -1449,6 +1504,8 @@ body:not(.dev-on) .dev-panel{display:none!important}
     <div class="fish small" id="fish2"><div class="fish-body"></div><div class="fish-fin"></div><div class="fish-tail"></div></div>
     <div class="fish small" id="fish3"><div class="fish-body"></div><div class="fish-fin"></div><div class="fish-tail"></div></div>
 
+    <!-- 计时器底下的光晕：必须在 <section class="timer"> 之前，它是圆泡背后那一层。 -->
+    <div class="timer-halo" aria-hidden="true"></div>
     <section class="timer" id="timer">
       <div class="mode" id="mode">准备专注</div>
       <div class="focus-progress" id="focusProgress" hidden aria-live="polite"></div>
@@ -2072,17 +2129,21 @@ body:not(.dev-on) .dev-panel{display:none!important}
   const IMAGE_SOURCE_RE = /^https?:\/\/.+\.(png|jpe?g|gif|webp|avif|svg|bmp)(?:[?#].*)?$/i;
   // 路径转成 CSS background。
   //   backgrounds  → cover（铺满整缸）
-  //   sands        → 按高度撑满 + 底边对齐 + 水平居中 + 不平铺（= 沙固定占缸底 20%）
+  //   sands        → cover + 底边对齐 + 水平居中 + 不平铺（与背景同一种"铺满"语义）
   //   decorations  → 与沙子完全相同的摆放规约（鱼缸中"水草长在沙子上"）；
   //                  要求装饰图也是**透明底**：透明让背景/下层透过来。
-  // 素材规约（2026-10-06）：整图 = 整缸高，沙/装饰画在图片底部（沙占图片底部 20%）。
-  // 所以渲染用 `auto 100%` —— 宽 auto 按比例、高撑满 → 图高 = 缸高，沙条带正好落在缸底 20%；
-  // 图宽 = 缸高 × 图宽高比，一般比缸宽，`center` 让超出部分从中轴线往两边裁掉。
-  // ⚠️ 别写回 `100% auto`（按宽度撑满）：图高会变成 缸宽 × 图高宽比，沙条带就不到 20%（旧 bug）。
+  // 素材规约（2026-10-06）：整图 = 整缸大小，沙/装饰画在图片底部（沙占图片底部 20%）。
+  // 🔴 用 `cover` 而不是 `auto 100%`：`cover` 取「宽/高两个方向里更大的那个缩放比」，
+  //    保证图**永远盖满整个缸**，超出的部分以中轴为基准裁掉（`center bottom`）。
+  //    - 缸比素材窄（16:10 缸 vs 16:9 素材）→ 按高度撑满 → 沙条带正好占缸底 20%；
+  //    - 缸比素材宽（超宽屏）→ 按宽度撑满 → 图高超出缸高，**底边对齐**所以沙完整，
+  //      但沙条带会略高于 20%（图被放大到盖满宽度了）。
+  //    曾经用过 `auto 100%`（只按高度撑满）：缸比素材宽时图比缸窄 → **两端露白**（10-06 修）。
+  //    也用过 `100% auto`（只按宽度撑满）：图高 = 缸宽 × 图高宽比 → 沙条带不到 20%。
   function cssFromImagePath(path, fit){
     const src = String(path || "").trim();
     if(!src || !IMAGE_SOURCE_RE.test(src)) return "";
-    if(fit === "sand" || fit === "decor-image") return `url("${src.replace(/["\\]/g, "")}") center bottom / auto 100% no-repeat`;
+    if(fit === "sand" || fit === "decor-image") return `url("${src.replace(/["\\]/g, "")}") center bottom / cover no-repeat`;
     const size = fit === "contain" ? "center bottom / contain" : "center / cover";
     return `url("${src.replace(/["\\]/g, "")}") ${size} no-repeat`;
   }
@@ -2096,7 +2157,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
     const override = item && typeof item.visual === "string" ? item.visual.trim() : "";
     const field = VISUAL_FIELD_BY_CATEGORY[category];
     // 装饰件按 class 渲染，图片走独立的 images 列表（可多层：后景 + 前景）。
-    // 沙子与上传的装饰件走"按高度撑满 + 贴底居中 + 不平铺"（同一种摆放规约）；
+    // 沙子与上传的装饰件走"cover 铺满整缸 + 贴底居中 + 中轴裁切 + 不平铺"（同一种摆放规约）；
     // 背景 cover；其他兜底 contain。
     const fit = category === "sands" ? "sand"
       : category === "decorations" ? "decor-image"
@@ -2813,8 +2874,8 @@ body:not(.dev-on) .dev-panel{display:none!important}
     const sandEl=document.getElementById("sand");
     const sandVisual=visualForItem("sands", data.sand);
     sandEl.style.background=sandVisual.css;
-    // 上传的沙子图必须整缸高：图按高度撑满（auto 100%），沙子条带（图内底部 20%）
-    // 正好落在缸底 20% 处，上面是透明区（让背景透出来）。内置渐变则保持原来的底部 19% 条带。
+    // 上传的沙子图必须盖满整缸：图按 `cover` 铺满（超宽部分以中轴裁掉），沙子条带（图内底部 20%）
+    // 在常规 16:10 缸里正好落在缸底 20% 处，上面是透明区（让背景透出来）。内置渐变则保持原来的底部 19% 条带。
     // 层级仍是 z-index:2 —— 压在背景层之上、装饰层之下。
     sandEl.classList.toggle("sand-image", Boolean(sandVisual.image));
     document.querySelectorAll(".plant").forEach(p=>{
