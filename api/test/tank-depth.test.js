@@ -1,12 +1,14 @@
-// 景深 + 未专注毛玻璃。
+// 背景层 + 未专注毛玻璃。
 //
-// 两条需求：
-//   ① 背景上加一层模糊（现在细节全挤在一个平面里，没有景深）
-//   ② 未开始专注时整个鱼缸罩毛玻璃，想看清自己的鱼缸就要打开计时
+// 现状（2026-10-06 起）：
+//   ① 背景写在独立的一层（.tank-bg）上，但**不做模糊** —— 曾经的 blur(3px) + scale(1.05)
+//      景深方案把手绘素材糊掉了，dominik 叫停，两个属性一起撤掉。留这一层是为了
+//      将来加滤镜时不牵连鱼。
+//   ② 未开始专注时整个鱼缸罩毛玻璃，想看清自己的鱼缸就要打开计时。
 //
 // 实现上最容易做错的两点，这里都锁住：
-//   - 背景必须挪到独立的一层（.tank-bg）再模糊。还铺在 .tank 上的话，一模糊连鱼一起糊。
-//   - 毛玻璃的 z-index 必须**算过**：压住鱼/草/沙/气泡，但让开海报标题和计时器。
+//   - 背景必须写在独立的一层上，不能直接铺在 .tank 上（一改滤镜就连鱼一起改）。
+//   - 毛玻璃的 z-index 必须**算过**：压住鱼/草/沙/气泡，但让开标题和计时器。
 //     该清楚的是字，该朦胧的是缸。
 //
 // 运行：node test/tank-depth.test.js
@@ -60,14 +62,14 @@ function extractFunction(src, name) {
   throw new Error(`函数 ${name} 花括号不配对`);
 }
 
-console.log("--- 1. 背景退到独立一层再模糊 ---");
+console.log("--- 1. 背景退到独立一层（且不做景深模糊）---");
 {
   const renderAquarium = extractFunction(source, "renderAquarium");
   chkTrue("先取 .tank-bg 那一层", /const tankBgEl=document\.getElementById\("tankBg"\)/.test(renderAquarium));
   chkTrue("背景值仍然来自 visualForItem（后台配置优先，没变）",
     /const backgroundCss=visualForItem\("backgrounds", data\.background\)\.css;/.test(renderAquarium));
   chkTrue("写到 .tank-bg 上", /if\(tankBgEl\) tankBgEl\.style\.background=backgroundCss;/.test(renderAquarium));
-  chkTrue("找不到那一层时退回旧行为（宁可没景深，也不能让背景消失）",
+  chkTrue("找不到那一层时退回旧行为（宁可少一层，也不能让背景消失）",
     /else tank\.style\.background=backgroundCss;/.test(renderAquarium));
   // 反向：旧写法是「函数第一件事就把背景铺在 .tank 上」，那种写法没救 —— 一模糊连鱼一起糊。
   chkTrue("旧的 tankEl.style.background=… 写法已消失",
@@ -77,12 +79,15 @@ console.log("--- 1. 背景退到独立一层再模糊 ---");
 }
 {
   const bg = rule(".tank-bg");
-  chkTrue("只模糊背景层", /filter:blur\(3px\)/.test(bg));
-  chkTrue("放大 1.05 补掉 blur 的四边透底", /transform:scale\(1\.05\)/.test(bg));
+  // 2026-10-06：取消景深。blur 把手绘细节糊掉；scale(1.05) 只是为遮 blur 在四边透出的底色，
+  // 一并撤掉。两条都写成反向断言，防止有人"顺手把景深加回来"。
+  chkTrue("背景层不再模糊（取消景深）", !/filter:blur/.test(bg));
+  chkTrue("背景层不再放大 1.05", !/transform:scale/.test(bg));
   chkTrue("铺满整缸", /background-size:cover/.test(bg));
   chkTrue("不抢事件", /pointer-events:none/.test(bg));
   chk("在 z 轴最底", zOf(".tank-bg"), 0);
-  chkTrue(".tank 仍然 overflow:hidden（放大后的背景要裁掉）", /overflow:hidden/.test(rule(".tank")));
+  // 沙/装饰按高度撑满、超宽部分从中轴线往两边裁切 —— 全靠 .tank 的 overflow:hidden 兜住。
+  chkTrue(".tank 仍然 overflow:hidden（背景超宽 + 沙/装饰中轴裁切都靠它）", /overflow:hidden/.test(rule(".tank")));
   chkTrue(".tank-bg 是绝对定位铺满", /position:absolute;inset:0/.test(bg));
 }
 

@@ -142,18 +142,15 @@
     pointer-events: none !important;
   }
 
-  /* 景深层：背景图从 .tank 的 background 上挪到这一层，单独加模糊。
-     以前背景和鱼/草/沙贴在同一张画布上，细节全挤在一个平面里，没有纵深；
-     现在背景退后一层并轻微虚化，前面的鱼就"浮"起来了。
-     scale(1.05) 是必须的：blur 会让四边透出底色，不放大就会露出一圈白边。
+  /* 背景层：背景图单独一层，不直接铺在 .tank 上（留着这层，将来加滤镜不牵连鱼）。
+     2026-10-06 取消景深：原先这层带 blur(3px) + scale(1.05)（放大是为了遮住 blur 在四边
+     透出的底色），实测把 dominik 手绘的细节糊掉了，两个属性一并去掉，背景恢复清晰。
      背景值由 renderAquarium 写 inline style（inline 胜过这里的 background-size）。 */
   .tank-bg {
     position: absolute; inset: 0; z-index: 0;
     background: linear-gradient(to bottom, #8bcbd9 0%, #9dd4dc 66%, #a9d6ce 100%);
     background-size: cover;
     background-position: center;
-    filter: blur(3px);
-    transform: scale(1.05);
     pointer-events: none;
   }
 
@@ -254,9 +251,10 @@
       #dfcb92;
     background-size: 38px 31px, 47px 39px, auto;
   }
-  /* 用后台上传的沙子图时整层拉到整缸高：图按高度撑满（JS 写 inline background），
-     沙子条带落在图片底部约 20%，上方透明区让水色/背景透出来。左右超出部分被裁切或平铺。
-     层级不变（z-index:2）—— 在背景层之上、装饰层之下。 */
+  /* 用后台上传的沙子图时整层拉到整缸高：图按**高度撑满**（JS 写 inline background）。
+     规约（2026-10-06 定稿）：素材按「整图 = 整缸高、沙画在图片底部 20%」绘制，
+     所以图高 = 缸高时，沙子条带正好落在缸底 20% 处；图比缸宽，超宽部分从中轴线往两边裁掉。
+     上方透明区让水色/背景透出来。层级不变（z-index:2）—— 在背景层之上、装饰层之下。 */
   .sand.sand-image { height: 100%; }
 
   .plant { position: absolute; bottom: 10.5%; width: 100px; height: 25%; z-index: 3; }
@@ -1067,9 +1065,11 @@ body.fa-maintenance-on .app{pointer-events:none;}
   pointer-events:none;
   transform:none!important;
 }
-/* 后台上传了图的水草层 —— 与沙子摆法一致：
-   铺满整缸、底边对齐、左右对齐；z-index:3 浮于沙子之上（z:2），物理上"水草长在沙子上"。
-   透明区让背景或下层透过来（图必须是透明底）。 */
+/* 后台上传了图的水草层 —— 摆放与沙子一致（铺满整缸、底边对齐、左右对齐），
+   但**层级在沙子之下**：dominik 定的规约是「装饰叠在沙子后」，即沙子（z:2）
+   压在装饰上面，水草根部被沙埋住 —— 和真实鱼缸一样。
+   🔴 z-index 不在这里覆盖：沿用 .aq-plant 的 z-index:1，装饰就落在沙之下。
+   装饰图必须是**透明底**，透明区让沙色与背景透出来。 */
 .aq-plant-image{
   left:0;
   right:0;
@@ -1077,7 +1077,6 @@ body.fa-maintenance-on .app{pointer-events:none;}
   bottom:0;
   width:100%;
   height:100%;
-  z-index:3;
 }
 .aq-plant i{
   position:absolute;
@@ -1087,13 +1086,14 @@ body.fa-maintenance-on .app{pointer-events:none;}
   border-radius:90% 10% 90% 10%;
 }
 /* 后台上传的装饰件图片：按上传顺序叠层，后面的盖在前面的上面（前景压后景）。
-   摆放规约与沙子相同（图大小可能与背景同）：100% 宽（与界面对齐）+ 底边对齐 + 不平铺。 */
+   摆放规约与沙子完全相同：图按**高度撑满**整缸（auto 100%）、底边对齐、水平居中，
+   超宽部分从中轴线往两边裁掉；不平铺。装饰图必须是透明底，透明区让沙色与背景透出来。 */
 .aq-plant-layer{
   position:absolute;
   inset:0;
   display:block;
   background-repeat:no-repeat;
-  background-size:100% auto;
+  background-size:auto 100%;
   background-position:center bottom;
 }
 .aq-plant-green i:nth-child(1){left:17px;width:9px;height:62px;background:#477c5c;transform:rotate(-18deg)}
@@ -2072,16 +2072,17 @@ body:not(.dev-on) .dev-panel{display:none!important}
   const IMAGE_SOURCE_RE = /^https?:\/\/.+\.(png|jpe?g|gif|webp|avif|svg|bmp)(?:[?#].*)?$/i;
   // 路径转成 CSS background。
   //   backgrounds  → cover（铺满整缸）
-  //   sands        → 贴底 + 横向撑满 + 不平铺（与界面下缘对齐、与界面左右对齐）
+  //   sands        → 按高度撑满 + 底边对齐 + 水平居中 + 不平铺（= 沙固定占缸底 20%）
   //   decorations  → 与沙子完全相同的摆放规约（鱼缸中"水草长在沙子上"）；
   //                  要求装饰图也是**透明底**：透明让背景/下层透过来。
-  // 旧实现 sands = `auto 100% repeat-x`：图按高度撑满、宽度不足横向平铺，
-  // 在宽屏或图宽比容器窄时出现"两端重复"。新规约改成 `100% auto no-repeat`：
-  // 图按容器宽度 100% 缩放、按比例缩放高度、底边对齐；不平铺、左右不裁切。
+  // 素材规约（2026-10-06）：整图 = 整缸高，沙/装饰画在图片底部（沙占图片底部 20%）。
+  // 所以渲染用 `auto 100%` —— 宽 auto 按比例、高撑满 → 图高 = 缸高，沙条带正好落在缸底 20%；
+  // 图宽 = 缸高 × 图宽高比，一般比缸宽，`center` 让超出部分从中轴线往两边裁掉。
+  // ⚠️ 别写回 `100% auto`（按宽度撑满）：图高会变成 缸宽 × 图高宽比，沙条带就不到 20%（旧 bug）。
   function cssFromImagePath(path, fit){
     const src = String(path || "").trim();
     if(!src || !IMAGE_SOURCE_RE.test(src)) return "";
-    if(fit === "sand" || fit === "decor-image") return `url("${src.replace(/["\\]/g, "")}") center bottom / 100% auto no-repeat`;
+    if(fit === "sand" || fit === "decor-image") return `url("${src.replace(/["\\]/g, "")}") center bottom / auto 100% no-repeat`;
     const size = fit === "contain" ? "center bottom / contain" : "center / cover";
     return `url("${src.replace(/["\\]/g, "")}") ${size} no-repeat`;
   }
@@ -2095,7 +2096,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
     const override = item && typeof item.visual === "string" ? item.visual.trim() : "";
     const field = VISUAL_FIELD_BY_CATEGORY[category];
     // 装饰件按 class 渲染，图片走独立的 images 列表（可多层：后景 + 前景）。
-    // 沙子与上传的装饰件走"贴底 + 横向撑满 + 不平铺"（同一种摆放规约）；
+    // 沙子与上传的装饰件走"按高度撑满 + 贴底居中 + 不平铺"（同一种摆放规约）；
     // 背景 cover；其他兜底 contain。
     const fit = category === "sands" ? "sand"
       : category === "decorations" ? "decor-image"
@@ -2803,9 +2804,8 @@ body:not(.dev-on) .dev-panel{display:none!important}
 
   function renderBubbles(){ document.getElementById("bubbleDisplay").textContent=`🫧 ${PlayerData.bubbles}`; }
   function renderAquarium(data){
-    // 背景画在独立的 .tank-bg 层上（那一层带 blur，负责景深），不再直接铺在 .tank 上 ——
-    // 铺在 .tank 上就没法只模糊背景：一模糊连鱼一起糊。
-    // 找不到这一层时退回旧行为：宁可没有景深，也不能让背景整个消失。
+    // 背景画在独立的 .tank-bg 层上，不再直接铺在 .tank 上（留着这层，将来加滤镜不牵连鱼）。
+    // 找不到这一层时退回旧行为：宁可少一层，也不能让背景整个消失。
     const backgroundCss=visualForItem("backgrounds", data.background).css;
     const tankBgEl=document.getElementById("tankBg");
     if(tankBgEl) tankBgEl.style.background=backgroundCss;
@@ -2813,8 +2813,9 @@ body:not(.dev-on) .dev-panel{display:none!important}
     const sandEl=document.getElementById("sand");
     const sandVisual=visualForItem("sands", data.sand);
     sandEl.style.background=sandVisual.css;
-    // 上传的沙子图必须整缸高：沙子只占图片底部约 20%，上面是透明区（让背景透出来）。
-    // 内置渐变则保持原来的底部 19% 条带。层级仍是 z-index:2 —— 压在背景层之上、装饰层之下。
+    // 上传的沙子图必须整缸高：图按高度撑满（auto 100%），沙子条带（图内底部 20%）
+    // 正好落在缸底 20% 处，上面是透明区（让背景透出来）。内置渐变则保持原来的底部 19% 条带。
+    // 层级仍是 z-index:2 —— 压在背景层之上、装饰层之下。
     sandEl.classList.toggle("sand-image", Boolean(sandVisual.image));
     document.querySelectorAll(".plant").forEach(p=>{
       p.style.display="none";
@@ -5244,6 +5245,9 @@ function resetFocus(completed) {
   renderBubbles();
   renderAquarium(AquariumData);
 
+  // 水底 = 缸高 81%（沙面在 80%，留 1% 让饲料落在沙面上、鱼不钻沙）。
+  // 沙图规约是「整图 = 整缸高、沙画在图片底部 20%」，所以这个比例永远和素材对齐 ——
+  // 不需要去读沙图像素实测（2026-10-06 先做过 canvas 实测沙面的方案，被这条规约取代，已回退）。
   let pellets = [];
 
   // 鱼的点击惊吓由 rebuildFishFromData 里的 el.onpointerdown 负责 —— 那个是属性赋值，

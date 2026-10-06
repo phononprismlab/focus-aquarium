@@ -141,7 +141,7 @@ console.log("\n--- 4. 状态条位置 ---");
   chkTrue("没有残留 top（top 会盖掉 bottom）", !/(^|[;{])top:/.test(focus));
 }
 
-// ===== 5. 沙子：贴底 + 与界面左右对齐 + 不平铺 =====
+// ===== 5. 沙子：按高度撑满（固定占缸底 20%）+ 贴底居中 + 不平铺 =====
 console.log("\n--- 5. 沙子上传图 ---");
 {
   const script = mainScript;
@@ -150,8 +150,11 @@ console.log("\n--- 5. 沙子上传图 ---");
   const api = new Function(`${re}\n${css}\nreturn { cssFromImagePath };`)();
   const url = "https://cdn.example.com/a/sand.png";
   const sand = api.cssFromImagePath(url, "sand");
-  chkTrue("沙子按宽度撑满（100% auto，不是 auto 100%）", /\/ 100% auto/.test(sand));
-  chkTrue("沙子不平铺（新规约：与界面下缘/左右对齐，不重复）", !/repeat-x/.test(sand));
+  // 2026-10-06 定稿：素材「整图 = 整缸高、沙画在图片底部 20%」→ 渲染必须 `auto 100%`（高撑满）。
+  // 图高 = 缸高 → 沙条带正好占缸底 20%；图比缸宽 → center 让超宽部分从中轴线往两边裁掉。
+  chkTrue("沙子按高度撑满（auto 100%，不是 100% auto）—— 沙条带固定占缸底 20%",
+    /\/ auto 100%/.test(sand) && !/\/ 100% auto/.test(sand));
+  chkTrue("沙子不平铺（超宽部分从中轴裁切，不重复）", !/repeat-x/.test(sand));
   chkTrue("沙子贴底（沙层在底部，不是居中）", /center bottom/.test(sand));
   chkTrue("沙子不再用 cover（cover 会把透明区铺满可见区域 → 沙子看不见）", !/cover/.test(sand));
   chkTrue("背景仍然 cover、contain 兜底 fit 未被波及",
@@ -163,7 +166,18 @@ console.log("\n--- 5. 沙子上传图 ---");
   chkTrue("上传沙子图时整层拉到整缸高", /\.sand\.sand-image \{ height: 100%; \}/.test(source));
   chkTrue("渲染时按有无上传图切换 class",
     /sandEl\.classList\.toggle\("sand-image", Boolean\(sandVisual\.image\)\)/.test(script));
-  chkTrue("沙子层级仍在背景之上、装饰之下（z-index:2）", /\.sand\{[^}]*z-index:2/.test(compact));
+  // 规约「装饰叠在沙子后」= 装饰（z:1）在沙子（z:2）**下面**，沙子压在装饰上面。
+  chkTrue("沙子层级在背景与装饰之上（z-index:2）", /\.sand\{[^}]*z-index:2/.test(compact));
+
+  // 2026-10-06：取消背景景深。blur 把手绘细节糊掉，scale(1.05) 只是为遮 blur 的白边，一并去掉。
+  const tankBg = (compact.match(/\.tank-bg\{[^}]*\}/) || [""])[0];
+  chkTrue("背景层不再加 blur（取消景深）", tankBg && !/filter:blur/.test(tankBg));
+  chkTrue("背景层不再 scale(1.05)", tankBg && !/transform:scale/.test(tankBg));
+  // 装饰层与沙子同规约：按高度撑满 + 贴底居中 + 不平铺。
+  const plantLayer = (compact.match(/\.aq-plant-layer\{[^}]*\}/) || [""])[0];
+  chkTrue("装饰层按高度撑满（auto 100%）", /background-size:auto 100%/.test(plantLayer));
+  chkTrue("装饰层贴底居中 + 不平铺",
+    /background-position:center bottom/.test(plantLayer) && /background-repeat:no-repeat/.test(plantLayer));
 }
 
 // ===== 6. 专注中点界面不掉饲料 =====
@@ -248,6 +262,10 @@ console.log("\n--- 10. 背景图尺寸标准 ---");
   chkTrue("后台上传提示写了尺寸/格式/体积标准",
     /背景图请压到 1600×900（16:9）、JPG 或 WebP、单张 ≤400KB/.test(adminSource));
   chkTrue("并说明超标的后果（拖慢首屏）", /超过这个量级会明显拖慢首屏加载/.test(adminSource));
+  // 2026-10-06：摆放规约改成「按高度撑满 + 超宽从中轴裁切」后，后台说明必须跟着改 ——
+  // 还写着「横向平铺」的话，运营会照着旧口径画素材。
+  chkTrue("沙子/装饰的摆放说明与新规约一致（按高度撑满 + 中轴裁切，不是平铺）",
+    /超出宽度的部分从中轴线往两边裁掉、不平铺/.test(adminSource) && !/横向平铺/.test(adminSource));
 }
 
 // ===== 11. 响应式覆盖必须排在基础规则之后 =====
