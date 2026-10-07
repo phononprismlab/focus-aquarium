@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import multer from "multer";
 import { createRepository } from "./repository.js";
 import { UPLOAD_ROOT, MAX_UPLOAD_MB, AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, storeAudio, ensureUploadDir, resolveAudioPaths, storagePlan, storageStatus, probeStorageGateway } from "./uploads.js";
+import { compressImage } from "./tinify.js";
 import { resolveAllowList, createOriginChecker } from "./cors.js";
 import { validateStartRequest } from "./reward.js";
 import { createFocusSessionStore } from "./focus-session.js";
@@ -24,6 +25,20 @@ import {
 } from "./player-store.js";
 
 const app = express();
+// 启动耗时埋点：云托管最小实例数为 0 时，用户遇到的「首屏转圈 / 配置连接失败」
+// 到底是容器调度慢、Node 启动慢还是数据层初始化慢，没有这些数字就只能靠猜。
+// 进程起点尽量靠前（import 全部完成后第一行），各阶段完成时刻相对它取差值。
+const BOOT_STARTED_AT = Date.now();
+const bootMarks = { listening: null, repository: null, playerStore: null };
+const bootMs = () => {
+  const at = Date.now() - BOOT_STARTED_AT;
+  return {
+    uptimeMs: at,
+    listeningMs: bootMarks.listening,
+    repositoryMs: bootMarks.repository,
+    playerStoreMs: bootMarks.playerStore
+  };
+};
 const host = process.env.HOST || "0.0.0.0";
 // 监听端口。
 // 主端口 PORT 默认 8080（非特权端口）：容器以非 root（USER node）运行，
@@ -133,19 +148,21 @@ const validate = (type, data) => {
   return null;
 };
 // 数据层状态单独存一个字段给 /api/health 读，而不是让健康检查去 await 仓库。
-// 仓库初始化要连云开发 RDB 并串行补齐十几条种子数据，全程是网络往返；
-// 健康检查一旦等它，容器编排就会在这段时间里一直探不通，把整个版本判成部署失败 ——
-// 表现就是"启动日志里服务明明起来了，部署却失败"。
+// 仓库初始化要连云开发 RDB（2026-10-07 起种子迁移已挪到后台，不再挡在这里），
+// 全程仍是网络往返；健康检查一旦等它，容器编排就会在这段时间里一直探不通，
+// 把整个版本判成部署失败 —— 表现就是"启动日志里服务明明起来了，部署却失败"。
 let repositoryStatus = "pending";
 const repositoryReady = createRepository().then(instance => {
+  bootMarks.repository = Date.now() - BOOT_STARTED_AT;
   repository = instance;
   repositoryStatus = "ok";
-  console.log("Repository initialized");
+  console.log(`Repository initialized（启动后 ${bootMarks.repository}ms）`);
   return instance;
 }).catch(error => {
+  bootMarks.repository = Date.now() - BOOT_STARTED_AT;
   repositoryError = error;
   repositoryStatus = "failed";
-  console.error("Repository initialization failed", error);
+  console.error(`Repository initialization failed（启动后 ${bootMarks.repository}ms）`, error);
   return null;
 });
 let injectedRepository = null;
@@ -196,20 +213,22 @@ async function blockIfMaintenance(res, uid) {
 }
 
 // ===== 玩家数据层（账号 / 存档 / 专注记录）=====
-// 与配置仓库分开初始化：配置仓库启动时要串行补齐十几条种子数据（网络往返），
+// 与配置仓库分开初始化：配置仓库启动时要连 RDB 并（后台）补齐种子数据（网络往返），
 // 玩家数据层只是取到一个 RDB 客户端对象（不发网络请求），两者互不阻塞。
 let playerStore;
 let playerStoreError;
 let playerStoreStatus = "pending";
 const playerStoreReady = createPlayerStore().then(instance => {
+  bootMarks.playerStore = Date.now() - BOOT_STARTED_AT;
   playerStore = instance;
   playerStoreStatus = "ok";
-  console.log(`Player store initialized (${instance.driver})`);
+  console.log(`Player store initialized (${instance.driver})（启动后 ${bootMarks.playerStore}ms）`);
   return instance;
 }).catch(error => {
+  bootMarks.playerStore = Date.now() - BOOT_STARTED_AT;
   playerStoreError = error;
   playerStoreStatus = "failed";
-  console.error("Player store initialization failed", error);
+  console.error(`Player store initialization failed（启动后 ${bootMarks.playerStore}ms）`, error);
   return null;
 });
 let injectedPlayerStore = null;
@@ -256,7 +275,11 @@ app.get("/api/health", (req, res) => {
     account: accountStatus(),
     // 会话令牌的密钥来源：explicit（显式配了 FISHTANK_SESSION_SECRET）
     // / derived（从 ADMIN_API_KEY 派生）/ none（都没配，存档接口会全部 401）。
-    sessionKey: sessionSecretStatus().source
+    sessionKey: sessionSecretStatus().source,
+    // 启动耗时分解（相对进程起点）。冷启动慢的时候，这三个数字直接说出时间花在哪：
+    // listening = 进程起来并绑上端口；repository = 配置仓库就绪（含种子迁移的串行 RDB 往返）；
+    // playerStore = 玩家数据层就绪。null = 还没完成。只读内存字段，不碰网络。
+    boot: bootMs()
   });
 });
 
@@ -1710,16 +1733,37 @@ app.post("/api/admin/assets", uploadSingle, async (req, res) => {
 app.post("/api/admin/assets/image", uploadImageSingle, async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "请选择要上传的图片文件" });
-    const stored = await storeAudio({ buffer: req.file.buffer, originalName: req.file.originalname, kind: "image", mimeType: req.file.mimetype }, "images");
+    // 压缩在落盘之前（T17）—— 存进云存储的就是压缩后的字节。
+    // 🔴 压缩失败不算上传失败：compressImage 永不抛异常，失败回落原图并带 warning。
+    const image = await compressImage(req.file.buffer, {
+      mimeType: req.file.mimetype,
+      role: String(req.body && req.body.role || "resource")
+    });
+    const stored = await storeAudio(
+      { buffer: image.buffer, originalName: req.file.originalname, kind: "image", mimeType: req.file.mimetype },
+      "images"
+    );
     res.json({
       data: {
         url: stored.url || "",
         path: stored.path,
         driver: stored.driver,
-        size: req.file.size,
+        size: image.size,
         name: req.file.originalname,
         fallbackError: stored.fallbackError || "",
-        fallbackCode: stored.fallbackCode || ""
+        fallbackCode: stored.fallbackCode || "",
+        image: {
+          compressed: image.compressed,
+          originalSize: image.originalSize,
+          size: image.size,
+          savedPercent: image.originalSize ? Math.round((1 - image.size / image.originalSize) * 100) : 0,
+          resized: image.resized,
+          overLimit: image.overLimit,
+          limitBytes: image.limitBytes,
+          compressionCount: image.compressionCount,
+          skipped: image.skipped,
+          warning: image.warning
+        }
       }
     });
   } catch (error) {
@@ -1849,7 +1893,8 @@ function startListening(listenPort) {
         }
         return resolve(false);
       }
-      console.log(`Fishtank API listening on ${host}:${listenPort}`);
+      if (bootMarks.listening === null) bootMarks.listening = Date.now() - BOOT_STARTED_AT;
+      console.log(`Fishtank API listening on ${host}:${listenPort}（启动后 ${bootMarks.listening}ms）`);
       void selfCheck(server);
       resolve(true);
     });

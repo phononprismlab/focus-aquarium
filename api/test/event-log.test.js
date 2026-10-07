@@ -46,7 +46,10 @@ function extractConst(src, name) {
 const code = [
   extractConst(source, "EVENT_LOG_KEY"),
   extractConst(source, "EVENT_LOG_LIMIT"),
-  ["escapeHtml", "formatReceiptStamp", "readEventLog", "saveEventLog", "eventLogEntry", "recordEventLog", "renderEventLog"]
+  // T09：货币符号改成自绘 SVG，事件日志里的「+12」不再带 emoji —— 把自绘那套 helper 一起搬进来。
+  extractConst(source, "BUB_GLYPH"),
+  extractConst(source, "BUB_SVG"),
+  ["escapeHtml", "bubHtml", "formatReceiptStamp", "readEventLog", "saveEventLog", "eventLogEntry", "recordEventLog", "renderEventLog"]
     .map(name => extractFunction(source, name)).join("\n")
 ].join("\n");
 
@@ -155,7 +158,9 @@ console.log("\n--- 5. 渲染 ---");
 {
   const { api, listEl } = build();
   api.recordEventLog(makeResult("水管里的小气泡", { bubbles: 12 }), BASE);
-  chkTrue("得泡泡写 +12", listEl.innerHTML.includes("🫧 +12"));
+  // T09：货币符号是自绘 SVG（不再是 emoji），但「+12」这个数字必须还在。
+  chkTrue("得泡泡写 +12（符号已换成自绘图形）",
+    listEl.innerHTML.includes('class="ic-bub"') && listEl.innerHTML.includes("+12"));
   chkTrue("没丢鱼时不出现「失去」", !listEl.innerHTML.includes("失去"));
 }
 {

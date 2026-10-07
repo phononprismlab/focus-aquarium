@@ -136,7 +136,8 @@ console.log("\n--- 8. 事件票上的影响标签 ---");
 {
   chkTrue("事件票有影响容器", /<div class="v02-event-impact" id="eventModalImpact" hidden><\/div>/.test(source));
   chkTrue("渲染函数存在", /function renderEventImpact\(effect\)\{/.test(source));
-  chkTrue("泡泡用普通标签", /chips\.push\(`<span>🫧 \+\$\{bubbles\}<\/span>`\)/.test(source));
+  // T09：货币符号是自绘 SVG，写法统一走 bubHtml()（先转义再换图形）。
+  chkTrue("泡泡用普通标签", /chips\.push\(`<span>\$\{bubHtml\("🫧"\)\} \+\$\{bubbles\}<\/span>`\)/.test(source));
   chkTrue("丢鱼用红色标签", /chips\.push\(`<span class="loss">失去 \$\{lost\.length\} 条 · /.test(source));
   chkTrue("没有影响时整块隐藏", /box\.hidden = chips\.length === 0;/.test(source));
   chkTrue("[hidden] 必须显式 display:none（display:flex 会盖掉 hidden）",
@@ -148,8 +149,8 @@ console.log("\n--- 9. 领奖小票（与购买票同一张纸） ---");
 {
   chkTrue("票面上有「奖励」行", /<div class="v02-receipt-row total" id="receiptGainRow" style="display:none"><span>奖励<\/span><span id="receiptGain"><\/span><\/div>/.test(source));
   chkTrue("奖励行默认隐藏、有值才显示", /gainRow\.style\.display=gainAmount>0\?"flex":"none";/.test(source));
-  chkTrue("奖励写成 +N（不是扣款）", /document\.getElementById\("receiptGain"\)\.textContent=`\+\$\{gainAmount\} 🫧`;/.test(source));
-  chkTrue("领奖小票不显示单价（满屏「0 🫧」像算错了）", /const priceCell=plain\?"":`<span>\$\{displayPrice\} 🫧<\/span>`;/.test(source));
+  chkTrue("奖励写成 +N（不是扣款）", /setBubText\(document\.getElementById\("receiptGain"\), `\+\$\{gainAmount\} 🫧`\);/.test(source));
+  chkTrue("领奖小票不显示单价（满屏「0 泡泡」像算错了）", /const priceCell=plain\?"":`<span>\$\{bubHtml\(displayPrice \+ " 🫧"\)\}<\/span>`;/.test(source));
   chkTrue("领奖小票时间口径是「小票时间」", /timeLabel:"小票时间"/.test(source));
   chkTrue("小票标题与理由都来自服务端返回值", /function showGrantReceipt\(receipt\)\{/.test(source) && /receipt\.reasons/.test(source));
   // 领奖不是购买：不能借道「支付」那一行显示，否则票面语义就乱了。

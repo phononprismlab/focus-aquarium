@@ -16,11 +16,68 @@ function test(name, fn) {
   catch (e) { failed++; console.log(`FAIL | ${name} -> ${e.message}`); }
 }
 
-// 单例配置（focus/audio）：直接以最新 seed 为准
-test("单例(focus) 用最新 seed 覆盖", () => {
+// 单例配置（focus/audio/about/ops）：一律**以库里的值为准**（即后台保存的那份）。
+// seed 只负责「库里没有时给初值」+「补齐 seed 新加的字段」。
+// 🔴 反向约束：曾经是 seed 无条件覆盖，导致后台改完文案、下次部署被冲回去。
+test("单例(focus) 以库里的值为准，不被 seed 覆盖", () => {
   const stored = { minFocusDuration: 25, maxFocusDuration: 120, rewardTiers: [{ id: "tier-1", endMinute: 25 }] };
   const seed = { minFocusDuration: 30, maxFocusDuration: 120, rewardTiers: [{ id: "tier-1", endMinute: 30 }] };
-  assert.deepStrictEqual(applySeedDefault("focus", stored, seed), seed);
+  const out = applySeedDefault("focus", stored, seed);
+  assert.strictEqual(out.minFocusDuration, 25, "后台改过的值必须保留");
+  assert.deepStrictEqual(out.rewardTiers, stored.rewardTiers, "数组（内容）以库里的为准");
+});
+
+test("单例(focus) 库里为空/缺字段时才用 seed", () => {
+  const seed = { minFocusDuration: 30, maxFocusDuration: 120 };
+  assert.deepStrictEqual(applySeedDefault("focus", {}, seed), seed, "空库用 seed");
+  assert.deepStrictEqual(applySeedDefault("focus", null, seed), seed, "无记录用 seed");
+  const partial = applySeedDefault("focus", { minFocusDuration: 25 }, seed);
+  assert.strictEqual(partial.minFocusDuration, 25, "已有的值保留");
+  assert.strictEqual(partial.maxFocusDuration, 120, "seed 新字段补齐");
+});
+
+test("单例(about) section 一层合并：后台改的 section 保留，缺的 section 补上", () => {
+  const stored = {
+    terms: { title: "我的协议", bodyHtml: "<p>后台改的</p>" },
+    story: { title: "品牌故事", bodyHtml: "<p>后台改的故事</p>" }
+  };
+  const seed = {
+    terms: { title: "用户协议", bodyHtml: "<p>seed</p>" },
+    privacy: { title: "隐私政策", bodyHtml: "<p>seed</p>" },
+    story: { title: "品牌故事", bodyHtml: "<p>seed</p>" },
+    tip: { title: "打赏支持", bodyHtml: "<p>seed</p>", imageUrl: "" }
+  };
+  const out = applySeedDefault("about", stored, seed);
+  assert.strictEqual(out.terms.bodyHtml, "<p>后台改的</p>", "后台改的正文保留");
+  assert.strictEqual(out.story.bodyHtml, "<p>后台改的故事</p>", "后台改的 section 保留");
+  assert.strictEqual(out.privacy.title, "隐私政策", "库里缺的 section 由 seed 补上");
+  assert.strictEqual(out.tip.imageUrl, "", "seed 新字段补齐");
+});
+
+test("单例(audio) categories 深合并、sounds 数组以库里为准", () => {
+  const stored = { categories: { bgm: { label: "背景", enabled: false, volume: 10 } }, sounds: [{ id: "s1", name: "后台改过的音效" }] };
+  const seed = {
+    categories: { bgm: { label: "背景白噪音", enabled: true, volume: 38 }, prompt: { label: "提示音", enabled: true, volume: 100 } },
+    sounds: [{ id: "seed-sound" }]
+  };
+  const out = applySeedDefault("audio", stored, seed);
+  assert.strictEqual(out.categories.bgm.volume, 10, "后台改过的音量保留");
+  assert.strictEqual(out.categories.bgm.label, "背景", "后台改过的分类名保留");
+  assert.strictEqual(out.categories.bgm.enabled, false, "后台关掉的分类保持关闭");
+  assert.strictEqual(out.categories.prompt.label, "提示音", "库里缺的分类由 seed 补上");
+  assert.deepStrictEqual(out.sounds, stored.sounds, "音效列表以库里的为准");
+});
+
+test("单例(ops) 停机状态与通知跨重启保留", () => {
+  const stored = { maintenance: true, maintenanceMessage: "维护中", notice: { id: "n1", title: "今晚维护", active: true } };
+  const seed = {
+    maintenance: false, maintenanceMessage: "", maintenanceEta: "", maintenanceAllowUids: [],
+    notice: { id: "", level: "info", title: "", body: "", startAt: 0, endAt: 0, ctaText: "", ctaUrl: "", active: false }
+  };
+  const out = applySeedDefault("ops", stored, seed);
+  assert.strictEqual(out.maintenance, true, "停机状态不被冲掉");
+  assert.strictEqual(out.notice.title, "今晚维护", "通知内容保留");
+  assert.deepStrictEqual(out.maintenanceAllowUids, [], "seed 新字段补齐");
 });
 
 // 用户内容：保留用户已改字段，补齐 seed 新增字段
@@ -107,13 +164,22 @@ test("B15: 老库假路径会被规划成 update（把死链清掉）", () => {
   assert.strictEqual(plan[0].publishedData.previewImage, "");
 });
 
-// plan: 单例有变化 -> update
-test("plan: 单例配置变化应 update", () => {
+// plan: 单例与 seed 不同 -> skip（后台的值说了算，启动时一次写都不该发生）
+test("plan: 单例与 seed 不一致时 skip（不覆盖后台配置）", () => {
   const seed = { minFocusDuration: 30 };
   const existingRows = [{ id: "focus", data: { minFocusDuration: 25 }, publishedData: { minFocusDuration: 25 }, rowId: 3 }];
   const plan = planSeedMigration("focus", [seed], existingRows);
+  assert.strictEqual(plan[0].action, "skip");
+});
+
+// plan: 单例缺 seed 新加的字段 -> update 且只补缺的那部分
+test("plan: 单例缺 seed 新字段 -> update 只补字段、不动已有值", () => {
+  const seed = { minFocusDuration: 30, maxFocusDuration: 120 };
+  const existingRows = [{ id: "focus", data: { minFocusDuration: 25 }, publishedData: { minFocusDuration: 25 }, rowId: 3 }];
+  const plan = planSeedMigration("focus", [seed], existingRows);
   assert.strictEqual(plan[0].action, "update");
-  assert.strictEqual(plan[0].data.minFocusDuration, 30);
+  assert.strictEqual(plan[0].data.minFocusDuration, 25, "库里的值保留");
+  assert.strictEqual(plan[0].data.maxFocusDuration, 120, "seed 新字段补齐");
 });
 
 // 幂等性：update 结果再跑一次 plan -> 全 skip

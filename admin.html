@@ -72,6 +72,14 @@
 		.link-button:hover { color: var(--coral); }
 		.link-button.delete { color: var(--coral); }
 		.link-button.delete:hover { color: #c6533d; }
+		/* 下架：比「删除」弱一档的颜色（它可逆，不该和真删除一个视觉重量）。 */
+		.link-button.retire { color: #bf7c27; }
+		.link-button.retire:hover { color: #8f5a12; }
+		/* 不可用的行内按钮必须看得出来 —— 只剩 4px padding 的纯文字，光靠 opacity 不够。 */
+		.link-button:disabled { color: var(--muted); opacity: .5; cursor: not-allowed; }
+		.link-button:disabled:hover { color: var(--muted); }
+		/* 「未上架」= 线上没有这一份（新建未发布 / 已被下架）。用中性灰，别和「待发布」的橙撞色。 */
+		.badge.unpublished { color: #6b6a66; background: #efefed; }
 		.empty { padding: 56px 20px; text-align: center; color: var(--muted); }
 		.empty strong { display: block; color: var(--ink); font-size: 16px; margin-bottom: 4px; }
 		.form-panel { max-width: 920px; }
@@ -168,7 +176,12 @@
 		.form-error[hidden] { display: none; }
 		.upload-error { display: block; color: #b4553a; font-size: 12px; font-weight: 700; margin-top: 6px; }
 		.upload-error[hidden] { display: none; }
+		/* 「素材过大」提示（T18）：与 .upload-error 的区别是**不阻断** —— 图已照常上传，只是提醒。 */
+		.upload-warn { display: block; color: #c0392b; font-size: 12px; font-weight: 700; margin-top: 6px; }
+		.upload-warn[hidden] { display: none; }
 		.invalid { border-color: #c6533d !important; box-shadow: 0 0 0 3px rgba(198,83,61,.12); }
+		/* 货币符号自绘（T09）：与玩家端同一套写法，尺寸跟字号走、颜色继承当前文字色。 */
+		.ic-bub { width: 1em; height: 1em; display: inline-block; vertical-align: -0.14em; flex: 0 0 auto; color: inherit; }
 		/* ===== 技术字段收进「高级设置」，默认折叠 ===== */
 		.adv { border: 1px dashed #c4dcd5; border-radius: 10px; padding: 11px 15px 15px; background: #fbfdfc; grid-column: 1 / -1; }
 		.adv > summary { cursor: pointer; font-weight: 700; font-size: 13px; color: var(--muted); }
@@ -352,6 +365,11 @@
 		const categoryLabel = value => SHOP_CATEGORIES.find(category => category.value === value)?.label || value;
 		const resourceList = value => Array.isArray(value) ? value : (value ? [value] : []);
 		const esc = value => String(value ?? "").replace(/[&<>\"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[char]));
+		// 货币符号自绘（T09）：原符号是 U+1FAE7（Emoji 14.0），Win10 无字形 → 自绘 SVG。
+		// 模板字符串里继续写原字符当占位符，只在落进 DOM 时替换；玩家端 index.html 是同一套写法。
+		const BUB_GLYPH = "\u{1FAE7}";
+		const BUB_SVG = '<svg class="ic-bub" viewBox="0 0 24 24" role="img" focusable="false" width="24" height="24"><title>泡泡</title><circle cx="14.2" cy="9.6" r="7.1" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="1.7"/><path d="M10.3 6.3a5.3 5.3 0 0 1 3.3-1.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".9"/><circle cx="6.7" cy="18.2" r="3.4" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="1.5"/><path d="M5.3 17.2a2.1 2.1 0 0 1 1.2-.7" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity=".9"/></svg>';
+		const bubHtml = raw => esc(String(raw == null ? "" : raw)).split(BUB_GLYPH).join(BUB_SVG);
 		let adminKey = sessionStorage.getItem("fishtank_admin_key") || "";
 		const adminKeyInput = document.getElementById("adminKeyInput");
 		const adminKeyBtn = document.getElementById("adminKeyBtn");
@@ -423,7 +441,7 @@
 			if (box) { box.hidden = true; box.textContent = ""; }
 			form.querySelectorAll(".field-error").forEach(tip => { tip.hidden = true; tip.textContent = ""; });
 			form.querySelectorAll(".invalid").forEach(input => input.classList.remove("invalid"));
-			form.querySelectorAll(".upload-error").forEach(tip => { tip.hidden = true; tip.textContent = ""; });
+			form.querySelectorAll(".upload-error, .upload-warn").forEach(tip => { tip.hidden = true; tip.textContent = ""; });
 		}
 		// 上传失败贴着文件控件说 —— 玩家/管理员的视线就在那，滚到顶部去看 toast 是反人类的。
 		// controlId 既可以是元素 id，也可以直接传元素（音效页的上传控件没有 id）。
@@ -435,6 +453,18 @@
 			if (!tip) { tip = document.createElement("span"); tip.className = "upload-error"; holder.appendChild(tip); }
 			tip.textContent = message;
 			tip.hidden = false;
+		}
+		// 和 showUploadError 的区别（T18）：这是**提示**，不阻断上传 —— 所以它不返回空串。
+		// 场景：Tinify 压缩后仍超大小上限 / 压缩服务临时不可用 —— 图已照常上传，只提醒一声。
+		function showUploadWarn(controlId, text) {
+			if (!controlId || !text) return;
+			const holder = typeof controlId === "string" ? document.getElementById(controlId) : controlId;
+			const anchor = holder && (holder.closest(".upload-row") || holder.parentElement);
+			if (!anchor) return;
+			let tip = anchor.querySelector(".upload-warn");
+			if (!tip) { tip = document.createElement("span"); tip.className = "upload-warn"; anchor.appendChild(tip); }
+			tip.hidden = false;
+			tip.textContent = `⚠ ${text}`;
 		}
 		// ===== 未保存离开拦截 =====
 		// leaveGuard 返回 true 表示当前表单有未保存的修改。切页签 / 返回列表 / 刷新都会被拦下来问一句。
@@ -470,13 +500,39 @@
 				data: record?.data || {},
 				publishedData: record?.publishedData || null,
 				published: Boolean(record?.published),
+				// dirty 保持原义：「线上没有发布过这份」，用于「刚保存为草稿」那张卡和「查看差异」。
+				// 🔴 它**不是**三态判定，别拿它渲染徽章 / 筛选（下架项也会命中）—— 用 recordState()。
 				dirty: !record?.published,
 				updatedAt: Number(record?.updatedAt) || 0
 			};
 		}
+		// 配置在后台有三种状态，不能只按「有没有发布」两分。
+		// 🔴 下架（后台点「下架」）之后 published=false 且 publishedData=null —— 和「新建了还没发布」
+		//    在库里长得完全一样（这是刻意的，见 repository.js 的 remove），所以这里也只按这两个字段判。
+		//    如果沿用旧的「!published 就是待发布」，下架的条目会被标成「有修改，待发布」，
+		//    管理员会以为它有待发的改动 —— 实际上它什么改动都没有，只是被撤下来了。
+		function recordState(item) {
+			if (item.published) return "published";
+			if (item.publishedData) return "draft";
+			return "unpublished";
+		}
+		const STATE_LABEL = { published: "已发布", draft: "有修改，待发布", unpublished: "未上架" };
+		const stateBadge = item => { const state = recordState(item); return `<span class="badge ${state}">${STATE_LABEL[state]}</span>`; };
+		// 发布按钮的文案跟着状态走：「未上架」的时候这个动作是把它重新放出去，叫「上架」更准确。
+		const publishLabel = item => recordState(item) === "unpublished" ? "上架" : "发布";
+		const publishDisabled = item => recordState(item) === "published" ? "disabled" : "";
+		const retireDisabled = item => recordState(item) === "published" ? "" : "disabled";
 		function applyRecords(records, type) {
 			// 记录里缺 data 字段时不该让后台崩掉，用空对象兜住，界面上表现为一条待补完的记录。
 			return (records || []).map(toEditableRecord);
+		}
+		// 下架 / 上架之后重新拉这一个类型。
+		// 🔴 不要本地改字段（以前是 splice 掉那一行）：published / publishedData 是服务端算的，
+		//    前端自己拼一份很容易和真实值漂移 —— 而且下架后那一行**必须留在列表里**，
+		//    否则管理员会以为它被删干净了，再也不会想到去「上架」。
+		async function reloadType(type) {
+			const response = await apiRequest(`/admin/${type}`);
+			state[type] = applyRecords(response.data || [], type);
 		}
 		async function loadAdminData() {
 			// 逐项接住失败：原来任何一项挂掉都会让整个后台打不开，也说不清是哪一项。
@@ -557,7 +613,7 @@
 			const haystack = [item.name, item.id, item.fishid, item.category, item.handler].filter(Boolean).join(" ").toLowerCase();
 			const query = String(filter.query || "").toLowerCase();
 			const queryOk = !query || haystack.includes(query);
-			const statusOk = !filter.status || (filter.status === "draft" ? item.dirty : !item.dirty);
+			const statusOk = !filter.status || recordState(item) === filter.status;
 			const categoryOk = !filter.category || item.category === filter.category;
 			return queryOk && statusOk && categoryOk;
 		}
@@ -582,6 +638,7 @@
 			if (!String(item.previewImage || "").trim()) notes.push({ cls: "info", text: "预览图缺失（商店卡片会没有图）" });
 			if (!String(item.description || "").trim()) notes.push({ cls: "info", text: "描述未填写" });
 			if (item.dirty) notes.push({ cls: "", text: "有草稿未发布" });
+			if (recordState(item) === "unpublished") notes.push({ cls: "bad", text: "未上架，玩家端看不到" });
 			return notes;
 		}
 		function fishNotes(item) {
@@ -589,6 +646,7 @@
 			if (!fishResourceRows(item.resourcePath).length) notes.push({ cls: "info", text: "未上传鱼图（玩家端用 CSS 鱼）" });
 			if (!String(item.animationCode || "").trim()) notes.push({ cls: "info", text: "未写动画代码（用内置游动）" });
 			if (item.dirty) notes.push({ cls: "", text: "有草稿未发布" });
+			if (recordState(item) === "unpublished") notes.push({ cls: "bad", text: "未上架，玩家端看不到" });
 			return notes;
 		}
 		function notesHtml(notes) {
@@ -672,7 +730,7 @@
 		function listFilterHtml(type, placeholder, { withCategory = false } = {}) {
 			const filter = listFilters[type];
 			const categorySelect = withCategory ? `<label>分类<select id="${type}Category"><option value="">全部分类</option>${SHOP_CATEGORIES.map(category => `<option value="${category.value}" ${filter.category === category.value ? "selected" : ""}>${category.label}</option>`).join("")}</select></label>` : "";
-			return `<div class="filter-row"><label>搜索<input id="${type}Search" value="${esc(filter.query)}" placeholder="${placeholder}"></label><label>状态<select id="${type}Status"><option value="" ${filter.status === "" ? "selected" : ""}>全部状态</option><option value="draft" ${filter.status === "draft" ? "selected" : ""}>待发布</option><option value="published" ${filter.status === "published" ? "selected" : ""}>已发布</option></select></label>${categorySelect}<button class="button secondary" id="${type}FilterApply">应用筛选</button><span class="count" id="${type}Count"></span></div>`;
+			return `<div class="filter-row"><label>搜索<input id="${type}Search" value="${esc(filter.query)}" placeholder="${placeholder}"></label><label>状态<select id="${type}Status"><option value="" ${filter.status === "" ? "selected" : ""}>全部状态</option><option value="published" ${filter.status === "published" ? "selected" : ""}>已发布</option><option value="draft" ${filter.status === "draft" ? "selected" : ""}>有修改，待发布</option><option value="unpublished" ${filter.status === "unpublished" ? "selected" : ""}>未上架</option></select></label>${categorySelect}<button class="button secondary" id="${type}FilterApply">应用筛选</button><span class="count" id="${type}Count"></span></div>`;
 		}
 		// 筛选即时生效（输入即过滤），「应用筛选」按钮保留给键盘/触屏习惯，两个入口读同一组值。
 		function bindListFilter(type, renderFn) {
@@ -724,9 +782,10 @@
 		function renderDecorationList() {
 			const filter = listFilters.decorations;
 			const items = state.decorations.filter(item => recordMatches(item, filter));
-			const draftCount = state.decorations.filter(item => item.dirty).length;
-			const rows = items.map((item) => { const index = state.decorations.indexOf(item); return `<tr><td><div class="item-name">${esc(item.name)}</div><div class="item-id">${esc(item.id)}</div>${notesHtml(decorationNotes(item))}</td><td>${esc(categoryLabel(item.category))}</td><td>${item.price === 0 ? "免费" : item.price + " 泡泡"}</td><td>${resourceStatus(item)}<br><span class="badge ${item.dirty ? "draft" : "published"}">${item.dirty ? "有修改，待发布" : "已发布"}</span></td><td>${formatUpdatedAt(item.updatedAt)}</td><td><div class="actions"><button class="link-button edit-decoration" data-index="${index}">编辑</button>${item.dirty ? `<button class="link-button view-diff" data-index="${index}">查看差异</button>` : ""}<button class="button publish" data-index="${index}" ${item.dirty ? "" : "disabled"}>发布</button><button class="link-button delete delete-decoration" data-index="${index}">删除</button></div></td></tr>`; }).join("");
-			main.innerHTML = pageHeader("DECORATION CONFIG", "装点鱼缸配置", "管理商品、装扮与资源。保存后会形成草稿，确认发布后才会同步给玩家。", `<button class="button primary" id="newDecoration">＋ 新建商品</button>`) + `<section class="panel"><div class="panel-head"><div><h3>商品列表</h3><div class="list-summary"><span class="summary-chip"><strong>${state.decorations.length}</strong> 个商品</span><span class="summary-chip"><strong>${draftCount}</strong> 个待发布</span><span class="summary-chip"><strong>${state.decorations.filter(item => !resourceList(item.resourcePath).filter(Boolean).length).length}</strong> 个缺少资源</span><span class="summary-chip"><strong>${state.decorations.filter(item => !String(item.previewImage || "").trim()).length}</strong> 个缺预览图</span></div></div></div>${savedBannerHtml("decorations", "id")}${listFilterHtml("decorations", "搜索名称或商品编号", { withCategory: true })}${items.length ? `<div class="table-wrap"><table><thead><tr><th>商品</th><th>分类</th><th>价格</th><th>资源 / 发布状态</th><th>最近修改</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty"><strong>${state.decorations.length ? "没有匹配的商品" : "还没有商品"}</strong>${state.decorations.length ? "试试清空筛选条件" : "点击右上角新建第一个商品"}</div>`}</section>`;
+			const draftCount = state.decorations.filter(item => recordState(item) === "draft").length;
+			const unpublishedCount = state.decorations.filter(item => recordState(item) === "unpublished").length;
+			const rows = items.map((item) => { const index = state.decorations.indexOf(item); return `<tr><td><div class="item-name">${esc(item.name)}</div><div class="item-id">${esc(item.id)}</div>${notesHtml(decorationNotes(item))}</td><td>${esc(categoryLabel(item.category))}</td><td>${item.price === 0 ? "免费" : item.price + " 泡泡"}</td><td>${resourceStatus(item)}<br>${stateBadge(item)}</td><td>${formatUpdatedAt(item.updatedAt)}</td><td><div class="actions"><button class="link-button edit-decoration" data-index="${index}">编辑</button>${item.dirty ? `<button class="link-button view-diff" data-index="${index}">查看差异</button>` : ""}<button class="button publish" data-index="${index}" ${publishDisabled(item)}>${publishLabel(item)}</button><button class="link-button retire retire-decoration" data-index="${index}" ${retireDisabled(item)}>下架</button></div></td></tr>`; }).join("");
+			main.innerHTML = pageHeader("DECORATION CONFIG", "装点鱼缸配置", "管理商品、装扮与资源。保存后会形成草稿，确认发布后才会同步给玩家。", `<button class="button primary" id="newDecoration">＋ 新建商品</button>`) + `<section class="panel"><div class="panel-head"><div><h3>商品列表</h3><div class="list-summary"><span class="summary-chip"><strong>${state.decorations.length}</strong> 个商品</span><span class="summary-chip"><strong>${draftCount}</strong> 个待发布</span><span class="summary-chip"><strong>${unpublishedCount}</strong> 个未上架</span><span class="summary-chip"><strong>${state.decorations.filter(item => !resourceList(item.resourcePath).filter(Boolean).length).length}</strong> 个缺少资源</span><span class="summary-chip"><strong>${state.decorations.filter(item => !String(item.previewImage || "").trim()).length}</strong> 个缺预览图</span></div></div></div>${savedBannerHtml("decorations", "id")}${listFilterHtml("decorations", "搜索名称或商品编号", { withCategory: true })}${items.length ? `<div class="table-wrap"><table><thead><tr><th>商品</th><th>分类</th><th>价格</th><th>资源 / 发布状态</th><th>最近修改</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty"><strong>${state.decorations.length ? "没有匹配的商品" : "还没有商品"}</strong>${state.decorations.length ? "试试清空筛选条件" : "点击右上角新建第一个商品"}</div>`}</section>`;
 			document.getElementById("newDecoration").onclick = () => renderDecorationForm();
 			bindListFilter("decorations", renderDecorationList);
 			bindSavedBanner("decorations", "id", renderDecorationList);
@@ -734,7 +793,7 @@
 			document.querySelectorAll(".edit-decoration").forEach(button => button.onclick = () => renderDecorationForm(Number(button.dataset.index)));
 			document.querySelectorAll(".view-diff").forEach(button => button.onclick = () => { const item = state.decorations[Number(button.dataset.index)]; showDiffDialog(item, item.name || item.id); });
 			document.querySelectorAll(".publish").forEach(button => button.onclick = () => publishItem("decorations", Number(button.dataset.index)));
-			document.querySelectorAll(".delete-decoration").forEach(button => button.onclick = async () => { if (!confirm("确定要删除这个配置吗？")) return; const item = state.decorations[Number(button.dataset.index)]; try { await apiRequest(`/admin/decorations/${encodeURIComponent(item.id)}`, { method: "DELETE" }); state.decorations.splice(Number(button.dataset.index), 1); renderDecorationList(); } catch (error) { showToast(`删除失败：${error.message}`); } });
+			document.querySelectorAll(".retire-decoration").forEach(button => button.onclick = async () => { const item = state.decorations[Number(button.dataset.index)]; if (!item) return; if (!confirm(`确定下架「${item.name || item.id}」吗？\n\n下架后玩家端立刻看不到它，配置仍然留在后台，随时可以重新上架。`)) return; try { await apiRequest(`/admin/decorations/${encodeURIComponent(item.id)}`, { method: "DELETE" }); lastSaved = null; await reloadType("decorations"); showToast("已下架，玩家端不再显示"); } catch (error) { showToast(`下架失败：${error.message}`); } renderDecorationList(); });
 		}
 		// 文件 chip：带一个 × 删除入口。以前 chip 只是个 span，没有任何删除方式，
 		// 加错一个资源就只能整页刷新重来。
@@ -759,13 +818,15 @@
 		}
 		// 上传资源统一走这里：按 MIME 选接口（音频 → /admin/assets 存 sounds/，图片 → /admin/assets/image 存 images/）。
 		// 云存储失败时返回空串，调用方据此拒绝把容器本地临时路径写进配置（实例重建就 404）。
-		async function uploadAsset(file, label, errorControl) {
+		async function uploadAsset(file, label, errorControl, role) {
 			errorControl = errorControl || "";   // 传了控件 id 就把错误贴在控件旁边，不传则只走顶部 banner
 			const endpoint = String(file.type || "").startsWith("audio/") ? "/admin/assets" : "/admin/assets/image";
 			showToast(`正在上传${label} ${file.name}…`, 2200);
 			try {
 				const form = new FormData();
 				form.append("file", file);
+				// T17：图片上传带角色，服务端按角色选压缩/缩放规格（preview/background/sand/decoration/fish/resource）。
+				if (role && endpoint.endsWith("/image")) form.append("role", role);
 				const headers = {};
 				if (adminKey) headers["x-admin-key"] = adminKey;
 				const response = await fetch(`${API_BASE}${endpoint}`, { method: "POST", body: form, headers });
@@ -779,6 +840,10 @@
 					showErrorBanner(`${message} —— 请先解决云存储问题，再重新上传。`);
 					return "";
 				}
+				// T18：压缩提示走独立通道 —— 标红但不阻断（图已照常上传，路径照常返回）。
+				if (body.data.image && body.data.image.warning) showUploadWarn(errorControl, body.data.image.warning);
+				// 给调用点读压缩结果用（预览图 toast 报「原大小 → 压缩后」）。
+				uploadAsset.lastImage = body.data.image || null;
 				return body.data.path || body.data.url || "";
 			} catch (error) {
 				const message = `${label}上传失败：${error.message}`;
@@ -792,7 +857,7 @@
 			// 音效管理里已上传的音频，直接挂到这个商品的 resourcePath 上。
 			// 这是两处配置唯一的关联点：挂同一个文件，商店才会用本页的名称和描述。
 			const resourceOptions = audioResourceOptions();
-			main.innerHTML = pageHeader("DECORATION CONFIG", index === null ? "新建商品" : "编辑商品", "配置商品的展示信息、资源与拥有上限。保存后返回列表，发布操作可单独进行。", `<button class="button secondary" id="backList">返回列表</button>`) + `<section class="panel form-panel"><div class="form-body"><form id="decorationForm"><div class="form-error" id="formError" hidden></div><div class="form-grid"><div class="field"><label>商品名称 <span>*</span></label><input name="name" value="${esc(item.name)}" required></div><div class="field"><label>商品分类 <span>*</span></label><select name="category">${SHOP_CATEGORIES.map(category => `<option value="${category.value}" ${item.category === category.value ? "selected" : ""}>${category.label}</option>`).join("")}</select></div><div class="field"><label>价格（泡泡）</label><input name="price" type="number" min="0" value="${item.price}"></div><div class="field"><label>最大拥有数量</label><input name="maxInventory" type="number" min="0" value="${item.maxInventory}"><span class="hint">鱼这一类是「最多养几条」，其它一般是 1（只能摆一个）</span></div><div class="field full"><label>商品描述</label><textarea name="description">${esc(item.description)}</textarea></div><label class="check"><input name="isMemberOnly" type="checkbox" ${item.isMemberOnly ? "checked" : ""}> 会员限定</label><div class="field full"><label>商店预览图</label><div class="upload-row"><label class="file-button">上传预览图<input id="previewUpload" type="file" accept="image/*"></label><span class="hint">建议先压到 400×400、100KB 以内</span></div><div class="file-list" id="previewFiles"></div></div><div class="field full"><label>鱼缸资源</label><div class="upload-row"><label class="file-button">上传资源<input id="resourceUpload" type="file" multiple></label><select id="resourcePick" style="flex:1;min-width:260px">${resourceOptions}</select></div><span class="hint">这是玩家鱼缸里实际显示的资源；装饰的第 1、2 张图分别作为后景和前景。背景图请压到 1600×900（16:9）、JPG 或 WebP、单张 ≤400KB —— 超过这个量级会明显拖慢首屏加载。沙子与装饰件请用透明底 PNG，按「整图 = 整缸大小」来画、内容画在图片底部（沙子只占底部约 20%、上方留透明）：玩家端会把图片铺满整缸（cover），沙子因此正好落在缸底 20%，超出宽度的部分从中轴线往两边裁掉、不平铺</span><div class="file-list" id="resourceFiles"></div></div><div class="form-grid"><div class="field"><label>编号 <span>*</span></label><input name="id" value="${esc(item.id)}"><span class="hint">系统识别用，创建后不建议修改；建议字母、数字、下划线或连字符</span></div><div class="field"><label>事件标签</label><input name="tags" value="${esc(tagsToInput(item.tags))}" placeholder="逗号分隔，如 undersea-treasure"><span class="hint">供随机事件按标签匹配资源；没有特殊玩法时留空即可</span></div></div></div><div class="form-foot"><button type="button" class="button secondary" id="cancelForm">取消</button><button class="button primary" type="submit">保存为草稿</button></div></form></div></section>`;
+			main.innerHTML = pageHeader("DECORATION CONFIG", index === null ? "新建商品" : "编辑商品", "配置商品的展示信息、资源与拥有上限。保存后返回列表，发布操作可单独进行。", `<button class="button secondary" id="backList">返回列表</button>`) + `<section class="panel form-panel"><div class="form-body"><form id="decorationForm"><div class="form-error" id="formError" hidden></div><div class="form-grid"><div class="field"><label>商品名称 <span>*</span></label><input name="name" value="${esc(item.name)}" required></div><div class="field"><label>商品分类 <span>*</span></label><select name="category">${SHOP_CATEGORIES.map(category => `<option value="${category.value}" ${item.category === category.value ? "selected" : ""}>${category.label}</option>`).join("")}</select></div><div class="field"><label>价格（泡泡）</label><input name="price" type="number" min="0" value="${item.price}"></div><div class="field"><label>最大拥有数量</label><input name="maxInventory" type="number" min="0" value="${item.maxInventory}"><span class="hint">鱼这一类是「最多养几条」，其它一般是 1（只能摆一个）</span></div><div class="field full"><label>商品描述</label><textarea name="description">${esc(item.description)}</textarea></div><label class="check"><input name="isMemberOnly" type="checkbox" ${item.isMemberOnly ? "checked" : ""}> 会员限定</label><div class="field full"><label>商店预览图</label><div class="upload-row"><label class="file-button">上传预览图<input id="previewUpload" type="file" accept="image/*"></label><span class="hint">建议先压到 400×400、100KB 以内</span></div><div class="file-list" id="previewFiles"></div></div><div class="field full"><label>鱼缸资源</label><div class="upload-row"><label class="file-button">上传资源<input id="resourceUpload" type="file" multiple></label><select id="resourcePick" style="flex:1;min-width:260px">${resourceOptions}</select></div><span class="hint">这是玩家鱼缸里实际显示的资源；装饰的第 1、2 张图分别作为后景和前景。背景图请压到 1600×900（16:9）、JPG 或 WebP、单张 ≤400KB —— 超过这个量级会明显拖慢首屏加载。沙子与装饰件请用透明底 PNG，按「整图 = 整缸大小」来画、内容画在图片底部（沙子只占底部约 12.5%、上方留透明）：玩家端会把图片铺满整缸（cover），沙子因此正好落在缸底 12.5%，超出宽度的部分从中轴线往两边裁掉、不平铺</span><div class="file-list" id="resourceFiles"></div></div><div class="form-grid"><div class="field"><label>编号 <span>*</span></label><input name="id" value="${esc(item.id)}"><span class="hint">系统识别用，创建后不建议修改；建议字母、数字、下划线或连字符</span></div><div class="field"><label>事件标签</label><input name="tags" value="${esc(tagsToInput(item.tags))}" placeholder="逗号分隔，如 undersea-treasure"><span class="hint">供随机事件按标签匹配资源；没有特殊玩法时留空即可</span></div></div></div><div class="form-foot"><button type="button" class="button secondary" id="cancelForm">取消</button><button class="button primary" type="submit">保存为草稿</button></div></form></div></section>`;
 			const goBackToList = () => { if (!confirmLeave()) return; editingIndex = null; setLeaveGuard(null); renderDecorationList(); };
 			document.getElementById("backList").onclick = goBackToList;
 			document.getElementById("cancelForm").onclick = goBackToList;
@@ -833,8 +898,13 @@
 			document.getElementById("resourceUpload").onchange = async event => {
 				const files = Array.from(event.target.files || []);
 				event.target.value = "";
+				// T17：按商品分类选压缩规格 —— 背景压到 1600×900、沙/装饰同规格、鱼只压不缩。
+				const decoForm = document.getElementById("decorationForm");
+				const cat = decoForm && decoForm.elements.category ? decoForm.elements.category.value : "";
+				const roleByCat = { backgrounds: "background", sands: "sand", decorations: "decoration", fish: "fish" };
+				const role = roleByCat[cat] || "resource";
 				for (const file of files) {
-					const path = await uploadAsset(file, "资源", "resourceUpload");
+					const path = await uploadAsset(file, "资源", "resourceUpload", role);
 					if (path) addResourcePath(path, file.name);
 				}
 			};
@@ -848,11 +918,14 @@
 				const file = event.target.files && event.target.files[0];
 				event.target.value = "";
 				if (!file) return;
-				const path = await uploadAsset(file, "预览图", "previewUpload");
+				const path = await uploadAsset(file, "预览图", "previewUpload", "preview");
 				if (!path) return;
 				previewPath = path;   // 一个商品只有一个预览图，直接替换
 				renderPreviewChip();
-				showToast(`已上传预览图 ${file.name}，记得保存并发布`);
+				// T18：上传成功的 toast 顺带报告压缩结果（uploadAsset.lastImage 是服务端 data.image）。
+				const img = uploadAsset.lastImage;
+				const saved = img && img.compressed && img.savedPercent > 0 ? `（${Math.round(img.originalSize/1024)}KB → ${Math.round(img.size/1024)}KB，-${img.savedPercent}%）` : "";
+				showToast(`已上传预览图 ${file.name}${saved}，记得保存并发布`);
 			};
 			document.getElementById("decorationForm").onsubmit = async event => {
 				event.preventDefault();
@@ -927,7 +1000,7 @@
 		function renderFishList() {
 			const filter = listFilters.fish;
 			const items = state.fish.filter(item => recordMatches(item, filter));
-			const rows = items.map(item => { const index = state.fish.indexOf(item); return `<tr><td><div class="item-name">${esc(item.name)}</div><div class="item-id">${esc(item.fishid)}</div>${notesHtml(fishNotes(item))}</td><td>${resourceStatus(item, "fish")}</td><td>${esc(item.movementCode || "内置游动")}</td><td>${item.scaleMin} - ${item.scaleMax}</td><td><span class="badge ${item.dirty ? "draft" : "published"}">${item.dirty ? "有修改，待发布" : "已发布"}</span><br><span class="hint">${formatUpdatedAt(item.updatedAt)}</span></td><td><div class="actions"><button class="link-button edit-fish" data-index="${index}">编辑</button>${item.dirty ? `<button class="link-button view-diff" data-index="${index}">查看差异</button>` : ""}<button class="button publish" data-index="${index}" ${item.dirty ? "" : "disabled"}>发布</button><button class="link-button delete delete-fish" data-index="${index}">删除</button></div></td></tr>`; }).join("");
+			const rows = items.map(item => { const index = state.fish.indexOf(item); return `<tr><td><div class="item-name">${esc(item.name)}</div><div class="item-id">${esc(item.fishid)}</div>${notesHtml(fishNotes(item))}</td><td>${resourceStatus(item, "fish")}</td><td>${esc(item.movementCode || "内置游动")}</td><td>${item.scaleMin} - ${item.scaleMax}</td><td>${stateBadge(item)}<br><span class="hint">${formatUpdatedAt(item.updatedAt)}</span></td><td><div class="actions"><button class="link-button edit-fish" data-index="${index}">编辑</button>${item.dirty ? `<button class="link-button view-diff" data-index="${index}">查看差异</button>` : ""}<button class="button publish" data-index="${index}" ${publishDisabled(item)}>${publishLabel(item)}</button><button class="link-button retire retire-fish" data-index="${index}" ${retireDisabled(item)}>下架</button></div></td></tr>`; }).join("");
 			main.innerHTML = pageHeader("FISH ASSEMBLY", "鱼种装配", "配置鱼种资源、游动表现与投喂反馈。保存后会形成草稿，确认发布后才会同步给玩家。", `<button class="button primary" id="newFish">＋ 新建鱼种</button>`) + `<section class="panel"><div class="panel-head"><div><h3>鱼种列表</h3><div class="list-summary"><span class="summary-chip"><strong>${state.fish.length}</strong> 个鱼种</span><span class="summary-chip"><strong>${state.fish.filter(item => item.dirty).length}</strong> 个待发布</span><span class="summary-chip"><strong>${state.fish.filter(item => !fishResourceRows(item.resourcePath).length).length}</strong> 个未上传鱼图</span></div></div></div>${savedBannerHtml("fish", "fish")}${listFilterHtml("fish", "搜索名称或鱼种编号")}${items.length ? `<div class="table-wrap"><table><thead><tr><th>鱼种</th><th>资源状态</th><th>游动类型</th><th>缩放范围</th><th>发布状态 / 最近修改</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty"><strong>${state.fish.length ? "没有匹配的鱼种" : "还没有鱼种"}</strong>${state.fish.length ? "试试清空筛选条件" : "点击右上角新建第一个鱼种"}</div>`}</section>`;
 			document.getElementById("newFish").onclick = () => renderFishForm();
 			bindListFilter("fish", renderFishList);
@@ -937,7 +1010,7 @@
 			document.querySelectorAll(".edit-fish").forEach(button => button.onclick = () => renderFishForm(Number(button.dataset.index)));
 			document.querySelectorAll(".view-diff").forEach(button => button.onclick = () => { const item = state.fish[Number(button.dataset.index)]; showDiffDialog(item, item.name || item.fishid); });
 			document.querySelectorAll(".publish").forEach(button => button.onclick = () => publishItem("fish", Number(button.dataset.index)));
-			document.querySelectorAll(".delete-fish").forEach(button => button.onclick = async () => { if (!confirm("确定要删除这个配置吗？")) return; const item = state.fish[Number(button.dataset.index)]; try { await apiRequest(`/admin/fish/${encodeURIComponent(item.fishid)}`, { method: "DELETE" }); state.fish.splice(Number(button.dataset.index), 1); renderFishList(); } catch (error) { showToast(`删除失败：${error.message}`); } });
+			document.querySelectorAll(".retire-fish").forEach(button => button.onclick = async () => { const item = state.fish[Number(button.dataset.index)]; if (!item) return; if (!confirm(`确定下架「${item.name || item.fishid}」吗？\n\n下架后玩家端立刻看不到它，配置仍然留在后台，随时可以重新上架。`)) return; try { await apiRequest(`/admin/fish/${encodeURIComponent(item.fishid)}`, { method: "DELETE" }); lastSaved = null; await reloadType("fish"); showToast("已下架，玩家端不再显示"); } catch (error) { showToast(`下架失败：${error.message}`); } renderFishList(); });
 		}
 		function renderFishForm(index = null) {
 			const item = index === null ? { fishid: "", name: "", resourcePath: "", movementCode: "", animationCode: "", tags: [], scaleMin: 1, scaleMax: 1, feedReaction: false } : state.fish[index]; editingIndex = index; editingType = "fish";
@@ -966,6 +1039,7 @@
 					try {
 						const form = new FormData();
 						form.append("file", file);
+						form.append("role", "fish");   // T17：鱼图只压不缩（保住「同画布同比例」契约，且省 1 次配额）
 						const headers = {};
 						if (adminKey) headers["x-admin-key"] = adminKey;
 						const response = await fetch(`${API_BASE}/admin/assets/image`, { method: "POST", body: form, headers });
@@ -978,9 +1052,13 @@
 						showErrorBanner(`${message} —— 图片「${file.name}」没有加入鱼种资源，请先解决云存储问题再重新上传。`);
 						continue;
 					}
+						// T18：压缩提示独立通道 —— 标红但不阻断（图已照常上传）。
+						if (body.data.image && body.data.image.warning) showUploadWarn("fishResourceUpload", body.data.image.warning);
 						const slot = FISH_SLOTS[Math.min(startIndex + i, FISH_SLOTS.length - 1)] || "body";
 						addFishResource(slot, body.data.url || body.data.path);
-						showToast(`已上传 ${file.name}（${slot}）`);
+						const img = body.data.image;
+						const saved = img && img.compressed && img.savedPercent > 0 ? `，${Math.round(img.originalSize/1024)}KB → ${Math.round(img.size/1024)}KB（-${img.savedPercent}%）` : "";
+						showToast(`已上传 ${file.name}（${slot}）${saved}`);
 					} catch (error) { showUploadError("fishResourceUpload", `上传失败：${error.message}（${file.name}）`); }
 				}
 			};
@@ -1122,7 +1200,7 @@
 		function renderEventList() {
 			const filter = listFilters.events;
 			const items = state.events.filter(item => recordMatches(item, filter));
-			const rows = items.map(item => { const index = state.events.indexOf(item); return `<tr><td><div class="item-name">${esc(item.name)}</div><div class="item-id">${esc(item.id)}</div><div class="item-id">玩家效果：${esc(eventMessagePreview(item.message || "未填写文案"))}</div>${notesHtml(eventNotes(item))}</td><td>${esc(eventHandlerLabel(item.handler))}${item.relatedTag ? `<div class="item-id">关联标签：${esc(item.relatedTag)}</div>` : ""}</td><td>${esc(eventTypeLabel(item.eventType))}</td><td>${describeEventRule(item)}</td><td>${esc(String(item.cooldownMinutes))} 分钟 / ${esc(String(item.maxPerDay))} 次</td><td>${item.enabled === false ? "停用" : "启用"}</td><td><span class="badge ${item.dirty ? "draft" : "published"}">${item.dirty ? "有修改，待发布" : "已发布"}</span><br><span class="hint">${formatUpdatedAt(item.updatedAt)}</span></td><td><div class="actions"><button class="link-button edit-event" data-index="${index}">编辑</button>${item.dirty ? `<button class="link-button view-diff" data-index="${index}">查看差异</button>` : ""}<button class="button publish" data-index="${index}" ${item.dirty ? "" : "disabled"}>发布</button><button class="link-button delete delete-event" data-index="${index}">删除</button></div></td></tr>`; }).join("");
+			const rows = items.map(item => { const index = state.events.indexOf(item); return `<tr><td><div class="item-name">${esc(item.name)}</div><div class="item-id">${esc(item.id)}</div><div class="item-id">玩家效果：${esc(eventMessagePreview(item.message || "未填写文案"))}</div>${notesHtml(eventNotes(item))}</td><td>${esc(eventHandlerLabel(item.handler))}${item.relatedTag ? `<div class="item-id">关联标签：${esc(item.relatedTag)}</div>` : ""}</td><td>${esc(eventTypeLabel(item.eventType))}</td><td>${describeEventRule(item)}</td><td>${esc(String(item.cooldownMinutes))} 分钟 / ${esc(String(item.maxPerDay))} 次</td><td>${item.enabled === false ? "停用" : "启用"}</td><td>${stateBadge(item)}<br><span class="hint">${formatUpdatedAt(item.updatedAt)}</span></td><td><div class="actions"><button class="link-button edit-event" data-index="${index}">编辑</button>${item.dirty ? `<button class="link-button view-diff" data-index="${index}">查看差异</button>` : ""}<button class="button publish" data-index="${index}" ${publishDisabled(item)}>${publishLabel(item)}</button><button class="link-button retire retire-event" data-index="${index}" ${retireDisabled(item)}>下架</button></div></td></tr>`; }).join("");
 			main.innerHTML = pageHeader("EVENT CONFIG", "事件设置", "配置随机事件的触发条件与玩家文案。保存后会形成草稿，确认发布后才会生效。", `<button class="button primary" id="newEvent">＋ 新建事件</button>`) + `<section class="panel"><div class="panel-head"><div><h3>事件列表</h3><div class="list-summary"><span class="summary-chip"><strong>${state.events.length}</strong> 个事件</span><span class="summary-chip"><strong>${state.events.filter(item => item.dirty).length}</strong> 个待发布</span><span class="summary-chip"><strong>${state.events.filter(item => item.enabled !== false).length}</strong> 个已启用</span></div></div></div>${savedBannerHtml("events", "id")}${listFilterHtml("events", "搜索事件名称、编号或处理器")}${items.length ? `<div class="table-wrap"><table><thead><tr><th>事件 / 玩家效果</th><th>处理方式</th><th>触发方式</th><th>触发时机</th><th>冷却 / 每日上限</th><th>启用</th><th>发布状态 / 最近修改</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="empty">${state.events.length ? "没有匹配的事件，试试清空筛选条件" : "还没有事件，点右上角新建。"}</p>`}</section>`;
 			document.getElementById("newEvent").onclick = () => renderEventForm();
 			bindListFilter("events", renderEventList);
@@ -1131,7 +1209,7 @@
 			document.querySelectorAll(".edit-event").forEach(button => button.onclick = () => renderEventForm(Number(button.dataset.index)));
 			document.querySelectorAll(".view-diff").forEach(button => button.onclick = () => { const item = state.events[Number(button.dataset.index)]; showDiffDialog(item, item.name || item.id); });
 			document.querySelectorAll(".publish").forEach(button => button.onclick = () => publishItem("events", Number(button.dataset.index)));
-			document.querySelectorAll(".delete-event").forEach(button => button.onclick = async () => { if (!confirm("确定要删除这个事件吗？")) return; const item = state.events[Number(button.dataset.index)]; try { await apiRequest(`/admin/events/${encodeURIComponent(item.id)}`, { method: "DELETE" }); state.events.splice(Number(button.dataset.index), 1); renderEventList(); } catch (error) { showToast(`删除失败：${error.message}`); } });
+			document.querySelectorAll(".retire-event").forEach(button => button.onclick = async () => { const item = state.events[Number(button.dataset.index)]; if (!item) return; if (!confirm(`确定下架「${item.name || item.id}」吗？\n\n下架后玩家端立刻看不到它，配置仍然留在后台，随时可以重新上架。`)) return; try { await apiRequest(`/admin/events/${encodeURIComponent(item.id)}`, { method: "DELETE" }); lastSaved = null; await reloadType("events"); showToast("已下架，玩家端不再显示"); } catch (error) { showToast(`下架失败：${error.message}`); } renderEventList(); });
 		}
 		function renderEventForm(index = null) {
 			const item = index === null ? defaultEventItem() : state.events[index];
@@ -1889,7 +1967,7 @@
 			const bubbles = Number(result.bubbles) || 0;
 			const items = result.items || [];
 			const what = [
-				bubbles > 0 ? `${bubbles} 🫧` : "",
+				bubbles > 0 ? bubHtml(`${bubbles} 🫧`) : "",
 				...items.map(item => `${esc(item.name || item.id)} ×${item.qty}`)
 			].filter(Boolean).join("、");
 			const targets = result.targets || [];
@@ -2001,7 +2079,7 @@
 				const grants = body.data.grants || [];
 				box.innerHTML = grants.length
 					? `<div class="table-wrap"><table><thead><tr><th>时间</th><th>玩家</th><th>内容</th><th>理由</th><th>状态</th></tr></thead><tbody>${grants.map(g => {
-						const what = [g.bubbles > 0 ? `${g.bubbles} 🫧` : "", ...(g.items || []).map(item => `${esc(item.id)} ×${item.qty}`)].filter(Boolean).join("、");
+						const what = [g.bubbles > 0 ? bubHtml(`${g.bubbles} 🫧`) : "", ...(g.items || []).map(item => `${esc(item.id)} ×${item.qty}`)].filter(Boolean).join("、");
 						return `<tr><td>${g.createdAt ? new Date(g.createdAt).toLocaleString() : "—"}</td><td class="item-id">${esc(g.userId)}</td><td>${what || "—"}</td><td>${esc(g.reason)}</td><td>${g.claimed ? `<span class="badge published">已领取</span>` : `<span class="badge">待领取</span>`}</td></tr>`;
 					}).join("")}</tbody></table></div>`
 					: `<div class="empty"><strong>还没有发放记录</strong>发出去的奖励会显示在这里</div>`;

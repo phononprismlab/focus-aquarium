@@ -78,18 +78,23 @@
   } catch (_) { /* 兜底失败也不能把页面搞崩 */ }
 })();
 </script>
-<title>鱼儿乐水族 · V0.2</title>
+<title>鱼儿乐水族 · 专注养鱼</title>
 <style>
   /* ===== v3 设计令牌：旧电脑水族馆 × 2D 游戏素材 × 高饱和复古 =====
      照抄 design/ui-prototype-v10.html（其令牌出自 design-tokens-v3.md 附录 A）。
      铁律：零外链 —— 颗粒是内联 data-uri SVG，字体走系统等线无衬线，无手写体。 */
   :root {
-    --screen-blue-50:#e3f1ff; --screen-blue-200:#9ccdff; --screen-blue-400:#3a9bff;
-    --screen-blue-500:#0a84ff; --screen-blue-600:#0a6ae0; --screen-blue-700:#0a4db8;
-    --screen-blue-900:#06295e;
+    /* 重点色（2026-10-07 降饱和）：色相不动，饱和度从 92~100% 压到 50~70%。
+       白字对比度不降（-500 上白字仍是 3.6:1 一档）。 */
+    --screen-blue-50:#e5f1fa; --screen-blue-200:#accfec; --screen-blue-400:#64a4d8;
+    --screen-blue-500:#478bc2; --screen-blue-600:#3876a8; --screen-blue-700:#275b86;
+    --screen-blue-900:#172e45;
+    /* 🔴 半透明重点色的唯一来源：与 --screen-blue-500 同值（71,139,194）。
+       要改重点色只改这两行 —— 别再写死 rgba(var(--accent-rgb),…) 那种硬编码。 */
+    --accent-rgb:71,139,194;
     --water-top:#cfe8ff; --water-upper:#5fb0ff; --water-mid:#1a86ff;
-    --water-deep:#0a4db8; --water-sand:#f0e7d2;
-    --teal:#16d6b4; --coral-red:#ff5a45; --yellow:#ffce2b; --beige:#f5efe1;
+    --water-deep:#275b86; --water-sand:#f0e7d2;   /* water-* 是 0 引用的死令牌，只有 deep 跟着重点色降饱和 */
+    --teal:#419f90; --coral-red:#d8695a; --yellow:#e2c050; --beige:#f5efe1;
     --ink:#06243f; --ink-soft:#0c3a63;
     --text-on-water:#eef6ff; --text-on-water-dim:rgba(238,246,255,0.74);
     --stroke-line:#07304f;
@@ -97,7 +102,8 @@
     --shell-border:rgba(190,225,255,0.50);
     --shell-edge:inset 0 1px 0 rgba(200,230,255,0.45);
     --shell-shadow:0 6px 20px rgba(4,22,48,0.38);
-    --sem-ok:#16d6b4; --sem-warn:#ffce2b; --sem-stop:#ff5a45;
+    /* 死令牌改成别名，免得以后有人顺手抄一个已经过时的硬值 */
+    --sem-ok:var(--teal); --sem-warn:var(--yellow); --sem-stop:var(--coral-red);
     --font-ui:"Tahoma","Verdana","Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
     --font-num:"Tahoma","Verdana","Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
     --space-2xs:4px; --space-xs:8px; --space-sm:12px; --space-md:16px;
@@ -118,18 +124,21 @@
   .app {
     width: 100vw; 
     height: 100vh;
+    /* T10：列向 flex —— 顶栏 / 缸 / 底栏 各占一段，缸体不再被 fixed 顶栏盖住顶部。 */
     display: flex; 
-    align-items: center; 
-    justify-content: center;
+    flex-direction: column;
     padding: 0;
   }
 
   /* 水缸本体沿用 V0.2 的治愈水色（dominik 2026-09-25 定：水缸/鱼/沙/草/背景
-     全部保持旧版，v3 令牌只用于外壳 UI —— 顶栏与商店抽屉）。 */
+     全部保持旧版，v3 令牌只用于外壳 UI —— 顶栏与商店抽屉）。
+     🔴 高度交给 flex（flex:1 1 auto + min-height:0），不能再用 height:100% ——
+     列向 flex 里它会和顶栏/底栏抢高度，把两栏挤出屏幕。 */
   .tank {
     position: relative;
+    flex: 1 1 auto; min-height: 0;
     width: 100%;
-    height: 100%;
+    height: auto;
     overflow: hidden;
     background: linear-gradient(to bottom, #8bcbd9 0%, #9dd4dc 66%, #a9d6ce 100%);
     isolation: isolate;
@@ -150,7 +159,8 @@
     position: absolute; inset: 0; z-index: 0;
     background: linear-gradient(to bottom, #8bcbd9 0%, #9dd4dc 66%, #a9d6ce 100%);
     background-size: cover;
-    background-position: center;
+    /* 实际生效的是 renderAquarium 写的 inline 简写（center top / cover）；这里只是兜底。 */
+    background-position: center top;
     pointer-events: none;
   }
 
@@ -168,18 +178,18 @@
        ② **不要硬边** —— 一律用大半径 radial-gradient（透明停在 70% 以后），
           坚决不用 repeating-* 渐变（那玩意儿天生带条纹边）；
        ③ **要「流动」不要「闪」** —— 波光靠 transform 横移（只走合成，不 repaint），
-          呼吸靠 opacity；节拍 11s / 13s，与圆泡的 bubbleFloat(4s) 互质，不会同拍。
+          呼吸靠 opacity；节拍 7s / 8s / 11s 两两互质，也都不与圆泡的 bubbleFloat(4s) 同拍。
      层级 40：在鱼(5)之上（光要落在鱼身上）、毛玻璃罩(50)之下（没专注时被糊住，不抢戏）。
-     强度整体压得很低（最亮处 ~0.30 alpha）：这是「空气感」，不是一盏灯。 */
+     T16（2026-10-07）：实测「不流动」是假象 —— 动画都在跑，是幅度太小 + 最亮段被旧 fixed
+     顶栏吃掉 ~72%。顶栏搬出缸体后光斑回收缸顶，alpha 整体 ×1.5、呼吸对比拉大、周期压短。 */
   .light-flow {
     position: absolute; inset: 0; z-index: 40;
     pointer-events: none;
     overflow: hidden;
     /* 光要「加」上去、不是「盖」上去 —— 否则浅色背景上会变成一层白雾。 */
     mix-blend-mode: screen;
-    /* ⚠️ 顶栏是 fixed 的、盖住缸顶约 52px（≈6.5%）→ 光斑的「最亮处」不能停在
-       y=0，否则整条光带最亮的那一截全被顶栏吃掉了，露出来的只剩尾巴。
-       所以纵向位置整体下移到 7%~14%，峰值正好落在顶栏下沿。 */
+    /* T10 之后顶栏不再压缸顶 → 光斑的「最亮处」可以回到 y=0~8%（旧版为躲 fixed
+       顶栏被迫下移到 7%~14%，最亮一整段被盖掉）。 */
     -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0,0,0,.86) 12%, rgba(0,0,0,.58) 32%, rgba(0,0,0,.30) 54%, rgba(0,0,0,.12) 74%, transparent 92%);
     mask-image: linear-gradient(to bottom, #000 0%, rgba(0,0,0,.86) 12%, rgba(0,0,0,.58) 32%, rgba(0,0,0,.30) 54%, rgba(0,0,0,.12) 74%, transparent 92%);
   }
@@ -188,54 +198,55 @@
      用 translateX 而不是 background-position：前者只走合成，后者每帧 repaint。
      几何是算过的：层 left:-50% / width:200% → 缸的可见区 = 层内 25%~75%。
      所以光斑全部落在层内 32%~69.5%（= 缸的 14%~89%），左右各留 14% / 11% 空白，
-     横移 ±4%（层宽，= ±8% 缸宽）时斑也不会从缸边「跳」出来。
+     横移 ±7%（层宽，= ±14% 缸宽）时斑也不会从缸边「跳」出来。
      斑与斑横向重叠约一半（半轴 7% 层宽 vs 间距 7.5%）→ 连成一条有起伏的带，
      看得见「在动」，但看不出「几个球」。纵向位置刻意错开，避免排成一条直线。 */
   .light-shimmer {
     position: absolute; top: 0; left: -50%; width: 200%; height: 100%;
     background:
-      radial-gradient(ellipse 7%   4.4% at 32%   8%,  rgba(255,255,255,.24), transparent 78%),
-      radial-gradient(ellipse 5.5% 3.6% at 39.5% 13%, rgba(255,255,255,.18), transparent 78%),
-      radial-gradient(ellipse 7.5% 4.6% at 47%   7%,  rgba(226,248,255,.22), transparent 80%),
-      radial-gradient(ellipse 5.8% 3.8% at 54.5% 14%, rgba(255,255,255,.17), transparent 78%),
-      radial-gradient(ellipse 7.2% 4.4% at 62%   9%,  rgba(226,248,255,.21), transparent 80%),
-      radial-gradient(ellipse 6%   4%   at 69.5% 13%, rgba(255,255,255,.17), transparent 78%);
-    animation: lightDrift 11s linear infinite alternate;
+      radial-gradient(ellipse 7%   4.4% at 32%   2%,  rgba(255,255,255,.36), transparent 78%),
+      radial-gradient(ellipse 5.5% 3.6% at 39.5% 7%, rgba(255,255,255,.27), transparent 78%),
+      radial-gradient(ellipse 7.5% 4.6% at 47%   1%,  rgba(226,248,255,.33), transparent 80%),
+      radial-gradient(ellipse 5.8% 3.8% at 54.5% 8%, rgba(255,255,255,.26), transparent 78%),
+      radial-gradient(ellipse 7.2% 4.4% at 62%   3%,  rgba(226,248,255,.32), transparent 80%),
+      radial-gradient(ellipse 6%   4%   at 69.5% 7%, rgba(255,255,255,.26), transparent 78%);
+    animation: lightDrift 7s linear infinite alternate;
   }
   @keyframes lightDrift {
-    from { transform: translateX(-4%); }
-    to   { transform: translateX(4%); }
+    from { transform: translateX(-7%); }
+    to   { transform: translateX(7%); }
   }
 
-  /* A2｜第二组波光，**反方向、更慢**（17s）。
+  /* A2｜第二组波光，**反方向、更慢**（11s）。
      只有一组斑在动时，眼睛很容易把它看成「一块雾在平移」；
      两组速度不同、方向相反的光斑叠在一起，互相错开又重合 ——
      这才是水面的感觉（真实的波光就是好几层不同节奏的水纹叠出来的）。
-     周期 11 / 13 / 17 两两互质，也都不与圆泡的 4s 同拍。 */
+     周期 7 / 8 / 11 两两互质，也都不与圆泡的 4s 同拍。 */
   .light-shimmer.alt {
     background:
-      radial-gradient(ellipse 6.2% 3.8% at 34%   11%, rgba(255,255,255,.16), transparent 80%),
-      radial-gradient(ellipse 8%   4.2% at 43%   6%,  rgba(226,248,255,.15), transparent 80%),
-      radial-gradient(ellipse 5.4% 3.4% at 52%   12%, rgba(255,255,255,.14), transparent 80%),
-      radial-gradient(ellipse 7.6% 4.4% at 61%   7%,  rgba(226,248,255,.15), transparent 80%),
-      radial-gradient(ellipse 5.8% 3.6% at 68%   12%, rgba(255,255,255,.13), transparent 80%);
-    animation: lightDriftAlt 17s linear infinite alternate;
+      radial-gradient(ellipse 6.2% 3.8% at 34%   5%, rgba(255,255,255,.24), transparent 80%),
+      radial-gradient(ellipse 8%   4.2% at 43%   1%,  rgba(226,248,255,.23), transparent 80%),
+      radial-gradient(ellipse 5.4% 3.4% at 52%   6%, rgba(255,255,255,.21), transparent 80%),
+      radial-gradient(ellipse 7.6% 4.4% at 61%   1%,  rgba(226,248,255,.23), transparent 80%),
+      radial-gradient(ellipse 5.8% 3.6% at 68%   6%, rgba(255,255,255,.20), transparent 80%);
+    animation: lightDriftAlt 11s linear infinite alternate;
   }
   @keyframes lightDriftAlt {
-    from { transform: translateX(4%); }
-    to   { transform: translateX(-4%); }
+    from { transform: translateX(7%); }
+    to   { transform: translateX(-7%); }
   }
 
   /* C｜顶部呼吸：一团从缸顶往下漫开的白光，整层明暗起伏。
-     径向中心放在 50% 2%（几乎就在缸沿上）→ 缸顶最亮、往下自然衰减，没有起止边。 */
+     径向中心放在 50% 1%（就在缸沿上）→ 缸顶最亮、往下自然衰减，没有起止边。
+     T16：底部 opacity .55→.38 拉大明暗对比；渐变峰值 .30→.42；13s→8s。 */
   .light-breath {
     position: absolute; inset: 0;
     background:
-      radial-gradient(ellipse 84% 62% at 50% 2%, rgba(255,255,255,.30), rgba(196,238,255,.14) 50%, transparent 84%);
-    animation: lightBreath 13s ease-in-out infinite;
+      radial-gradient(ellipse 84% 62% at 50% 1%, rgba(255,255,255,.42), rgba(196,238,255,.14) 50%, transparent 84%);
+    animation: lightBreath 8s ease-in-out infinite;
   }
   @keyframes lightBreath {
-    0%, 100% { opacity: .55; }
+    0%, 100% { opacity: .38; }
     50%      { opacity: 1; }
   }
 
@@ -348,7 +359,7 @@
   }
 
   .sand {
-    position: absolute; left: 0; right: 0; bottom: 0; height: 19%; z-index: 2;
+    position: absolute; left: 0; right: 0; bottom: 0; height: 12.5%; z-index: 2;
     background:
       radial-gradient(circle at 15% 35%, rgba(151,121,68,.10) 0 1px, transparent 2px),
       radial-gradient(circle at 72% 65%, rgba(151,121,68,.08) 0 1px, transparent 2px),
@@ -356,7 +367,7 @@
     background-size: 38px 31px, 47px 39px, auto;
   }
   /* 用后台上传的沙子图时整层拉到整缸大小：图按 `cover` 铺满（JS 写 inline background）。
-     规约（2026-10-06 定稿）：素材按「整图 = 整缸大小、沙画在图片底部 20%」绘制，
+     规约（2026-10-06 定稿，2026-10-07 调整）：素材按「整图 = 整缸大小、沙画在图片底部 12.5%」绘制，
      `cover` 保证图永远盖满整缸（取宽/高两方向更大的缩放比），超出的部分以中轴为基准裁掉。
      常规 16:10 缸里按高度撑满 → 沙条带正好落在缸底 20%；超宽屏按宽度撑满 → 底边对齐沙完整。
      上方透明区让水色/背景透出来。层级不变（z-index:2）—— 在背景层之上、装饰层之下。 */
@@ -544,8 +555,8 @@
     transition: transform .12s ease, background-color .15s ease;
     -webkit-tap-highlight-color: transparent;
   }
-  .start:hover, .end:hover { background: rgba(10,132,255,0.08); transform: scale(1.05); }
-  .start:active, .end:active { background: rgba(10,132,255,0.16); transform: scale(0.96); }
+  .start:hover, .end:hover { background: rgba(var(--accent-rgb),0.08); transform: scale(1.05); }
+  .start:active, .end:active { background: rgba(var(--accent-rgb),0.16); transform: scale(0.96); }
   .end {
     /* 复用 .start 的扁平样式；未专注时必须藏起来（同时露出来玩家不知道点哪个）。
        专注中由 JS 写 inline display = inline-flex 打开（inline 优先级高于这条）。 */
@@ -574,24 +585,28 @@
   .modal-card { width: min(340px, calc(100vw - 40px)); padding: 27px; border-radius: 22px; background: #f6fbfb; text-align: center; }
   .modal-actions { display: flex; gap: 10px; justify-content: center; margin-top: 20px; }
   .modal-actions button { border: 0; border-radius: 11px; padding: 10px 18px; font-size: 15px; cursor: pointer; }
+  /* 结束确认弹窗的副行：剩余时间 + 可得泡泡（T05）。数字用 tabular-nums 不跳动。 */
+  .modal-sub { margin-top: 8px; font-size: 13px; line-height: 1.65; color: #5a7378; }
+  .modal-sub b { color: var(--screen-blue-700); font-variant-numeric: tabular-nums; }
   /* 旧青绿（#e1eeee / #5a8588）已统一换成规定的蓝：次级按钮用浅蓝底，主按钮用蓝 500。 */
   .continue { background: var(--screen-blue-50); color: var(--screen-blue-700); }
   .confirm { background: var(--screen-blue-500); color: white; }
 
   /* ===== 「关于」区块（设置抽屉内）：合规入口 + 品牌/打赏导航 hub ===== */
-  .about-block { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--shell-border); }
+  .about-block { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--shell-border); }
   .about-title { font-size: 12px; letter-spacing: .12em; color: var(--text-on-water-dim); margin-bottom: 8px; }
   .about-list { display: flex; flex-direction: column; gap: 2px; }
   .about-row {
     display: flex; align-items: center; justify-content: space-between;
-    width: 100%; padding: 12px 6px; border: 0; border-radius: 10px;
+    width: 100%; padding: 10px 6px; border: 0; border-radius: 10px;
     background: transparent; color: var(--text-on-water);
     font: 600 14px/1.4 var(--font-ui); text-align: left; cursor: pointer;
     transition: background-color .15s ease;
   }
-  .about-row:hover { background: rgba(10,132,255,0.10); }
-  .about-row:active { background: rgba(10,132,255,0.18); }
+  .about-row:hover { background: rgba(var(--accent-rgb),0.10); }
+  .about-row:active { background: rgba(var(--accent-rgb),0.18); }
   .about-row .chev { color: var(--text-on-water-dim); font-size: 13px; }
+  #settingsDrawer .v02-shop-content{ padding-bottom:calc(var(--space-lg) + env(safe-area-inset-bottom, 0px)); }
   .about-note { font-size: 11px; color: var(--text-on-water-dim); margin-top: 10px; line-height: 1.6; }
 
   /* ===== 设置项：开关行 ===== */
@@ -687,7 +702,7 @@
   }
   .completion-flash.show { opacity:1; pointer-events:auto; animation:none; }
   .completion-main { font-size:clamp(22px,4vw,30px); font-weight:800; letter-spacing:.08em; color:#24353a; }
-  .completion-sub { margin-top:7px; font-size:12px; color:#5a7378; }
+  .completion-sub { margin-top:9px; font-size:15px; font-weight:600; color:#3d5559; line-height:1.6; }
   .timer.complete-pulse { animation:completionPulse 1.05s ease-in-out 3; }
   @keyframes completionFlash {
     0%{opacity:0;transform:translate(-50%,-50%) scale(.82)}
@@ -787,6 +802,8 @@
 .audio-slider-label { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; font-size: 12px; letter-spacing: 0.06em; }
 .audio-slider-label span:last-child { opacity: 0.78; font-variant-numeric: tabular-nums; }
 .audio-settings input[type="range"] { display: block; width: 100%; height: 4px; margin: 0; accent-color: #fff; cursor: pointer; }
+.audio-muted-note { display: none; margin-bottom: 12px; font-size: 12px; line-height: 1.5; color: var(--text-on-water-dim); }
+.audio-settings.muted-by-master .audio-muted-note { display: block; }
 
 /* 3. 账号同步（沿用调音面板的视觉，不另起一套设计） */
 .account-block { margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.28); }
@@ -815,41 +832,80 @@
 
 
 /* ===== v0.2 商店与数据系统 ===== */
-/* 顶栏：按原型 .topbar 的通栏壳（浮水半透深蓝 + 底部一线）。
-   左：泡泡数 + 装点入口；右侧空间留给音频控件（它是独立元素，定位到栏内）。 */
+/* 顶栏 = 缸盖（T10/T11）：搬出 .tank 后改为普通流式通栏（不再 fixed、不再压缸顶），
+   质感按「鱼缸盖」做 —— 盖顶受光、盖底转折、唇边高光；::after 是盖子投在水面上的影
+   （有厚度，不是贴纸）。两条影都 pointer-events:none，不吃缸里的投喂手势。 */
 .v02-topbar{
-  position:fixed;left:0;right:0;top:0;z-index:1000;
+  position:relative;flex:0 0 auto;z-index:1000;
   display:flex;align-items:center;justify-content:space-between;gap:var(--space-md);
   min-height:52px;padding:10px 16px;
-  background:var(--shell-bg);border-bottom:1px solid var(--shell-border);
-  box-shadow:var(--shell-edge);
-  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  background:linear-gradient(to bottom,rgba(4,24,50,0.94) 0%,rgba(9,42,80,0.86) 58%,rgba(9,42,80,0.72) 100%);
+  border-bottom:1px solid rgba(190,225,255,0.55);
+  box-shadow:inset 0 1px 0 rgba(200,230,255,0.45),inset 0 -1px 0 rgba(4,22,48,0.55),0 2px 0 rgba(255,255,255,0.10);
   font-family:var(--font-ui);color:var(--text-on-water);
 }
+.v02-topbar::after{
+  content:"";position:absolute;left:0;right:0;top:100%;height:16px;
+  background:linear-gradient(to bottom,rgba(4,22,48,0.34),transparent);
+  pointer-events:none;
+}
 /* 专注聚合状态条：只读展示「今日 / 累计」，不暴露逐条明细。
-   位置：页面偏底部（dominik 2026-09-25 二次调整）—— 中段只留计时器，这块是「扫一眼就行」的
-   信息，贴底最不碍事，也不会像贴计时器那样被 bubbleFloat 的浮动幅度带得忽上忽下。
-   ⚠️ 不再写 top —— fixed/absolute 同时写 top 和 bottom 时 top 会赢，贴底就会失效。 */
-.v02-focus{position:absolute;left:50%;transform:translateX(-50%);bottom:max(16px,3.5vh);z-index:1000;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 13px;border:1px solid var(--shell-border);background:var(--shell-bg);box-shadow:var(--shell-edge),var(--shell-shadow);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-radius:var(--radius-lg);color:var(--text-on-water);font-family:var(--font-ui);line-height:1.4;pointer-events:none;}
+   T10/T12 搬家：从缸内绝对定位改为底栏里的普通流式子项，由底栏 flex 居中。
+   ⚠️ 去掉 position/left/transform/bottom/z-index；
+   ⚠️ .v02-focus{ 这条规则必须保留且仍在横屏断点之前（player-tank-ui.test.js:280），
+       且不能出现在 520px 断点里（focus-status-position.test.js）。 */
+.v02-focus{display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--text-on-water);font-family:var(--font-ui);line-height:1.4;pointer-events:none;}
 .v02-focus[hidden]{display:none;}
 .v02-focus .focus-today{font-size:12px;letter-spacing:.04em;font-weight:700;}
 .v02-focus .focus-total{font-size:11px;letter-spacing:.04em;opacity:.85;}
+/* 无账号（建号失败 / FISHTANK_DISABLE_ACCOUNT）时的占位：说明 + 可点重试。
+   🔴 站内没有登录/注册流程 —— 账号是 ensureAccount() 静默建号的，「去登录」不存在。
+   可点击，所以不继承 .v02-focus 的 pointer-events:none。 */
+.v02-focus-hint{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-on-water-dim);}
+.v02-focus-hint[hidden]{display:none;}
+.v02-focus-hint button{
+  border:1px solid var(--shell-border);border-radius:var(--radius-sm);
+  background:rgba(var(--accent-rgb),0.30);color:var(--text-on-water);
+  font:600 12px var(--font-ui);padding:4px 12px;cursor:pointer;
+}
+/* 底栏 = 缸底座（T10/T11）：与顶栏同一套「咬合」质感，通栏、无圆角。
+   ::before 是底座往缸里投的影 —— pointer-events:none，不吃投喂手势。 */
+.v02-bottombar{
+  position:relative;flex:0 0 auto;z-index:1000;
+  min-height:56px;padding:9px 16px;
+  display:flex;align-items:center;justify-content:center;gap:var(--space-md);
+  background:linear-gradient(to bottom,rgba(9,42,80,0.72) 0%,rgba(9,42,80,0.88) 42%,rgba(4,24,50,0.96) 100%);
+  border-top:1px solid rgba(190,225,255,0.55);
+  box-shadow:inset 0 1px 0 rgba(200,230,255,0.42),0 -2px 0 rgba(255,255,255,0.08);
+  font-family:var(--font-ui);color:var(--text-on-water);
+}
+.v02-bottombar::before{
+  content:"";position:absolute;left:0;right:0;bottom:100%;height:16px;
+  background:linear-gradient(to top,rgba(4,22,48,0.34),transparent);
+  pointer-events:none;
+}
 /* 左：只有泡泡数（原型 .topbar .bubble-count，无外壳，数字等宽不跳动）。 */
 .v02-bubbles{
   display:inline-flex;align-items:center;gap:4px;
   font-family:var(--font-num);font-weight:700;font-size:14px;
   font-variant-numeric:tabular-nums;letter-spacing:.04em;
   color:var(--text-on-water);
-  /* 窄屏下「🫧 3000」会在 emoji 和数字之间断行，把顶栏撑成两行（360px 实测）。
+  /* 窄屏下「泡泡 3000」会在符号和数字之间断行，把顶栏撑成两行（360px 实测）。
      泡泡数是顶栏里最不能换行的东西，直接锁死。 */
   white-space:nowrap;flex:0 0 auto;
+}
+/* 货币符号自绘（T09）：尺寸跟着字号走，颜色继承当前文字色。
+   vertical-align 是基线微调值，不同字号下会略有偏差（11/12/13/14/18px 都看过）。 */
+.ic-bub{
+  width:1em;height:1em;display:inline-block;vertical-align:-0.14em;
+  flex:0 0 auto;color:inherit;
 }
 /* 右：三个直接可见入口，点哪个开哪个右侧抽屉（原型 .top-entries）。 */
 .v02-topbar-entries{display:flex;align-items:center;gap:8px;}
 .v02-top-entry{
   font-family:var(--font-ui);font-size:13px;font-weight:600;letter-spacing:.04em;
   color:var(--text-on-water);
-  background:rgba(10,132,255,0.30);
+  background:rgba(var(--accent-rgb),0.30);
   border:1px solid var(--shell-border);
   border-radius:var(--radius-sm);
   padding:6px 14px;
@@ -857,7 +913,7 @@
   cursor:pointer;
   transition:background .2s ease,transform .1s ease;
 }
-.v02-top-entry:hover{background:rgba(10,132,255,0.50)}
+.v02-top-entry:hover{background:rgba(var(--accent-rgb),0.50)}
 .v02-top-entry:active{transform:scale(0.97)}
 .v02-top-entry.active{background:var(--screen-blue-500);border-color:var(--shell-border);}
 /* 顶栏公告图标：只在后台发布了公告时出现，常驻在标题右侧，
@@ -936,12 +992,26 @@ body.fa-maintenance-on .app{pointer-events:none;}
   cursor:pointer;box-shadow:var(--shell-edge);
 }
 .v02-close:hover{background:rgba(255,255,255,0.22)}
-.v02-tabs{display:flex;gap:6px;flex-wrap:wrap;}
+.v02-tabs{
+  display:flex; gap:4px;
+  flex-wrap:nowrap;
+  overflow-x:auto; overflow-y:hidden;
+  margin:0 calc(-1 * var(--space-lg));
+  padding:0 var(--space-lg);
+  scrollbar-width:none; -ms-overflow-style:none;
+  -webkit-overflow-scrolling:touch;
+}
 .v02-tab{
+  flex:0 0 auto;
   font-family:var(--font-ui);font-size:11px;font-weight:700;letter-spacing:.06em;
-  padding:6px 11px;border-radius:var(--radius-xs);
+  padding:6px 9px;border-radius:var(--radius-xs);
   background:transparent;color:var(--text-on-water-dim);border:1px solid transparent;cursor:pointer;
   transition:background .15s ease;
+}
+.v02-tabs::-webkit-scrollbar{ display:none; }
+.v02-tabs.is-scrollable{
+  mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent);
+  -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent);
 }
 .v02-tab:hover{background:rgba(255,255,255,0.10)}
 .v02-tab.active{background:var(--screen-blue-500);color:#fff;border-color:var(--shell-border);}
@@ -953,10 +1023,10 @@ body.fa-maintenance-on .app{pointer-events:none;}
   /* 一行两个：440px 的抽屉里放三列卡片太挤（预览图被压成小方块），
      两列每列约 190px，预览图和名字都看得清。 */
   .v02-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-sm);}
-.v02-item{border:1px solid var(--shell-border);border-radius:var(--radius-md);padding:var(--space-sm);background:rgba(10,132,255,0.14);display:flex;flex-direction:column;gap:6px;transition:border-color .15s ease,transform .1s ease,background .15s ease;}
-.v02-item:hover{transform:translateY(-2px);background:rgba(10,132,255,0.22)}
+.v02-item{border:1px solid var(--shell-border);border-radius:var(--radius-md);padding:var(--space-sm);background:rgba(var(--accent-rgb),0.14);display:flex;flex-direction:column;gap:6px;transition:border-color .15s ease,transform .1s ease,background .15s ease;}
+.v02-item:hover{transform:translateY(-2px);background:rgba(var(--accent-rgb),0.22)}
 .v02-preview{height:96px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;overflow:hidden;background:linear-gradient(135deg,#a9dfe8,#d9f2ef);}
-.v02-preview:hover{filter:brightness(1.03);box-shadow:inset 0 0 0 2px rgba(10,132,255,.25)}
+.v02-preview:hover{filter:brightness(1.03);box-shadow:inset 0 0 0 2px rgba(var(--accent-rgb),.25)}
 .v02-preview-fish{font-size:48px;filter:drop-shadow(0 5px 4px rgba(0,0,0,.12));}
 /* object-fit 用 contain：完整显示整张图、绝不裁切（正方形图上下被裁的元凶就是 cover）。
    contain 留出的空白露出的正是这层渐变，而它与 .v02-preview 的底色完全一致 → 留白肉眼看不出来。
@@ -1012,8 +1082,8 @@ body.fa-maintenance-on .app{pointer-events:none;}
 }
 .v02-item-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:4px}.v02-price{font-family:var(--font-num);font-size:12px;color:var(--yellow);font-variant-numeric:tabular-nums}.v02-buy{border:0;border-radius:var(--radius-sm);padding:8px 12px;background:var(--screen-blue-500);color:#fff;cursor:pointer;font-family:inherit}.v02-buy:disabled{background:rgba(190,225,255,.16);color:var(--text-on-water-dim);cursor:not-allowed}.v02-owned{font-size:11px;color:var(--teal);white-space:nowrap}
 .v02-dress,.v02-quantity button{border:0;border-radius:var(--radius-sm);padding:7px 11px;background:var(--screen-blue-500);color:#fff;cursor:pointer;font:700 12px inherit}.v02-dress:disabled{background:rgba(190,225,255,.16);color:var(--text-on-water-dim);cursor:not-allowed}.v02-quantity{display:flex;align-items:center;gap:8px}.v02-quantity button{width:28px;height:28px;padding:0;font-size:17px;line-height:1}.v02-quantity span{min-width:16px;text-align:center;font-weight:700;color:var(--text-on-water)}
-.v02-footer{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex:0 0 auto;padding:var(--space-sm) var(--space-lg);border-top:1px solid var(--shell-border);position:relative;z-index:1}.v02-save{border:0;border-radius:var(--radius-sm);padding:9px 16px;background:var(--screen-blue-500);color:#fff;cursor:pointer;font-family:var(--font-ui);font-weight:600;white-space:nowrap;flex-shrink:0}.v02-cancel{border:1px solid var(--shell-border);border-radius:var(--radius-sm);padding:9px 16px;background:transparent;color:var(--text-on-water-dim);cursor:pointer;font-family:var(--font-ui);white-space:nowrap;flex-shrink:0}.v02-message{margin-right:auto;font-size:12px;color:var(--text-on-water-dim);min-height:18px}
-.v02-settlement{margin-right:auto;min-height:18px;font-size:12px;color:var(--text-on-water-dim);font-family:var(--font-num);font-variant-numeric:tabular-nums}
+.v02-footer{display:flex;flex-direction:column;align-items:stretch;gap:10px;flex:0 0 auto;padding:var(--space-sm) var(--space-lg) calc(var(--space-sm) + env(safe-area-inset-bottom,0px));border-top:1px solid var(--shell-border);position:relative;z-index:1}.v02-footer-actions{display:flex;justify-content:flex-end;gap:10px;}.v02-save{border:0;border-radius:var(--radius-sm);padding:9px 16px;background:var(--screen-blue-500);color:#fff;cursor:pointer;font-family:var(--font-ui);font-weight:600;white-space:nowrap;flex-shrink:0}.v02-cancel{border:1px solid var(--shell-border);border-radius:var(--radius-sm);padding:9px 16px;background:transparent;color:var(--text-on-water-dim);cursor:pointer;font-family:var(--font-ui);white-space:nowrap;flex-shrink:0}.v02-message{margin-right:auto;font-size:12px;color:var(--text-on-water-dim);min-height:18px}
+.v02-settlement{margin-right:0;min-height:0;line-height:1.5;font-size:12px;color:var(--text-on-water-dim);font-family:var(--font-num);font-variant-numeric:tabular-nums}
 .v02-settlement b{color:var(--teal);font-weight:700}
 /* 泡泡不够：当场把差额写出来，别等玩家点了"保存鱼缸"才用一张小票告诉他。 */
 .v02-settlement.short{color:var(--coral-red)}
@@ -1035,7 +1105,7 @@ body.fa-maintenance-on .app{pointer-events:none;}
 .v02-drawer .audio-toggle{
   width:100%;height:36px;font-size:15px;
   border:1px solid var(--shell-border);border-radius:var(--radius-sm);
-  background:rgba(10,132,255,0.30);box-shadow:var(--shell-edge);
+  background:rgba(var(--accent-rgb),0.30);box-shadow:var(--shell-edge);
 }
 .v02-drawer .audio-settings{
   position:static;top:auto;right:auto;z-index:auto;
@@ -1044,6 +1114,23 @@ body.fa-maintenance-on .app{pointer-events:none;}
   opacity:1;transform:none;pointer-events:auto;color:var(--text-on-water);
 }
 .v02-drawer .audio-settings-title{font-size:12px;letter-spacing:.1em;opacity:.8;}
+
+/* T04：三个区块纵向节奏由 content 承担（原来靠 .audio-controls 的 gap:12px） */
+#settingsDrawer .v02-shop-content{display:flex;flex-direction:column;gap:var(--space-sm);}
+/* 关掉 .audio-controls button 对抽屉里其它按钮的污染 */
+#settingsDrawer .audio-controls button{justify-content:initial;}
+#settingsDrawer .about-row{justify-content:space-between;}
+#settingsDrawer .about-row:hover{background:rgba(var(--accent-rgb),0.10);}
+/* 主开关从整宽蓝条改成设置行里的方形开关 */
+#settingsDrawer .audio-toggle{
+  width:44px;height:32px;flex:0 0 auto;
+  border:1px solid var(--shell-border);border-radius:var(--radius-sm);
+  background:rgba(var(--accent-rgb),0.30);box-shadow:var(--shell-edge);
+}
+#settingsDrawer .audio-toggle.muted{background:rgba(190,225,255,0.14);}
+/* 静音时滑杆要看得出来是被静音的 */
+#settingsDrawer .audio-settings.muted-by-master .audio-slider-row{opacity:.5;}
+#settingsDrawer .audio-settings.muted-by-master input[type=range]{cursor:not-allowed;}
 
 /* 账号同步区块搬到深蓝抽屉里要重新校色：原配色是按白色半透面板调的
    （11px + opacity:.75 的字在浅灰底上凑合能看），搬到深蓝壳上几乎全糊。
@@ -1054,20 +1141,26 @@ body.fa-maintenance-on .app{pointer-events:none;}
 .v02-drawer .account-note{color:var(--text-on-water);opacity:.92;}
 .v02-drawer .account-note.ok{color:var(--teal);opacity:1;}
 .v02-drawer .account-note.bad{color:var(--coral-red);opacity:1;}
-.v02-drawer .account-row button{background:rgba(10,132,255,0.22);border-color:var(--shell-border);color:var(--text-on-water);}
-.v02-drawer .account-row button:hover{background:rgba(10,132,255,0.34);}
-.v02-drawer .account-field{background:rgba(10,132,255,0.10);border-color:var(--shell-border);color:var(--text-on-water);}
+.v02-drawer .account-row button{background:rgba(var(--accent-rgb),0.22);border-color:var(--shell-border);color:var(--text-on-water);}
+.v02-drawer .account-row button:hover{background:rgba(var(--accent-rgb),0.34);}
+.v02-drawer .account-row button.account-danger{
+  border-color:rgba(255,176,176,0.62); color:#ffd6d6;
+}
+.v02-drawer .account-row button.account-danger:hover{ background:rgba(217,83,79,0.30); }
+.v02-drawer .account-tip.account-danger-tip{ color:#ffd6d6; }
+.account-block-danger{ border-top-color:rgba(255,176,176,0.42); }
+.v02-drawer .account-field{background:rgba(var(--accent-rgb),0.10);border-color:var(--shell-border);color:var(--text-on-water);}
 
 /* 「我的」资料卡：昵称 + 注册时间 + 鱼数 + 累计专注。
    在云端没登录时整张卡隐藏（与顶栏专注统计一致），没昵称时显示输入框。 */
-.v02-mine-card{padding:var(--space-sm) var(--space-md);margin-bottom:var(--space-md);border:1px solid var(--shell-border);border-radius:var(--radius-md);background:rgba(10,132,255,0.14);}
+.v02-mine-card{padding:var(--space-sm) var(--space-md);margin-bottom:var(--space-md);border:1px solid var(--shell-border);border-radius:var(--radius-md);background:rgba(var(--accent-rgb),0.14);}
 .v02-mine-card[hidden]{display:none;}
 .v02-mine-field{margin-top:var(--space-xs);}
 .v02-mine-field:first-child{margin-top:0;}
 .v02-mine-label{font-family:var(--font-ui);font-size:11px;letter-spacing:.1em;color:var(--text-on-water-dim);margin-bottom:4px;}
 .v02-mine-input{
   width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--shell-border);border-radius:var(--radius-sm);
-  background:rgba(10,132,255,0.10);color:var(--text-on-water);
+  background:rgba(var(--accent-rgb),0.10);color:var(--text-on-water);
   font-family:var(--font-ui);font-size:13px;
 }
 .v02-mine-input::placeholder{color:var(--text-on-water-dim);}
@@ -1088,14 +1181,14 @@ body.fa-maintenance-on .app{pointer-events:none;}
 .v02-log-title{font-family:var(--font-ui);font-size:13px;font-weight:700;letter-spacing:.06em;color:var(--text-on-water);}
 .v02-log-sub{font-family:var(--font-ui);font-size:10px;letter-spacing:.04em;color:var(--text-on-water-dim);margin-top:2px;}
 .v02-log-list{list-style:none;margin:var(--space-sm) 0 0;padding:0;display:flex;flex-direction:column;gap:7px;max-height:230px;overflow-y:auto;scrollbar-width:thin;}
-.v02-log-item{padding:7px 9px;border:1px solid var(--shell-border);border-radius:var(--radius-sm);background:rgba(10,132,255,0.12);}
+.v02-log-item{padding:7px 9px;border:1px solid var(--shell-border);border-radius:var(--radius-sm);background:rgba(var(--accent-rgb),0.12);}
 .v02-log-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;}
 .v02-log-name{font-family:var(--font-ui);font-size:12px;font-weight:700;color:var(--text-on-water);}
 .v02-log-time{font-family:var(--font-num);font-size:10px;color:var(--text-on-water-dim);font-variant-numeric:tabular-nums;white-space:nowrap;}
 .v02-log-delta{font-family:var(--font-num);font-size:11px;color:var(--yellow);margin-top:3px;line-height:1.6;}
 .v02-log-empty{font-family:var(--font-ui);font-size:11px;color:var(--text-on-water-dim);line-height:1.7;padding:7px 2px;}
 /* 这一分类没有商品时的空态（后台清空了该类，或配置没拉到）。 */
-.v02-empty{grid-column:1/-1;padding:34px 18px;text-align:center;font-size:13px;line-height:1.8;color:var(--text-on-water-dim);background:rgba(10,132,255,0.10);border-radius:var(--radius-md);border:1px dashed var(--shell-border)}
+.v02-empty{grid-column:1/-1;padding:34px 18px;text-align:center;font-size:13px;line-height:1.8;color:var(--text-on-water-dim);background:rgba(var(--accent-rgb),0.10);border-radius:var(--radius-md);border:1px dashed var(--shell-border)}
 .v02-item-tip{font-size:11px;color:var(--coral-red);margin-top:6px}
 .v02-quantity button:disabled{background:rgba(190,225,255,.16);color:var(--text-on-water-dim);cursor:not-allowed}
 /* 抽屉宽度恒定（min(440px,92vw)），窄屏靠 92vw 收缩即可，不再按视口砍列数。 */
@@ -1442,7 +1535,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
 /* 事件对鱼缸做了什么，用两枚小标签说清 —— 叙事文案里不一定带数字。 */
 .v02-event-impact{display:flex;flex-wrap:wrap;justify-content:center;gap:7px;margin-top:14px;}
 .v02-event-impact[hidden]{display:none;}
-.v02-event-impact span{font-size:11px;font-weight:700;letter-spacing:.04em;padding:4px 10px;border-radius:999px;background:rgba(10,132,255,.12);color:var(--screen-blue-700);font-variant-numeric:tabular-nums;}
+.v02-event-impact span{font-size:11px;font-weight:700;letter-spacing:.04em;padding:4px 10px;border-radius:999px;background:rgba(var(--accent-rgb),.12);color:var(--screen-blue-700);font-variant-numeric:tabular-nums;}
 .v02-event-impact span.loss{background:rgba(216,92,92,.14);color:#a4453f;}
 .v02-event-actions{display:flex;gap:10px;margin:18px 0 20px;}
 .v02-event-actions button{flex:1;height:40px;border:0;border-radius:10px;padding:0 12px;color:#fff;cursor:pointer;font-family:inherit;font-weight:700;}
@@ -1474,10 +1567,11 @@ body:not(.dev-on) .dev-panel{display:none!important}
   animation:none!important;
 }
 .completion-reward{
-  margin-top:13px;
-  font-size:18px;
-  font-weight:800;
+  margin-top:10px;
+  font-size:14px;
+  font-weight:700;
   color:var(--screen-blue-700);
+  font-variant-numeric:tabular-nums;
 }
 .completion-confirm{
   margin-top:18px;
@@ -1531,7 +1625,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
 .guide-actions{display:flex;gap:10px;justify-content:center;margin-top:14px}
 .guide-actions button{border:0;border-radius:12px;padding:9px 20px;font-size:14px;cursor:pointer}
 .guide-skip{background:#e4eeef;color:#48646a}
-.guide-next{background:var(--screen-blue-500);color:#fff;box-shadow:0 4px 10px rgba(10,132,255,.3)}
+.guide-next{background:var(--screen-blue-500);color:#fff;box-shadow:0 4px 10px rgba(var(--accent-rgb),.3)}
 
 /* ===== 同步码保存引导（建号后只弹一次，R6 风险缓解）===== */
 .sync-guide{position:fixed;inset:0;z-index:5500;display:flex;align-items:center;justify-content:center;background:rgba(12,34,38,.4)}
@@ -1541,7 +1635,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
 .sync-guide-text{font-size:13px;line-height:1.75;color:#4a666b;margin:0 0 18px;text-align:left}
 .sync-guide-actions{display:flex;gap:10px;justify-content:center}
 .sync-guide-actions button{border:0;border-radius:12px;padding:10px 18px;font-size:14px;cursor:pointer}
-.sync-guide-go{background:var(--screen-blue-500);color:#fff;box-shadow:0 4px 10px rgba(10,132,255,.3)}
+.sync-guide-go{background:var(--screen-blue-500);color:#fff;box-shadow:0 4px 10px rgba(var(--accent-rgb),.3)}
 .sync-guide-skip{background:#e4eeef;color:#48646a}
 .sync-guide-input{width:100%;box-sizing:border-box;margin:0 0 6px;padding:10px 12px;border:1px solid #cfe0e2;border-radius:12px;font-size:14px;background:#fff;color:#22393d}
 .sync-guide-input:focus{outline:2px solid var(--screen-blue-500);outline-offset:1px}
@@ -1581,8 +1675,11 @@ body:not(.dev-on) .dev-panel{display:none!important}
     .time-step{width:26px;height:26px;flex:0 0 26px;font-size:16px}
     .time-sub{display:none}
     .start,.end{width:40px;height:40px;margin-top:6px;font-size:14px}
-    .v02-focus{bottom:8px;padding:5px 10px}
-    .v02-focus .focus-today{font-size:11px}
+    /* 底栏压缩档（T10-5）：横屏下 52+56=108px 占掉 28% 纵向空间 → 底栏压薄、
+       统计条并成单行、字号 10px，把高度还给缸。 */
+    .v02-bottombar{min-height:40px;padding:6px 12px}
+    .v02-focus{flex-direction:row;gap:10px}
+    .v02-focus .focus-today{font-size:10px}
     .v02-focus .focus-total{font-size:10px}
     .plant{height:20%}
   }
@@ -1594,8 +1691,10 @@ body:not(.dev-on) .dev-panel{display:none!important}
      三条约束：
        ① 绝不把用户永远挡在门外：配置/素材超时都放行，离线也能用。
        ② 最短显示 450ms —— 服务已经热了的时候不要「闪一下」。
-       ③ 35s 自动淡出兜底：万一 JS 报错，加载页绝不能永久驻留（页面本身坏了，但别让
-          用户对着一个转圈的壳子猜发生了什么）。
+       ③ 45s 自动淡出兜底：万一 JS 报错，加载页绝不能永久驻留（页面本身坏了，但别让
+          用户对着一个转圈的壳子猜发生了什么）。45s 与首屏等配置的预算
+          （CONFIG_WARMUP_BUDGET_MS）对齐 —— 冷启动最长要等这么久，等待期间
+          不该先露出半成品鱼缸。
      层级 9000：压住顶栏通知(5000)/小票(3200)/抽屉(2000)，但让开维护页(9999) —— 停机时
      维护页必须能盖住它，否则用户只看到「一直在唤醒」而不知道是停服。 */
   .boot-gate{
@@ -1603,7 +1702,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
     display:flex; align-items:center; justify-content:center;
     background:linear-gradient(to bottom,#8bcbd9 0%,#9dd4dc 66%,#a9d6ce 100%);
     transition:opacity .45s ease, visibility .45s ease;
-    animation:bootGateFallback 0s linear 35s forwards;
+    animation:bootGateFallback 0s linear 45s forwards;
   }
   .boot-gate.is-done{opacity:0; visibility:hidden; pointer-events:none}
   @keyframes bootGateFallback{to{opacity:0; visibility:hidden; pointer-events:none}}
@@ -1642,7 +1741,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
 <body>
 
 <!-- 首屏加载页：云服务冷启动 + 素材下载期间盖住整屏。默认可见，就绪后由 JS 淡出并移除；
-     万一 JS 报错，CSS 里挂了 35s 自动淡出兜底（见 .boot-gate 的 bootGateFallback）。 -->
+     万一 JS 报错，CSS 里挂了 45s 自动淡出兜底（见 .boot-gate 的 bootGateFallback）。 -->
 <div class="boot-gate" id="bootGate" role="status" aria-live="polite">
   <div class="boot-scene">
     <div class="boot-bubbles" aria-hidden="true"><i></i><i></i><i></i></div>
@@ -1685,6 +1784,18 @@ body:not(.dev-on) .dev-panel{display:none!important}
 </div>
 
 <div class="app">
+<div class="v02-topbar">
+  <h1 class="v02-brand-title" id="appTitle">鱼儿乐水族</h1>
+  <button type="button" class="v02-notice-btn" id="opsNoticeBtn" hidden aria-label="查看公告" title="公告">!</button>
+  <nav class="v02-topbar-entries">
+    <div class="v02-bubbles" id="bubbleDisplay" aria-label="当前泡泡数"><svg class="ic-bub" viewBox="0 0 24 24" role="img" focusable="false" width="24" height="24"><title>泡泡</title><circle cx="14.2" cy="9.6" r="7.1" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="1.7"/><path d="M10.3 6.3a5.3 5.3 0 0 1 3.3-1.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".9"/><circle cx="6.7" cy="18.2" r="3.4" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="1.5"/><path d="M5.3 17.2a2.1 2.1 0 0 1 1.2-.7" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity=".9"/></svg><span id="bubbleCount">0</span></div>
+    <button type="button" class="v02-top-entry" id="shopOpenBtn" data-drawer="shopModal" aria-label="打开装点鱼缸" title="装点鱼缸">装点</button>
+    <button type="button" class="v02-top-entry" id="mineOpenBtn" data-drawer="mineDrawer" aria-label="打开我的鱼缸" title="我的鱼缸">我的</button>
+    <button type="button" class="v02-top-entry" id="settingsOpenBtn" data-drawer="settingsDrawer" aria-label="打开设置" title="设置">设置</button>
+  </nav>
+</div>
+<!-- 音频控件已收进「设置」抽屉（见 #settingsDrawer），顶栏只留标题 + 泡泡数 + 三个入口 -->
+
 <main class="tank" id="tank">
   <div class="tank-bg" id="tankBg" aria-hidden="true"></div>
   <div class="water-glow"></div>
@@ -1699,17 +1810,6 @@ body:not(.dev-on) .dev-panel{display:none!important}
   <div class="tank-edge left" aria-hidden="true"></div>
   <div class="tank-edge right" aria-hidden="true"></div>
   <div class="bubbles" id="bubbles" aria-hidden="true"></div>
-  <div class="v02-topbar">
-    <h1 class="v02-brand-title" id="appTitle">鱼儿乐水族</h1>
-    <button type="button" class="v02-notice-btn" id="opsNoticeBtn" hidden aria-label="查看公告" title="公告">!</button>
-    <nav class="v02-topbar-entries">
-      <div class="v02-bubbles" id="bubbleDisplay" aria-label="当前泡泡数">🫧 0</div>
-      <button type="button" class="v02-top-entry" id="shopOpenBtn" data-drawer="shopModal" aria-label="打开装点鱼缸" title="装点鱼缸">装点</button>
-      <button type="button" class="v02-top-entry" id="mineOpenBtn" data-drawer="mineDrawer" aria-label="打开我的鱼缸" title="我的鱼缸">我的</button>
-      <button type="button" class="v02-top-entry" id="settingsOpenBtn" data-drawer="settingsDrawer" aria-label="打开设置" title="设置">设置</button>
-    </nav>
-  </div>
-  <!-- 音频控件已收进「设置」抽屉（见 #settingsDrawer），顶栏只留标题 + 泡泡数 + 三个入口 -->
 
     <div class="plant left"><span class="leaf"></span><span class="leaf"></span><span class="leaf"></span><span class="leaf"></span></div>
     <div class="plant right"><span class="leaf"></span><span class="leaf"></span><span class="leaf"></span><span class="leaf"></span></div>
@@ -1733,22 +1833,29 @@ body:not(.dev-on) .dev-panel{display:none!important}
       <button class="start" id="start" type="button" aria-label="开始专注" title="开始专注"><span class="start-glyph" aria-hidden="true">▶</span></button>
       <button class="end" id="end" type="button" aria-label="结束专注" title="结束专注"><span class="end-glyph" aria-hidden="true">■</span></button>
     </section>
-    <!-- 专注聚合状态条：贴在计时器下面。放这里而不是右上角，是因为右上角会随着
-         屏幕变长飘出视野，而它跟着计时器走，任何屏幕比例下都在视线中心附近。 -->
-    <div class="v02-focus" id="focusStatus" hidden aria-live="polite">
-      <div class="focus-today" id="focusToday">今日专注 0 次 · 0 分钟</div>
-      <div class="focus-total" id="focusTotal">累计 0 次 · 0 分钟</div>
-    </div>
+    <!-- 专注聚合状态条：已搬到底栏（T10/T12），由底栏 flex 居中。 -->
     <section class="completion-flash" id="completionFlash" aria-live="polite" aria-hidden="true">
       <div class="completion-main">专注完成</div>
-      <div class="completion-reward" id="completionReward">本次专注获得了 0 泡泡 🫧</div>
       <div class="completion-sub">这段时间，已经属于你自己了。</div>
+      <div class="completion-reward" id="completionReward"></div>
       <button class="completion-confirm" id="completionConfirm">确认</button>
     </section>
     <!-- 未专注时的毛玻璃罩：盖住鱼/草/沙/背景，但让开标题与计时器。
          开计时加 body.focus-running，罩子淡出 —— 看清鱼缸是专注的奖励。 -->
     <div class="tank-frost" aria-hidden="true"></div>
   </main>
+
+  <!-- 底栏 = 缸底座（T10/T11/T12）：专注统计的家。无账号时显示占位 + 重试。 -->
+  <footer class="v02-bottombar">
+    <div class="v02-focus" id="focusStatus" hidden aria-live="polite">
+      <div class="focus-today" id="focusToday">今日专注 0 次 · 0 分钟</div>
+      <div class="focus-total" id="focusTotal">累计 0 次 · 0 分钟</div>
+    </div>
+    <div class="v02-focus-hint" id="focusHint" hidden>
+      <span>专注统计暂时连不上服务器</span>
+      <button type="button" id="focusHintRetry">重试</button>
+    </div>
+  </footer>
 </div>
 
 
@@ -1762,7 +1869,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
     <div class="v02-tabs" id="shopTabs">
         <button type="button" class="v02-tab active" data-category="all">全部</button>
         <button type="button" class="v02-tab" data-category="fish">🐠 鱼</button>
-        <button type="button" class="v02-tab" data-category="decorations">🌿 鱼缸装饰</button>
+        <button type="button" class="v02-tab" data-category="decorations">🌿 装饰</button>
         <button type="button" class="v02-tab" data-category="backgrounds">🖼️ 背景</button>
         <button type="button" class="v02-tab" data-category="sands">🏖️ 沙子</button>
         <button type="button" class="v02-tab" data-category="sounds">🌊 白噪音</button>
@@ -1772,9 +1879,11 @@ body:not(.dev-on) .dev-panel{display:none!important}
       <div class="v02-grid" id="shopGrid"></div>
     </div>
     <div class="v02-footer">
-        <div class="v02-settlement" id="shopSettlement" aria-live="polite"></div>
+      <div class="v02-settlement" id="shopSettlement" aria-live="polite"></div>
+      <div class="v02-footer-actions">
         <button type="button" class="v02-cancel" id="shopCancelBtn">清空预览</button>
-      <button type="button" class="v02-save" id="shopSaveBtn">保存鱼缸</button>
+        <button type="button" class="v02-save" id="shopSaveBtn">保存鱼缸</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1820,6 +1929,10 @@ body:not(.dev-on) .dev-panel{display:none!important}
           <div class="account-row gap-top"><button type="button" id="syncRedeemGo">恢复我的鱼缸</button></div>
           <div class="account-note" id="syncRedeemMsg"></div>
         </div>
+      </div>
+
+      <div class="account-block account-block-danger" id="accountDangerBlock">
+        <div class="account-line">危险操作</div>
         <div class="account-tip account-danger-tip">注销会永久删除你的鱼缸、泡泡与专注记录，不可恢复。</div>
         <div class="account-row gap-top">
           <button type="button" id="accountDeleteBtn" class="account-danger">注销账号</button>
@@ -1844,13 +1957,21 @@ body:not(.dev-on) .dev-panel{display:none!important}
     </div>
     <div class="v02-shop-content">
       <div class="audio-controls" id="audioControls">
-    <button type="button" class="audio-toggle" id="audioToggle" aria-label="静音" title="静音 / 取消静音" aria-pressed="false">🔊</button>
-    <button type="button" class="audio-settings-toggle" id="audioSettingsToggle" aria-label="音频设置" title="音频设置" aria-expanded="false">•••</button>
-    <div class="audio-settings" id="audioSettings" aria-hidden="true">
-      <div class="audio-settings-title">音频</div>
-      <!-- 滑块按后台配置的音效分类动态生成，分类可增删，这里不再写死 -->
-      <div id="audioSliders"></div>
-    </div>
+        <div class="audio-settings-title">声音</div>
+        <label class="settings-row" for="audioToggle">
+          <span class="settings-row-text">
+            <span class="settings-row-label" id="audioToggleLabel">全部声音</span>
+            <span class="settings-row-hint">关掉后所有音效静音，滑杆设置会保留。</span>
+          </span>
+          <button type="button" class="audio-toggle" id="audioToggle" aria-label="静音" title="静音 / 取消静音" aria-pressed="false">🔊</button>
+        </label>
+        <div class="audio-settings" id="audioSettings" aria-hidden="true">
+          <div class="audio-muted-note">已静音 —— 打开上面的开关后可调</div>
+          <div id="audioSliders"></div>
+        </div>
+        <button type="button" class="audio-settings-toggle" id="audioSettingsToggle" aria-label="音频设置" title="音频设置" aria-expanded="false">•••</button>
+      </div>
+
       <div class="settings-block">
         <div class="settings-block-title">画面</div>
         <label class="settings-row" for="lightFlowToggle">
@@ -1864,6 +1985,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
           </span>
         </label>
       </div>
+
       <div class="about-block">
         <div class="about-title">关于</div>
         <div class="about-list">
@@ -1876,7 +1998,6 @@ body:not(.dev-on) .dev-panel{display:none!important}
         </div>
         <div class="about-note">鱼儿乐水族 · 把爸妈水族馆里那些鱼，留在网上。</div>
       </div>
-  </div>
     </div>
   </div>
 </aside>
@@ -1884,15 +2005,15 @@ body:not(.dev-on) .dev-panel{display:none!important}
 <button type="button" class="dev-toggle" id="devToggle" aria-label="开发者面板" title="开发者面板（?dev=1 才可用）">DEV</button>
 <div class="dev-panel" id="devPanel" aria-hidden="true">
   <div class="dev-title">🛠 开发者测试工具</div>
-  <div class="dev-sub">仅用于 v0.2 开发测试，不属于正式游戏 UI</div>
+  <div class="dev-sub">仅用于开发测试，不属于正式游戏 UI</div>
   <div class="dev-sub">奖励由服务端按<b>真实经过的时间</b>结算，所以上面两个"快进"按钮不会发泡泡（测经济请用 +100/+1000）。</div>
   <div class="dev-status" id="devStatus"></div>
   <div class="dev-actions">
     <button type="button" id="devReduceFocus" hidden>减少计时 5 分钟</button>
     <button type="button" id="devCompleteFocus" hidden>立刻完成当前专注</button>
-    <button type="button" id="devAdd100">+100 🫧</button>
-    <button type="button" id="devAdd1000">+1000 🫧</button>
-    <button type="button" id="devAdd10000">+10000 🫧</button>
+    <button type="button" id="devAdd100">+100 <svg class="ic-bub" viewBox="0 0 24 24" role="img" focusable="false" width="24" height="24"><title>泡泡</title><circle cx="14.2" cy="9.6" r="7.1" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="1.7"/><path d="M10.3 6.3a5.3 5.3 0 0 1 3.3-1.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".9"/><circle cx="6.7" cy="18.2" r="3.4" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="1.5"/><path d="M5.3 17.2a2.1 2.1 0 0 1 1.2-.7" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity=".9"/></svg></button>
+    <button type="button" id="devAdd1000">+1000 <svg class="ic-bub" viewBox="0 0 24 24" role="img" focusable="false" width="24" height="24"><title>泡泡</title><circle cx="14.2" cy="9.6" r="7.1" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="1.7"/><path d="M10.3 6.3a5.3 5.3 0 0 1 3.3-1.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".9"/><circle cx="6.7" cy="18.2" r="3.4" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="1.5"/><path d="M5.3 17.2a2.1 2.1 0 0 1 1.2-.7" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity=".9"/></svg></button>
+    <button type="button" id="devAdd10000">+10000 <svg class="ic-bub" viewBox="0 0 24 24" role="img" focusable="false" width="24" height="24"><title>泡泡</title><circle cx="14.2" cy="9.6" r="7.1" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="1.7"/><path d="M10.3 6.3a5.3 5.3 0 0 1 3.3-1.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".9"/><circle cx="6.7" cy="18.2" r="3.4" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="1.5"/><path d="M5.3 17.2a2.1 2.1 0 0 1 1.2-.7" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity=".9"/></svg></button>
     <button type="button" id="devMember">切换会员</button>
     <button type="button" id="devResetBubble">泡泡归零</button>
     <button type="button" id="devClearInventory">清空库存</button>
@@ -1971,10 +2092,14 @@ body:not(.dev-on) .dev-panel{display:none!important}
 
 <div class="modal" id="modal">
   <div class="modal-card">
-    <div>确定结束专注？</div>
+    <div id="endConfirmTitle">确定结束专注？</div>
+    <div class="modal-sub" id="endConfirmSub"></div>
     <div class="modal-actions">
-      <button class="continue" id="continue">继续专注</button>
-      <button class="confirm" id="confirm">确定结束</button>
+      <!-- ⚠️ 类名沿用旧名、看 id 判断用途（T05 主色给安全动作）：
+           #continue = 「继续专注」= 安全动作 = 蓝色主按钮（class 却叫 confirm）；
+           #confirm  = 「确定结束」= 破坏性动作 = 浅蓝次级（class 却叫 continue）。 -->
+      <button class="confirm" id="continue">继续专注</button>
+      <button class="continue" id="confirm">确定结束</button>
     </div>
   </div>
 </div>
@@ -2093,6 +2218,35 @@ body:not(.dev-on) .dev-panel{display:none!important}
     return String(value ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
   }
 
+  // ===== 货币符号自绘（T09）=====
+  // 原符号是 U+1FAE7（Emoji 14.0 / 2021 新增），Win10 的 Segoe UI Emoji 没有它 → 豆腐块。
+  // 它是全站唯一的货币符号、直接落在核心循环上，所以换成自绘 SVG（单色描边 + 低透明填充）。
+  // 约定：模板字符串里继续写原字符当占位符，只在落进 DOM 时替换成图形 —— 这样锁字符串的测试不用改。
+  const BUB_GLYPH = "\u{1FAE7}";
+  const BUB_SVG = '<svg class="ic-bub" viewBox="0 0 24 24" role="img" focusable="false" width="24" height="24"><title>泡泡</title><circle cx="14.2" cy="9.6" r="7.1" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="1.7"/><path d="M10.3 6.3a5.3 5.3 0 0 1 3.3-1.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".9"/><circle cx="6.7" cy="18.2" r="3.4" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="1.5"/><path d="M5.3 17.2a2.1 2.1 0 0 1 1.2-.7" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity=".9"/></svg>';
+  // innerHTML 落点用：先转义再换图标（转义在前，图标是可信常量，不会被转义）。
+  // ⚠️ 只用于「整段都是纯文本」的字符串；带真标签（<b>/<br>）的串不能走这里，会被转义成字面量。
+  function bubHtml(raw){
+    return escapeHtml(String(raw == null ? "" : raw)).split(BUB_GLYPH).join(BUB_SVG);
+  }
+  // textContent 落点用：图标是元素、数字是文本节点，天然防注入。
+  function setBubText(el, raw){
+    if(!el) return;
+    el.textContent = "";
+    const parts = String(raw == null ? "" : raw).split(BUB_GLYPH);
+    const frag = document.createDocumentFragment();
+    parts.forEach((part, i) => {
+      if(i) frag.appendChild(createBubIcon());
+      if(part) frag.appendChild(document.createTextNode(part));
+    });
+    el.appendChild(frag);
+  }
+  function createBubIcon(){
+    const span = document.createElement("span");
+    span.innerHTML = BUB_SVG;
+    return span.firstChild || span;
+  }
+
   // 内置默认数据来自 game-data.js，只在配置接口不可用时使用；
   // 正常情况下后台下发的配置会整体覆盖它，后台才是唯一权威数据源。
   const DEFAULT_DATA = window.FISHTANK_DEFAULT_DATA || {
@@ -2172,25 +2326,30 @@ body:not(.dev-on) .dev-panel{display:none!important}
     // 否则用户会看到浏览器原始的 "Failed to fetch" 而不是能看懂的中文提示。
     // 只 catch 失败是不够的：接口「挂住」（既不返回也不报错）时这个 Promise 永远 pending，
     // Promise.all 就永远不 resolve —— 首屏一直转圈、商店点不开，而且没有任何提示。
-    // 所以再加一道超时：超时按失败处理，走下面的 .catch → null，降级提示照常生效。
-    // 🔴 2026-10-06 由 8s 放宽到 20s：云托管缩容到 0 之后，**第一个请求要等容器冷启动**
-    // （几秒到十几秒），8s 会把「正在启动」误判成「拉不到配置」→ 玩家看到降级提示条 +
-    // 内置默认素材。现在有首屏加载页兜着，等待是可见的，不怕放宽。
-    const CONFIG_FETCH_TIMEOUT_MS = 20000;
-    const safeFetch = path => {
+    // 所以再加一道超时：超时走下面的 .catch → null，被标记为「没等到答复」（timedOut），
+    // 由 syncPublishedConfig() 决定是「再等一轮」还是「降级提示」（2026-10-07 起）。
+    // 单次超时 CONFIG_FETCH_TIMEOUT_MS 定义在下面 syncPublishedConfig 之前 —— 那里的重试
+    // 循环要用它算「还剩多少预算」，写在函数里会变成取不到的局部变量。
+    const timedOut = new Set();
+    const safeFetch = (path, label) => {
       const controller = typeof AbortController === "function" ? new AbortController() : null;
       const timer = controller ? setTimeout(() => controller.abort(), CONFIG_FETCH_TIMEOUT_MS) : null;
+      let aborted = false;
+      if (controller) controller.signal.addEventListener("abort", () => { aborted = true; });
       return Promise.resolve()
         .then(() => fetch(`${API_BASE}${path}`, { cache:"no-store", signal: controller ? controller.signal : undefined }))
         .catch(() => null)
-        .finally(() => { if (timer) clearTimeout(timer); });
+        .finally(() => {
+          if (timer) clearTimeout(timer);
+          if (aborted && label) timedOut.add(label);
+        });
     };
     const [decorationsResponse, fishResponse, focusResponse, audioResponse, eventsResponse] = await Promise.all([
-      safeFetch("/game/decorations"),
-      safeFetch("/game/fish"),
-      safeFetch("/game/focus"),
-      safeFetch("/game/audio"),
-      safeFetch("/game/events")
+      safeFetch("/game/decorations", "装饰"),
+      safeFetch("/game/fish", "鱼种"),
+      safeFetch("/game/focus", "专注配置"),
+      safeFetch("/game/audio", "音频配置"),
+      safeFetch("/game/events", "事件")
     ]);
     const usable = response => Boolean(response && response.ok);
     const failed = [];
@@ -2250,13 +2409,46 @@ body:not(.dev-on) .dev-panel{display:none!important}
     }catch(error){
       console.warn("应用音频配置失败，沿用内置音效：", error);
     }
-    return { failed, audioFailed };
+    // 「没等到答复」不等于「失败」：前者是服务还在启动（冷启动 / 刚发完版），
+    // 后者是服务活着但明确报错。**全部**失败项都属于前者时才算 warmupOnly，
+    // 调用方据此决定是「再等一轮」还是「给用户看失败提示」。
+    const pending = failed.concat(audioFailed ? ["音频配置"] : []);
+    const warmupOnly = pending.length > 0 && pending.every(label => timedOut.has(label));
+    return { failed, audioFailed, warmupOnly };
   }
 
+  // 单次配置请求的超时。
+  // 🔴 2026-10-06 由 8s 放宽到 20s：云托管缩容到 0 之后，**第一个请求要等容器冷启动**
+  // （几秒到十几秒），8s 会把「正在启动」误判成「拉不到配置」→ 玩家看到降级提示条 +
+  // 内置默认素材。现在有首屏加载页兜着，等待是可见的，不怕放宽。
+  // 🔴 2026-10-07：单次超时再宽也盖不住真实冷启动（可达数十秒），所以超时不再直接判
+  // 「失败」，而是标记为「没等到答复」（timedOut），交给 syncPublishedConfig() 决定要不要
+  // 再等一轮。只有**明确收到错误响应**才算真失败。
+  const CONFIG_FETCH_TIMEOUT_MS = 20000;
+  // 首屏愿意为「等配置」付出的总时间。云托管缩容到 0（或刚发完版）之后，第一个请求要等
+  // 容器起来，实测可达数十秒 —— 单次 20s 超时一定会先响一次。
+  // 与其把「正在启动」误报成「连接失败」，不如在预算内静默再等一轮：绝大多数情况下
+  // 第二轮落在已经起来的实例上，几秒就有结果，用户全程只看到加载页。
+  const CONFIG_WARMUP_BUDGET_MS = 45000;
+  const CONFIG_RETRY_GAP_MS = 600;
+
   // 拉取配置并把结果反馈给用户；失败时不抛错，调用方照常继续渲染。
-  async function syncPublishedConfig(){
+  // options.noRetry = true 时不等冷启动（手动点「重试」时用：那时用户已经等过一轮了）。
+  async function syncPublishedConfig(options){
     try{
-      const result = await loadPublishedConfig();
+      const allowRetry = !(options && options.noRetry === true);
+      // 🔴 预算必须从**第一次请求之前**起算：写在第一次 await 之后的话，第一轮花掉的时间
+      // 不算在预算内，最坏会多等整整一轮（实测 45s 预算打成 62s）。
+      const deadline = Date.now() + CONFIG_WARMUP_BUDGET_MS;
+      let result = await loadPublishedConfig();
+      // 只有超时才重试：收到明确错误响应的（4xx/5xx）说明服务活着，是真失败，
+      // 再等一轮只会让用户多等，不会改变结果。
+      while(allowRetry && result.warmupOnly && Date.now() + CONFIG_FETCH_TIMEOUT_MS < deadline){
+        await new Promise(resolve => setTimeout(resolve, CONFIG_RETRY_GAP_MS));
+        // 加载页还在时把等待说出来；加载页已经退场时 bootStage 会自己 return（节点已移除）。
+        bootStage(null, null, "服务还在启动，继续等待…");
+        result = await loadPublishedConfig();
+      }
       // 去重：failed 里可能因为解析失败出现重复项。
       const failed = Array.from(new Set(result.failed));
       if(!failed.length && !result.audioFailed){
@@ -2393,7 +2585,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
   //   sands        → cover + 底边对齐 + 水平居中 + 不平铺（与背景同一种"铺满"语义）
   //   decorations  → 与沙子完全相同的摆放规约（鱼缸中"水草长在沙子上"）；
   //                  要求装饰图也是**透明底**：透明让背景/下层透过来。
-  // 素材规约（2026-10-06）：整图 = 整缸大小，沙/装饰画在图片底部（沙占图片底部 20%）。
+  // 素材规约（2026-10-06，2026-10-07 调整）：整图 = 整缸大小，沙/装饰画在图片底部（沙占图片底部 12.5%）。
   // 🔴 用 `cover` 而不是 `auto 100%`：`cover` 取「宽/高两个方向里更大的那个缩放比」，
   //    保证图**永远盖满整个缸**，超出的部分以中轴为基准裁掉（`center bottom`）。
   //    - 缸比素材窄（16:10 缸 vs 16:9 素材）→ 按高度撑满 → 沙条带正好占缸底 20%；
@@ -2405,7 +2597,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
     const src = String(path || "").trim();
     if(!src || !IMAGE_SOURCE_RE.test(src)) return "";
     if(fit === "sand" || fit === "decor-image") return `url("${src.replace(/["\\]/g, "")}") center bottom / cover no-repeat`;
-    const size = fit === "contain" ? "center bottom / contain" : "center / cover";
+    const size = fit === "contain" ? "center bottom / contain" : "center top / cover";
     return `url("${src.replace(/["\\]/g, "")}") ${size} no-repeat`;
   }
   // 渲染不再按 id 写死：优先用后台商品自带的 visual，其次用后台上传的图片，最后查内置样式表。
@@ -3126,7 +3318,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
     document.getElementById("accountDeleteCancel").addEventListener("click", closeAccountDelete);
   })();
 
-  function renderBubbles(){ document.getElementById("bubbleDisplay").textContent=`🫧 ${PlayerData.bubbles}`; }
+  function renderBubbles(){ document.getElementById("bubbleCount").textContent=PlayerData.bubbles; }
   function renderAquarium(data){
     // 背景画在独立的 .tank-bg 层上，不再直接铺在 .tank 上（留着这层，将来加滤镜不牵连鱼）。
     // 找不到这一层时退回旧行为：宁可少一层，也不能让背景整个消失。
@@ -3137,8 +3329,8 @@ body:not(.dev-on) .dev-panel{display:none!important}
     const sandEl=document.getElementById("sand");
     const sandVisual=visualForItem("sands", data.sand);
     sandEl.style.background=sandVisual.css;
-    // 上传的沙子图必须盖满整缸：图按 `cover` 铺满（超宽部分以中轴裁掉），沙子条带（图内底部 20%）
-    // 在常规 16:10 缸里正好落在缸底 20% 处，上面是透明区（让背景透出来）。内置渐变则保持原来的底部 19% 条带。
+    // 上传的沙子图必须盖满整缸：图按 `cover` 铺满（超宽部分以中轴裁掉），沙子条带（图内底部 12.5%）
+    // 在常规缸里正好落在缸底 12.5% 处，上面是透明区（让背景透出来）。内置渐变则保持原来的底部 12.5% 条带。
     // 层级仍是 z-index:2 —— 压在背景层之上、装饰层之下。
     sandEl.classList.toggle("sand-image", Boolean(sandVisual.image));
     document.querySelectorAll(".plant").forEach(p=>{
@@ -3675,7 +3867,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
       return '<li class="v02-log-item">'
         + `<div class="v02-log-head"><span class="v02-log-name">${escapeHtml(entry.name)}</span>`
         + `<span class="v02-log-time">${formatReceiptStamp(entry.at)}</span></div>`
-        + `<div class="v02-log-delta">${escapeHtml(delta.length ? delta.join("　") : "鱼缸没有变化")}</div>`
+        + `<div class="v02-log-delta">${bubHtml(delta.length ? delta.join("　") : "鱼缸没有变化")}</div>`
         + '</li>';
     }).join("");
   }
@@ -3695,7 +3887,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
     if(!box) return;
     const chips = [];
     const bubbles = Math.max(0, Math.floor(Number((effect || {}).bubbles) || 0));
-    if(bubbles > 0) chips.push(`<span>🫧 +${bubbles}</span>`);
+    if(bubbles > 0) chips.push(`<span>${bubHtml("🫧")} +${bubbles}</span>`);
     const lost = Array.isArray((effect || {}).lost) ? effect.lost.filter(entry => entry && entry.name) : [];
     if(lost.length) chips.push(`<span class="loss">失去 ${lost.length} 条 · ${escapeHtml(lost.map(entry => entry.name).join("、"))}</span>`);
     box.innerHTML = chips.join("");
@@ -3958,7 +4150,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
     renderBarcode(document.getElementById("receiptBarcode"), RECEIPT_BARCODE_TEXT);
     const modal=document.getElementById("purchaseReceipt");
     const rowsEl=document.getElementById("receiptRows");
-    // plain：整单不收钱（领奖）。此时不显示单价/小计 —— 满屏「0 ×1」「0 🫧」只会让人以为算错了。
+    // plain：整单不收钱（领奖）。此时不显示单价/小计 —— 满屏「0 ×1」「0 泡泡」只会让人以为算错了。
     const plain = options.plain === true;
     rowsEl.innerHTML="";
     rows.forEach(row=>{
@@ -3969,7 +4161,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
       const qtyText=plain?`×${quantity}`:`${unitPrice} ×${quantity}`;
       const memberMark=row.isMemberOnly?'<span class="v02-member-badge">★ 会员</span>':'';
       const displayPrice=Math.abs(Number(row.price)||0);
-      const priceCell=plain?"":`<span>${displayPrice} 🫧</span>`;
+      const priceCell=plain?"":`<span>${bubHtml(displayPrice + " 🫧")}</span>`;
       div.innerHTML=`<span>${memberMark}${escapeHtml(row.name)} ${qtyText}</span>${priceCell}`;
       rowsEl.appendChild(div);
     });
@@ -3983,12 +4175,13 @@ body:not(.dev-on) .dev-panel{display:none!important}
     paidRow.style.display=paidAmount>0?"flex":"none";
     if(gainRow){
       gainRow.style.display=gainAmount>0?"flex":"none";
-      if(gainAmount>0) document.getElementById("receiptGain").textContent=`+${gainAmount} 🫧`;
+      if(gainAmount>0) setBubText(document.getElementById("receiptGain"), `+${gainAmount} 🫧`);
     }
     refundRow.style.display=refundAmount>0?"flex":"none";
-    document.getElementById("receiptPaid").textContent=`-${paidAmount} 🫧`;
-    document.getElementById("receiptRefund").textContent=`${refundAmount} 🫧`;
-    document.getElementById("receiptNote").textContent=note||"";
+    setBubText(document.getElementById("receiptPaid"), `-${paidAmount} 🫧`);
+    setBubText(document.getElementById("receiptRefund"), `${refundAmount} 🫧`);
+    // 这是票面「备注」的唯一写入点：带货币符号的文案都从 note 参数进来，换这里一处就全覆盖。
+    setBubText(document.getElementById("receiptNote"), note||"");
     const adjustBtn=document.getElementById("receiptAdjustBtn");
     const closeBtn=document.getElementById("receiptCloseBtn");
     if(adjustBtn && closeBtn){
@@ -3999,7 +4192,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
     const balanceRow=document.getElementById("receiptBalanceRow");
     if(balanceRow){
       balanceRow.style.display=options.balance!==undefined?"flex":"none";
-      if(options.balance!==undefined) document.getElementById("receiptBalance").textContent=`${options.balance} 🫧`;
+      if(options.balance!==undefined) setBubText(document.getElementById("receiptBalance"), `${options.balance} 🫧`);
     }
     modal.classList.add("show");
     modal.setAttribute("aria-hidden","false");
@@ -4039,10 +4232,17 @@ body:not(.dev-on) .dev-panel{display:none!important}
     const short=settlement.paid-(PlayerData.bubbles+settlement.refund);
     if(short>0) parts.push(`还差 ${short} 🫧（现有 ${PlayerData.bubbles} 🫧）`);
     // 一个泡泡都没有的新玩家打开商店只会一脸茫然：先说清泡泡从哪来。
-    if(parts.length===0 && PlayerData.bubbles<=0) parts.push("还没有泡泡 —— 专注满 25 分钟就能攒到 🫧");
+    // 口径：奖励档位是「0–25 分 1 颗/分」，**25 是档位上限、不是门槛**，第 1 分钟就有泡泡。
+    // 旧文案把 25 分钟说成门槛，与档位自相矛盾 —— 新玩家会以为时长不足就白专注了。
+    if(parts.length===0 && PlayerData.bubbles<=0) parts.push("还没有泡泡 —— 泡泡靠专注时长换，1 分钟起就有 🫧");
     const el=document.getElementById("shopSettlement");
-    el.textContent=parts.join("　");
+    setBubText(el, parts.join("　"));
     el.classList.toggle("short",short>0);
+  }
+
+  function syncTabsScroll(){
+    const tabs = document.getElementById("shopTabs");
+    if(tabs) tabs.classList.toggle("is-scrollable", tabs.scrollWidth > tabs.clientWidth + 1);
   }
 
   function renderShop(){
@@ -4105,7 +4305,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
       d.innerHTML=preview+
         `<div class="v02-item-name"><span class="v02-item-name-text">${escapeHtml(item.name)}</span>${item.isMemberOnly?'<span class="v02-member-badge">★ 会员</span>':''}</div>`+
         `<div class="v02-item-meta"><span class="v02-description">${escapeHtml(item.description||"")}</span></div>`+
-        `<div class="v02-item-actions"><span class="v02-price">${item.price} 🫧</span><span class="v02-owned">已拥有 ${owned}</span>${action}</div>`+
+        `<div class="v02-item-actions"><span class="v02-price">${bubHtml(item.price + " 🫧")}</span><span class="v02-owned">已拥有 ${owned}</span>${action}</div>`+
         (fishAtMax?`<div class="v02-item-tip">已经养满啦，这个品种最多 ${item.maxInventory} 条。</div>`:"");
       grid.appendChild(d);
     });
@@ -4117,6 +4317,7 @@ body:not(.dev-on) .dev-panel{display:none!important}
     grid.querySelectorAll('[data-plus]').forEach(el=>el.addEventListener('click',e=>{e.stopPropagation();changePreviewFish(el.dataset.plus,1)}));
     grid.querySelectorAll('[data-minus]').forEach(el=>el.addEventListener('click',e=>{e.stopPropagation();changePreviewFish(el.dataset.minus,-1)}));
     renderSettlement();
+    syncTabsScroll();
   }
 
   function changePreviewFish(id,delta){
@@ -4394,7 +4595,8 @@ body:not(.dev-on) .dev-panel{display:none!important}
         if(n>0) counts.push(`${id} ×${n}`);
       });
     });
-    el.innerHTML=`泡泡：<b>${PlayerData.bubbles}</b> 🫧<br>
+    // 这段串里有真标签（<b>/<br>），不能走 bubHtml 的整体转义 —— 图标常量直接拼。
+    el.innerHTML=`泡泡：<b>${PlayerData.bubbles}</b> ${BUB_SVG}<br>
       会员：<b>${PlayerData.isMember?"是":"否"}</b><br>
       账号：<b>${ACCOUNT_UID||"未建号"}</b><br>
       云同步：<b>${CLOUD_SYNC_ENABLED?"已开启":"未开启（纯本地）"}</b><br>
@@ -4960,6 +5162,11 @@ function categoryScale(key){
   function setAudioMuted(muted){
     audioMuted = muted;
 
+    const panel = document.getElementById("audioSettings");
+    if(panel) panel.classList.toggle("muted-by-master", muted);
+    const label = document.getElementById("audioToggleLabel");
+    if(label) label.textContent = muted ? "全部声音 · 已静音" : "全部声音";
+
     if(audioCtx && masterGain){
       masterGain.gain.cancelScheduledValues(audioCtx.currentTime);
       masterGain.gain.setTargetAtTime(muted ? 0 : 0.72, audioCtx.currentTime, 0.025);
@@ -5173,7 +5380,20 @@ function categoryScale(key){
   document.addEventListener("visibilitychange", snapshotOnHide);
   window.addEventListener("pagehide", () => persistFocusSnapshot(true));
 
-  endBtn.onclick = () => modal.classList.add("show");
+  endBtn.onclick = () => {
+    // 和 resetFocus 同一口径：durationSeconds - remaining 才是真实已专注秒数
+    const elapsedSeconds = Math.max(0, durationSeconds - remaining);
+    const willGet = focusRewardMinutes(Math.floor(elapsedSeconds / 60), sessionIsMember);
+    const sub = document.getElementById("endConfirmSub");
+    if(sub){
+      const left = remaining > 0
+        ? `还剩 <b>${String(Math.floor(remaining/60)).padStart(2,"0")}:${String(remaining%60).padStart(2,"0")}</b> · `
+        : "";
+      // 串里有 <b>（倒计时/奖励数字）→ 不能走 bubHtml 的整体转义，图标常量直接拼。
+      sub.innerHTML = `${left}现在结束可得 <b>${willGet}</b> ${BUB_SVG}`;
+    }
+    modal.classList.add("show");
+  };
   continueBtn.onclick = () => modal.classList.remove("show");
   completionConfirm.onclick = () => {
     completionFlash.classList.remove("show");
@@ -5785,9 +6005,9 @@ function resetFocus(completed, options) {
         : applyFocusReward(reward);
       // 算出 0 说明这次确实没攒够时长（DEV 快进、提前结束都算），
       // 这时要把话说清楚，否则玩家只会觉得奖励被吞了。
-      completionReward.textContent = granted > 0
+      setBubText(completionReward, granted > 0
         ? `本次专注获得了 ${granted} 泡泡 🫧`
-        : "这次没攒够时长，没有泡泡。下次专注满 25 分钟就有啦 🫧";
+        : "这次不到 1 分钟，还没有泡泡 🫧");
     };
     settleFocusReward(localReward, elapsedSeconds).then(
       settlement => {
@@ -5820,8 +6040,8 @@ function resetFocus(completed, options) {
   // 放在初始化最末尾：它可能直接走到结算流程，那时计时器、鱼缸、存档都必须已经就绪。
   restoreFocusSession();
 
-  // 水底 = 缸高 81%（沙面在 80%，留 1% 让饲料落在沙面上、鱼不钻沙）。
-  // 沙图规约是「整图 = 整缸高、沙画在图片底部 20%」，所以这个比例永远和素材对齐 ——
+  // 水底 = 缸高 (1 - SAND_RATIO) = 87.5%（沙面在 12.5%，留少量余量让饲料沉进沙里、鱼不钻沙）。
+  // 沙图规约是「整图 = 整缸高、沙画在图片底部 12.5%」，所以这个比例永远和素材对齐 ——
   // 不需要去读沙图像素实测（2026-10-06 先做过 canvas 实测沙面的方案，被这条规约取代，已回退）。
   let pellets = [];
 
@@ -5830,17 +6050,31 @@ function resetFocus(completed, options) {
   // 这里以前又用 addEventListener 绑了一遍（只覆盖初始化那批元素），
   // 结果点一下鱼触发两次、惊吓音效播两遍 —— 已删除，只保留 rebuildFishFromData 那一处。
 
+  // 沙占缸高的比例（素材规约同步：整图 = 整缸大小，沙画在图片底部 SAND_RATIO）。
+  // 单一常量：CSS `.sand{height}` 必须与它一致（现 12.5%）。
+  const SAND_RATIO = 0.125;
+  const waterBottomOf = rect => rect.height * (1 - SAND_RATIO);
+
+  // 沙面不是一条水平线：中段略高（沙丘），两端略低，再叠一条极细的波纹。
+  // 全部由落点横坐标决定 —— 同一位置永远同一个深度，刷新/重进都不变，也没有 Math.random。
+  function pelletRestY(px, rect){
+    const t = clamp(px / Math.max(1, rect.width), 0, 1);
+    const mound  = 1 - Math.sin(t * Math.PI);             // 0(中间) → 1(两端)
+    const ripple = Math.sin(t * Math.PI * 7) * 0.5 + 0.5; // 0..1，7 个波峰
+    return waterBottomOf(rect) + (0.004 + 0.026 * mound + 0.010 * ripple) * rect.height;
+  }
+
   tank.addEventListener("pointerdown", (e) => {
     if (!running) return; 
     // 点水面 = 投喂。但凡点到「界面控件」都不该掉饲料（dominik 2026-09-25 实测：
     // 专注中点右上角的装点/我的/设置会同时丢下一粒饲料，因为顶栏就在 .tank 里面）。
     // 这里一次性把交互层都排除掉：顶栏、抽屉、弹窗、计时器、音频控件，以及任何按钮/输入。
-    if (e.target.closest("button, a, input, select, textarea, .timer, .modal, .audio-controls, .v02-topbar, .v02-drawer, .v02-shop, .v02-event, .v02-receipt, .v02-focus-blocker")) return;
+    if (e.target.closest("button, a, input, select, textarea, .timer, .modal, .audio-controls, .v02-topbar, .v02-bottombar, .v02-drawer, .v02-shop, .v02-event, .v02-receipt, .v02-focus-blocker")) return;
 
     const rect = tank.getBoundingClientRect();
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
-    const waterBottom = rect.height * 0.81;
+    const waterBottom = waterBottomOf(rect);
 
     if (py >= waterBottom) return;
 
@@ -5851,7 +6085,7 @@ function resetFocus(completed, options) {
     tank.appendChild(pelletEl);
     playFeedSound();
 
-    pellets.push({ x: px, y: py, el: pelletEl, eaten: false });
+    pellets.push({ x: px, y: py, el: pelletEl, eaten: false, restY: pelletRestY(px, rect) });
   });
 
   function clamp(val, min, max) {
@@ -5860,10 +6094,10 @@ function resetFocus(completed, options) {
 
   window.addEventListener("resize", () => {
     const rect = tank.getBoundingClientRect();
-    const waterBottom = rect.height * 0.81;
+    const waterBottom = waterBottomOf(rect);
 
     pellets = pellets.filter(p => {
-      const isOutOfBounds = p.x > rect.width || p.y > waterBottom;
+      const isOutOfBounds = p.x > rect.width || p.y > waterBottomOf(rect) + 0.05 * rect.height;
       if (isOutOfBounds) {
         if (p.el && p.el.parentNode) p.el.remove();
         return false;
@@ -5880,6 +6114,7 @@ function resetFocus(completed, options) {
         fish.targetY = fish.radius + Math.random() * (waterBottom - fish.radius * 2);
       }
     });
+    syncTabsScroll();
   });
 
   function getSpeedScale(rect){
@@ -5889,10 +6124,10 @@ function resetFocus(completed, options) {
   function animate() {
     const rect = tank.getBoundingClientRect();
     const speedScale = getSpeedScale(rect);
-    const waterBottom = rect.height * 0.81; 
+    const waterBottom = waterBottomOf(rect); 
 
     pellets.forEach(p => {
-      if (!p.eaten && p.y < waterBottom) {
+      if (!p.eaten && p.y < p.restY) {
         p.y += 0.9; 
         p.el.style.top = p.y + "px";
       }
@@ -6409,13 +6644,21 @@ const elemToRemove = nearest.el;
   function renderFocusStats(){
     const el = document.getElementById("focusStatus");
     if(!el) return;
-    // 没账号（没令牌）就没有聚合数据，隐藏状态条。
-    if(!CLOUD_SYNC_ENABLED || !ACCOUNT_TOKEN){ el.hidden = true; return; }
+    const hint = document.getElementById("focusHint");
+    // 没账号（没令牌）就没有聚合数据：隐藏统计、显示占位（T12：占位 = 说明 + 可点重试）。
+    // 🔴 el.hidden = true 这行写法被 focus-stats-ui.test.js 锁着，别改。
+    // 🔴 if(hint) 守卫是必须的 —— focus-stats-ui.test.js 的假 DOM 没有 #focusHint。
+    if(!CLOUD_SYNC_ENABLED || !ACCOUNT_TOKEN){
+      el.hidden = true;
+      if(hint) hint.hidden = false;
+      return;
+    }
     const todayEl = document.getElementById("focusToday");
     const totalEl = document.getElementById("focusTotal");
     if(todayEl) todayEl.textContent = `今日专注 ${focusStats.focusCountToday} 次 · ${focusStats.focusMinutesToday} 分钟`;
     if(totalEl) totalEl.textContent = `累计 ${focusStats.focusCount} 次 · ${focusStats.focusMinutesTotal} 分钟`;
     el.hidden = false;
+    if(hint) hint.hidden = true;
     renderMineProfile();
   }
 
@@ -6528,13 +6771,30 @@ const elemToRemove = nearest.el;
   if(retryButton) retryButton.addEventListener("click", async () => {
     retryButton.disabled = true;
     retryButton.textContent = "重试中…";
-    const ok = await syncPublishedConfig();
+    // 手动重试时不再等冷启动：用户已经等过整轮了，再按首屏预算等一遍毫无意义。
+    const ok = await syncPublishedConfig({ noRetry: true });
     retryButton.disabled = false;
     retryButton.textContent = "重试";
     if(ok){ renderShop(); renderAquarium(AquariumData); }
   });
   const closeButton = document.getElementById("configNoticeClose");
   if(closeButton) closeButton.addEventListener("click", hideConfigNotice);
+
+  // 专注统计（T12）：启动时先渲染一次 —— 没令牌时把底栏占位（#focusHint）亮出来。
+  // 之前 renderFocusStats 只在 refreshFocusStats（有令牌才往下走）里被调，
+  // 建号失败 / FISHTANK_DISABLE_ACCOUNT 的玩家永远看不到任何反馈，底栏就是空的。
+  renderFocusStats();
+  const focusHintRetry = document.getElementById("focusHintRetry");
+  if(focusHintRetry) focusHintRetry.addEventListener("click", async () => {
+    focusHintRetry.disabled = true;
+    focusHintRetry.textContent = "重试中…";
+    try{
+      await ensureAccount();      // 成功时内部会顺带 syncCloudSave + refreshFocusStats
+      await refreshFocusStats();  // 再显式刷一次，兜住「有令牌但没拉到统计」的情况
+    }catch(_){ /* 建号失败保持占位，下次打开自动重试 */ }
+    focusHintRetry.disabled = false;
+    focusHintRetry.textContent = "重试";
+  });
 
   window.addEventListener("pointerdown", unlockAudio, {capture:true, passive:true});
   window.addEventListener("keydown", unlockAudio, {once:true});

@@ -238,8 +238,8 @@ chkTrue("资源 chip 删除后重新编号（后景/前景不会错位）",
 console.log("\n--- 6. 上传资源要真的传到云存储，不能只写本地文件名 ---");
 chkTrue("不再把 file.name 当路径写进配置", !/addResourceChip\(file\.name/.test(scriptSource));
 chkTrue("有统一的 uploadAsset（按 MIME 选接口）",
-  // 第三个参数是 2026-09-25 错误分级改造加的「错误贴到哪个控件」，不影响这条断言的意图。
-  /async function uploadAsset\(file, label(?:, [a-zA-Z]+)?\)[\s\S]{0,400}startsWith\("audio\/"\) \? "\/admin\/assets" : "\/admin\/assets\/image"/.test(scriptSource));
+  // 第三个参数是 2026-09-25 错误分级改造加的「错误贴到哪个控件」，第四个 role 是 2026-10-07 Tinify 压缩规格加的，不影响这条断言的意图。
+  /async function uploadAsset\(file, label(?:, [a-zA-Z]+)*\)[\s\S]{0,400}startsWith\("audio\/"\) \? "\/admin\/assets" : "\/admin\/assets\/image"/.test(scriptSource));
 {
   fetchImpl = async () => ({ ok: true, status: 200, json: async () => ({ data: { path: "images/uploaded-1.png", url: "" } }) });
   const api = bootAdmin();

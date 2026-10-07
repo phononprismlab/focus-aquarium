@@ -93,9 +93,10 @@ console.log("\n--- 2. 🔴 seed 迁移不能冲掉停机状态 ---");
   chk("notice 保留后台填的内容", out.notice.title, "今晚维护");
   chk("notice 缺的字段由 seed 补齐", out.notice.ctaText, "");
 
-  // 反向：普通单例（focus）仍是「以 seed 为准」，这个行为没被改坏。
+  // 反向：普通单例（focus）与 ops 同一套语义 —— 也以库里的值为准。
+  // 曾经这里断言的是「普通单例以 seed 为准」，那条旧行为会让后台改的配置在下次部署被冲掉。
   const focusOut = applySeedDefault("focus", { minFocusDuration: 25 }, { minFocusDuration: 30 });
-  chk("普通单例仍以 seed 为准（未改坏既有行为）", focusOut.minFocusDuration, 30);
+  chk("普通单例同样以库里的值为准", focusOut.minFocusDuration, 25);
 
   // 空 stored（首次写入）→ 用 seed
   chk("stored 为空时直接用 seed", applySeedDefault("ops", {}, OPS_SEED_SHAPE).maintenance, false);

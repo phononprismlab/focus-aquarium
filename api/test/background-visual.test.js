@@ -85,20 +85,20 @@ console.log("--- 1. 背景：上传的图要变成能铺满的 CSS ---");
   const s = build([{ id: "bg001", category: "backgrounds", previewImage: "https://cdn/a.png" }]);
   chk("previewImage 生效（url + 铺满）",
     s.visualForItem("backgrounds", "bg001").css,
-    'url("https://cdn/a.png") center / cover no-repeat');
+    'url("https://cdn/a.png") center top / cover no-repeat');
 }
 {
   const s = build([{ id: "bg001", category: "backgrounds", resourcePath: ["https://cdn/b.jpg"] }]);
   chk("resourcePath 字符串数组也生效",
     s.visualForItem("backgrounds", "bg001").css,
-    'url("https://cdn/b.jpg") center / cover no-repeat');
+    'url("https://cdn/b.jpg") center top / cover no-repeat');
 }
 {
   // 鱼的插槽格式：[{slot,path}]，背景商品也可能被存成这个形状。
   const s = build([{ id: "bg001", category: "backgrounds", resourcePath: [{ slot: "body", path: "https://cdn/c.webp" }] }]);
   chk("resourcePath 是 {slot,path} 也取得到 path",
     s.visualForItem("backgrounds", "bg001").css,
-    'url("https://cdn/c.webp") center / cover no-repeat');
+    'url("https://cdn/c.webp") center top / cover no-repeat');
 }
 {
   const s = build([{ id: "bg001", category: "backgrounds" }]);
@@ -133,9 +133,9 @@ console.log("\n--- 2. 反向：不该铺的一律不铺 ---");
 
 console.log("\n--- 3. 底砂：cover 铺满整缸（固定占缸底 20%）+ 贴底居中 + 不平铺 ---");
 {
-  // 2026-10-06 定稿：素材按「整图 = 整缸大小、沙画在图片底部 20%」绘制。
+  // 2026-10-06 定稿，2026-10-07 调整：素材按「整图 = 整缸大小、沙画在图片底部 12.5%」绘制。
   // 渲染用 `cover`（取宽/高两方向更大的缩放比）—— 图永远盖满整缸，超出部分以中轴裁掉。
-  // 常规 16:10 缸里按高度撑满 → 沙条带正好占缸底 20%；超宽屏按宽度撑满 → 底边对齐沙完整。
+  // 常规缸里按高度撑满 → 沙条带正好占缸底 12.5%；超宽屏按宽度撑满 → 底边对齐沙完整。
   // ⚠️ 曾经用过 `auto 100%`（只按高度撑满）：缸比素材宽时图比缸窄 → 两端露白（10-06 修）。
   //    也用过 `100% auto`（只按宽度撑满）：图高 = 缸宽 × 图高宽比，沙条带只有 18%，别再写回去。
   // 要求图是透明 PNG；不透明的话上方区域会遮挡背景。
@@ -148,7 +148,7 @@ console.log("\n--- 3. 底砂：cover 铺满整缸（固定占缸底 20%）+ 贴�
     'url("https://cdn/sand.png") center bottom / cover no-repeat');
   chk("背景仍走 cover（不受沙子改动影响）",
     s.cssFromImagePath("https://cdn/bg.png", "cover"),
-    'url("https://cdn/bg.png") center / cover no-repeat');
+    'url("https://cdn/bg.png") center top / cover no-repeat');
   // 装饰上传图与沙图摆法完全相同 —— "decor-image" 是上传装饰图的专用 fit。
   chk("装饰上传图与沙图摆法一致（cover 铺满整缸 + 贴底居中 + 不平铺）",
     s.cssFromImagePath("https://cdn/deco.png", "decor-image"),
@@ -167,7 +167,7 @@ console.log("\n--- 4. 路径里的引号不能提前闭合 url() ---");
 {
   const s = build([]);
   chk("引号与反斜杠被清掉",
-    s.cssFromImagePath('https://x/a"b\\c.png'), 'url("https://x/abc.png") center / cover no-repeat');
+    s.cssFromImagePath('https://x/a"b\\c.png'), 'url("https://x/abc.png") center top / cover no-repeat');
   chk("空值不出 CSS", s.cssFromImagePath(""), "");
 }
 

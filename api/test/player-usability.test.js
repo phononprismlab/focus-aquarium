@@ -51,6 +51,13 @@ function extractFunction(src, name) {
   throw new Error(`函数 ${name} 花括号不配对`);
 }
 
+// 抽出一行式常量（const X = ...;），T09 的自绘货币符号常量要靠它搬进沙箱。
+function extractConst(src, name) {
+  const match = src.match(new RegExp(`const ${name} = [^\\n]*;`));
+  if (!match) throw new Error(`index.html 里找不到常量 ${name}`);
+  return match[0];
+}
+
 // 按方括号配对抽出一个数组字面量（GUIDE_STEPS 这类数据）。
 function extractArray(src, constName) {
   const key = `const ${constName} = [`;
@@ -385,24 +392,44 @@ function makeSettlement({ paid = 0, refund = 0, bubbles = 0 } = {}) {
   globalThis.__el = {
     textContent: "",
     _short: null,
-    classList: { toggle(cls, on) { if (cls === "short") globalThis.__el._short = on; } }
+    classList: { toggle(cls, on) { if (cls === "short") globalThis.__el._short = on; } },
+    // setBubText 会往元素里塞一个「文档片段」，桩这边把片段里的可读文本累加进来。
+    appendChild(node) { globalThis.__el.textContent += (node && node.textContent) || ""; return node; }
   };
   return new Function(`
 const TempAquariumData = {};
 const PlayerData = { bubbles: ${bubbles} };
 function buildSettlement(){ return { paid: ${paid}, refund: ${refund} }; }
-const document = { getElementById: () => globalThis.__el };
+// T09：货币符号是自绘 SVG，renderSettlement 走 setBubText —— 桩要给出它用到的那几个 DOM 方法。
+// createElement 返回的节点代表图标：真实 DOM 里图标节点的可读文本就是 SVG 的 <title>泡泡</title>，
+// 所以桩给的 textContent 是「泡泡」二字（textContent 会连 SVG 标题一起算进去）。
+const document = {
+  getElementById: () => globalThis.__el,
+  createTextNode: text => ({ textContent: String(text) }),
+  createDocumentFragment: () => {
+    const frag = { kids: [], appendChild(node) { frag.kids.push(node); return node; }, get textContent() { return frag.kids.map(k => (k && k.textContent) || "").join(""); } };
+    return frag;
+  },
+  createElement: () => ({ innerHTML: "", firstChild: null, textContent: "泡泡" })
+};
+${extractConst(source, "BUB_GLYPH")}
+${extractConst(source, "BUB_SVG")}
+${extractFunction(source, "escapeHtml")}
+${extractFunction(source, "bubHtml")}
+${extractFunction(source, "setBubText")}
+${extractFunction(source, "createBubIcon")}
 ${extractFunction(source, "renderSettlement")}
 return renderSettlement;
 `)();
 }
 {
   const run = opts => { makeSettlement(opts)(); return { text: globalThis.__el.textContent, short: globalThis.__el._short }; };
-  chk("够钱：只说需支付，不标红", run({ paid: 100, bubbles: 500 }), { text: "需支付 100 🫧", short: false });
-  chk("不够钱：说出还差多少和现有余额", run({ paid: 300, bubbles: 120 }), { text: "需支付 300 🫧　还差 180 🫧（现有 120 🫧）", short: true });
-  chk("返还也算进可支配（120+50 够付 150）", run({ paid: 150, refund: 50, bubbles: 120 }), { text: "需支付 150 🫧　可返还 50 🫧", short: false });
-  chk("刚好够：不标红", run({ paid: 100, bubbles: 100 }), { text: "需支付 100 🫧", short: false });
-  chk("零泡泡新玩家：告诉他泡泡从哪来", run({ paid: 0, bubbles: 0 }), { text: "还没有泡泡 —— 专注满 25 分钟就能攒到 🫧", short: false });
+  chk("够钱：只说需支付，不标红", run({ paid: 100, bubbles: 500 }), { text: "需支付 100 泡泡", short: false });
+  chk("不够钱：说出还差多少和现有余额", run({ paid: 300, bubbles: 120 }), { text: "需支付 300 泡泡　还差 180 泡泡（现有 120 泡泡）", short: true });
+  chk("返还也算进可支配（120+50 够付 150）", run({ paid: 150, refund: 50, bubbles: 120 }), { text: "需支付 150 泡泡　可返还 50 泡泡", short: false });
+  chk("刚好够：不标红", run({ paid: 100, bubbles: 100 }), { text: "需支付 100 泡泡", short: false });
+  // 文案里符号前留了个空格（给图标留的间距），所以读出来是「就有 泡泡」。
+  chk("零泡泡新玩家：告诉他泡泡从哪来", run({ paid: 0, bubbles: 0 }), { text: "还没有泡泡 —— 泡泡靠专注时长换，1 分钟起就有 泡泡", short: false });
   chk("有泡泡但没选东西：不打扰", run({ paid: 0, bubbles: 80 }), { text: "", short: false });
 }
 chkTrue("差额行有独立样式（标红）", /\.v02-settlement\.short\{/.test(source));

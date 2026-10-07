@@ -340,9 +340,6 @@ const seed = {
 };
 
 const singletonTypes = new Set(["focus", "audio", "about", "ops"]);
-// 运营态单例：后台填的值必须**跨重启保留**（停机开关、通知文案、白名单），
-// 所以 seed 只负责给初始结构、补齐以后新增的字段，绝不覆盖已有值。
-const operationalSingletons = new Set(["ops"]);
 const idForType = (type, data) => type === "fish" ? data.fishid : singletonTypes.has(type) ? type : data.id;
 
 function makeRecord(type, data, published = true) {
@@ -367,19 +364,29 @@ export function isLegacyPlaceholderPreview(value) {
 }
 
 // 把 seed 默认值应用到某条已存储记录，返回「应当写入的数据」。
-// - 单例配置（focus / audio）：直接以最新 seed 为准（应用配置更新应随版本生效）。
-// - 用户内容（decorations / fish）：以 seed 为基底，仅补齐缺失字段，保留用户已有值。
+// 🔴 单例配置（focus / audio / about / ops）一律**以库里的值为准** —— 也就是以后台保存的
+// 那份为准。seed 只做两件事：库里没有时给初值；库里缺了 seed 新加的字段时补上。
+// 曾经这里对 focus / audio / about 无条件 `return base`（seed 覆盖一切），后果是
+// **后台改完文案/参数，下次部署就被冲回 seed**：玩家看到的和后台配置的不一致，
+// 而且只会在部署之后才暴露，排查成本极高。ops 早就按「以库为准」走了（停机状态重启不能丢），
+// 现在四条单例统一成同一套语义。
+// - 用户内容（decorations / fish / events）：以 seed 为基底，仅补齐缺失字段，保留用户已有值。
 export function applySeedDefault(type, stored, seed) {
   const base = structuredClone(seed);
   if (singletonTypes.has(type)) {
-    // 运营态单例（ops）：以 stored 为准，只把 seed 里新增的字段补进去。
-    // 停机状态要是重启就没了，维护窗口等于裸奔。
-    if (operationalSingletons.has(type) && stored && typeof stored === "object" && Object.keys(stored).length) {
-      const merged = { ...base, ...stored };
-      if (base.notice || stored.notice) merged.notice = { ...(base.notice || {}), ...(stored.notice || {}) };
-      return merged;
+    if (!stored || typeof stored !== "object" || !Object.keys(stored).length) return base;
+    const merged = { ...base, ...stored };
+    // 顶层键两边都是普通对象时做一层深合并：about 的 5 个 section、audio 的 categories、
+    // ops 的 notice。后台只改了其中一部分字段时，seed 新加的字段不会丢。
+    // 数组整体以 stored 为准（音效列表、rewardTiers 属于「内容」，后台增删过就不能被 seed 覆盖）。
+    for (const [key, value] of Object.entries(base)) {
+      const saved = stored[key];
+      const bothPlainObjects = value && saved
+        && typeof value === "object" && typeof saved === "object"
+        && !Array.isArray(value) && !Array.isArray(saved);
+      if (bothPlainObjects) merged[key] = { ...value, ...saved };
     }
-    return base;
+    return merged;
   }
   const merged = base;
   for (const [k, v] of Object.entries(stored || {})) {
@@ -402,9 +409,13 @@ export function planSeedMigration(type, seedValues, existingRows) {
       return { action: "insert", id, data: structuredClone(seed) };
     }
     const newData = applySeedDefault(type, existing.data, seed);
+    // 🔴 publishedData 为 null 有两种来源：后台新建了还没发布的草稿，或者后台把它**下架**了。
+    //    两种都表示「线上没有这一份」，必须原样保持 null。
+    //    以前这里写的是 `: newData`，等于每次启动都给下架项偷偷填一份线上数据 ——
+    //    published 那一列当时没被碰，玩家端还看不到，但状态是脏的（下次任何人翻库都会困惑）。
     const newPublished = existing.publishedData != null
       ? applySeedDefault(type, existing.publishedData, seed)
-      : newData;
+      : null;
     const changed = !deepEqual(newData, existing.data) || !deepEqual(newPublished, existing.publishedData);
     if (!changed) return { action: "skip", id };
     return { action: "update", id, data: newData, publishedData: newPublished, rowId: existing.rowId };
@@ -437,8 +448,14 @@ export function createMemoryRepository() {
       records.set(key, record);
       return structuredClone(record);
     },
+    // 「删除」= 下架，不是真删（与云端仓库同一套语义，见 createCloudbaseRepository 里的说明）。
+    // 行留在 records 里，id 还在，runSeedMigration 才会走 skip/update 而不是 insert 补回来。
     async remove(type, id) {
-      records.delete(`${type}:${id}`);
+      const record = records.get(`${type}:${id}`);
+      if (!record) return;
+      record.published = false;
+      record.publishedData = null;
+      record.updatedAt = now();
     },
     async publish(type, id) {
       const record = records.get(`${type}:${id}`);
@@ -481,44 +498,73 @@ export function setRdbForTest(instance) {
   rdbPromise = instance ? Promise.resolve(instance) : null;
 }
 
-export async function createCloudbaseRepository() {
-  const db = await getRdb();
-  const tableName = "fishtank_configs";
-
-  // 种子迁移：把 seed 的默认集合并进已部署的数据库（B2）。
-  // 一次性按 type 拉取全部已存在行，与 seed 比对后规划 insert / update / skip，
-  // 缺失的新项与缺失字段会被补齐，用户已改过的内容不会被覆盖。
-  for (const [type, value] of Object.entries(seed)) {
+// 种子迁移：把 seed 的默认集合并进已部署的数据库（B2）。
+// 一次性按 type 拉取全部已存在行，与 seed 比对后规划 insert / update / skip，
+// 缺失的新项与缺失字段会被补齐，用户已改过的内容不会被覆盖。
+// 🔴 7 个 type 的 select **并行**发：原本串行 7 次往返，冷启动时每次都是「等首字节」，
+// 叠加起来就是十几秒的启动时间，而它们之间没有任何依赖。
+export async function runSeedMigration(db, tableName = "fishtank_configs") {
+  const planned = await Promise.all(Object.entries(seed).map(async ([type, value]) => {
     const seedValues = Array.isArray(value) ? value : [value];
     const { data: rows } = await db.from(tableName).select("*").eq("type", type).throwOnError();
     // 防御：数据层异常时 select 可能返回非数组（测试用的假环境就会这样），
     // 归一化成数组，避免 .map 直接把整个仓库初始化搞崩。真实环境正常返回数组。
     const existingRows = Array.isArray(rows) ? rows : [];
-    const plan = planSeedMigration(type, seedValues, existingRows.map(r => ({
-      id: r.config_id,
-      data: r.data || {},
-      publishedData: r.published_data,
-      rowId: r.id
-    })));
+    return {
+      type,
+      plan: planSeedMigration(type, seedValues, existingRows.map(r => ({
+        id: r.config_id,
+        data: r.data || {},
+        publishedData: r.published_data,
+        rowId: r.id
+      })))
+    };
+  }));
+  // 写操作也并行：已部署的库正常情况下全是 skip（零写），只有**空库首次初始化**或
+  // 新增默认项 / 改了默认参数时才落写。空库时是 23 条 insert —— 串行发就是 23 次往返，
+  // 冷启动下每次都是「等首字节」，加起来比所有 select 还贵。这些写之间没有依赖
+  // （不同的 config_id / 不同的行 id），并发发掉只花一次往返的时间。
+  const writes = [];
+  for (const { type, plan } of planned) {
     for (const op of plan) {
       if (op.action === "insert") {
-        await db.from(tableName).insert([{
+        writes.push(db.from(tableName).insert([{
           type,
           config_id: op.id,
           data: op.data,
           published_data: structuredClone(op.data),
           published: true,
           updated_at: now()
-        }], { defaultToNull: false }).throwOnError();
+        }], { defaultToNull: false }).throwOnError());
       } else if (op.action === "update") {
-        await db.from(tableName).update({
+        writes.push(db.from(tableName).update({
           data: op.data,
-          published_data: op.publishedData ?? op.data,
+          // 显式区分「没有值」和「值是 null」：下架项的 publishedData 就是 null，
+          // 用 `?? op.data` 会把它悄悄"重新发布"出一份线上数据。
+          // published 那一列**不在这里写** —— 迁移只补默认集，没有权力改「玩家能不能看到」。
+          published_data: op.publishedData === undefined ? op.data : op.publishedData,
           updated_at: now()
-        }).eq("id", op.rowId).throwOnError();
+        }).eq("id", op.rowId).throwOnError());
       }
     }
   }
+  await Promise.all(writes);
+}
+
+// options.background = true：不 await 种子迁移，仓库**立刻**可用。
+// 生产（server.js）必须走这条：迁移只是「补齐默认集」，而读接口本来就是直接查库、不依赖它，
+// 把它挡在启动路径上等于让每个冷启动的请求白等若干次网络往返；
+// 更要命的是迁移里带 throwOnError —— DB 抖动一次，整个仓库就被判成初始化失败，
+// 于是全站配置接口 500（不是「退回默认值」，是真报错）。
+export async function createCloudbaseRepository(options = {}) {
+  const db = await getRdb();
+  const tableName = "fishtank_configs";
+
+  const migrations = runSeedMigration(db, tableName).catch(error => {
+    console.error("种子迁移失败（服务照常提供配置，只是默认集可能不完整）：", error && error.message ? error.message : error);
+  });
+  if (options && options.background === true) void migrations;
+  else await migrations;
 
   const toRecord = row => ({
     type: row.type,
@@ -559,6 +605,17 @@ export async function createCloudbaseRepository() {
       }
       return toRecord({ ...row, id: current?.id });
     },
+    // 后台的「删除」= 下架，不是真删。
+    //
+    // 🔴 为什么不能真删：`runSeedMigration` 判断某个默认项该不该补，唯一的依据就是
+    //    「库里有没有这个 config_id」（见 planSeedMigration）。真删之后那一行消失，
+    //    在它眼里就等于「这个默认项从来没建过」→ 下次启动 insert 补回来 →
+    //    后台删掉的默认项自己复活，玩家端也跟着重新看到。
+    //    所以这里只把「玩家可见」关掉：published=false + published_data=null。
+    //    · 玩家端（/api/game/*）按 published===true 过滤 → 立刻看不到；
+    //    · 后台列表（/api/admin/*）不筛 published → 仍然看得到，随时能「上架」恢复；
+    //    · 种子迁移看到 id 还在 → 走 skip/update，不会 insert。
+    // 行不存在时静默返回（幂等）：重复下架同一条不该报错。
     async remove(type, id) {
       const { data: existing } = await db
         .from(tableName)
@@ -566,7 +623,11 @@ export async function createCloudbaseRepository() {
         .eq("type", type)
         .eq("config_id", id)
         .throwOnError();
-      await Promise.all(existing.map(row => db.from(tableName).delete().eq("id", row.id).throwOnError()));
+      await Promise.all(existing.map(row => db
+        .from(tableName)
+        .update({ published: false, published_data: null, updated_at: now() })
+        .eq("id", row.id)
+        .throwOnError()));
     },
     async publish(type, id) {
       const { data: existing } = await db
@@ -590,7 +651,9 @@ export async function createCloudbaseRepository() {
 }
 
 export async function createRepository() {
-  if (process.env.CLOUDBASE_ENV_ID) return createCloudbaseRepository();
+  // 生产走「后台迁移」：仓库在拿到 RDB 客户端后立刻可用，种子迁移在后台补齐默认集。
+  // 冷启动时这能省掉启动路径上的全部网络等待（见 createCloudbaseRepository 的说明）。
+  if (process.env.CLOUDBASE_ENV_ID) return createCloudbaseRepository({ background: true });
   if (process.env.NODE_ENV === "production") throw new Error("CLOUDBASE_ENV_ID is required in production");
   return createMemoryRepository();
 }

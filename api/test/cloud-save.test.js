@@ -188,7 +188,7 @@ const baseSave = () => ({
 {
   const incoming = baseSave();
   incoming.PlayerData = { ...baseSave().PlayerData, bubbles: "abc" };
-  chk("非数字泡泡归零（NaN 会一路传染到「🫧 NaN」）", mergeSaveForWrite(baseSave(), incoming).save.PlayerData.bubbles, 0);
+  chk("非数字泡泡归零（NaN 会一路传染到「泡泡 NaN」）", mergeSaveForWrite(baseSave(), incoming).save.PlayerData.bubbles, 0);
 }
 
 // ===== 4. 鱼缸布局不能变成白嫖通道 =====

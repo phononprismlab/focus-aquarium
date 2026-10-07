@@ -68,8 +68,9 @@ console.log("--- 1. 顶栏 ---");
   chkTrue("标题在顶栏里（id 仍是 appTitle，动画/引用不用改）",
     /<h1 class="v02-brand-title" id="appTitle">鱼儿乐水族<\/h1>/.test(topbar));
   chkTrue("缸里的大海报标题已删除", !/<h1 class="poster-title"/.test(source) && !/class="poster-title"/.test(source));
+  // T09：泡泡数换成自绘 SVG 后，这两个 id 之间多了一段内联 <svg>（约 490 字符）→ 放宽上限。
   chkTrue("泡泡数在顶栏右侧、排在「装点」前面",
-    /<nav class="v02-topbar-entries">\s*<div class="v02-bubbles" id="bubbleDisplay"[\s\S]{0,200}id="shopOpenBtn"/.test(topbar));
+    /<nav class="v02-topbar-entries">\s*<div class="v02-bubbles" id="bubbleDisplay"[\s\S]{0,900}id="shopOpenBtn"/.test(topbar));
   chkTrue("顶栏是左右两端布局（space-between）", /justify-content:space-between/.test(rule(".v02-topbar")));
   const brand = rule(".v02-brand-title");
   chkTrue("品牌标题不再是绝对定位（已经进文档流）", brand.length > 0 && !/position:absolute/.test(brand));
@@ -137,8 +138,8 @@ console.log("\n--- 3. 专注中状态行 ---");
 console.log("\n--- 4. 状态条位置 ---");
 {
   const focus = rule(".v02-focus");
-  chkTrue("贴页面底部", /bottom:max\(16px,3\.5vh\)/.test(focus));
-  chkTrue("没有残留 top（top 会盖掉 bottom）", !/(^|[;{])top:/.test(focus));
+  chkTrue("统计条在底栏内、不再是绝对定位（T10/T12 搬家）", !/position:absolute/.test(focus));
+  chkTrue("没有残留 top（列向布局里不该出现）", !/(^|[;{])top:/.test(focus));
 }
 
 // ===== 5. 沙子：cover 铺满整缸（固定占缸底 20%）+ 贴底居中 + 不平铺 =====
@@ -294,7 +295,7 @@ console.log("\n--- 11. 响应式覆盖的书写位置 ---");
   chkTrue("小屏断点真的收紧了入口按钮", /\.v02-top-entry\{padding:5px 9px;font-size:12px\}/.test(small));
   // 泡泡数在 ≤480px 曾被 display:none 藏掉（搬进顶栏后手机上就完全看不见泡泡了）。
   chkTrue("小屏不再把泡泡数藏起来", !/@media\(max-width:480px\)\{\.v02-bubbles\{display:none\}/.test(source));
-  chkTrue("泡泡数锁死不换行（窄屏下「🫧 3000」会在 emoji 后断行，把顶栏撑成两行）",
+  chkTrue("泡泡数锁死不换行（窄屏下「泡泡 3000」会在符号后断行，把顶栏撑成两行）",
     /\.v02-bubbles\{[^}]*white-space:nowrap/.test(compact));
 }
 

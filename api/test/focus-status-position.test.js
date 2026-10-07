@@ -1,10 +1,14 @@
-// 「今日专注 / 累计」状态条的位置契约。
+// 「今日专注 / 累计」状态条的位置契约（T10/T12 搬家后）。
 //
-// 历史：右上角 → 计时器正下方（2026-09-25 上午）→ **页面偏底部**（2026-09-25 下午，dominik：
-// 「中段只放计时器，这块看着碍事」）。所以现在锁的是：
-//   1) 贴底、居中、且**不能写 top** —— absolute 同时给 top 和 bottom 时 top 会赢，贴底会静默失效；
-//   2) 手机横屏下计时器按 vh 取尺寸、状态条贴底，两者各占一端不重叠；
-//   3) 层级/交互契约不变（在毛玻璃罩之上、不吃点击、无账号隐藏）。
+// 历史：右上角 → 计时器正下方（2026-09-25 上午）→ 页面偏底部（2026-09-25 下午）
+//       → **底栏**（2026-10-07，T10：顶栏/缸/底栏 三段式，缸体不再被 fixed 顶栏盖住）。
+// 所以现在锁的是：
+//   1) 三段式结构：顶栏是 .app 的直接子元素、排在 .tank 之前；底栏排在 .tank 之后；
+//      🔴 顶栏标签必须保持 `<div class="v02-topbar">` —— 本文件与 player-tank-ui.test.js
+//      都用 indexOf 切源码，标签一变 indexOf 返回 -1，两处会以极难懂的方式红掉；
+//   2) 统计条是底栏里的普通流式子项：不再绝对定位、不写 top/bottom/left/transform；
+//   3) 层级/交互契约不变：顶栏保留 z-index:1000（tank-depth.test.js 读它）、
+//      不吃点击、hidden 整块隐藏、无账号时统计隐藏且占位（#focusHint）出现。
 //
 // 运行：node test/focus-status-position.test.js
 import fs from "node:fs";
@@ -28,7 +32,6 @@ function chkTrue(name, condition) {
 }
 const compact = source.replace(/:\s+/g, ":").replace(/;\s+/g, ";").replace(/\s*\{\s*/g, "{").replace(/\s*\}\s*/g, "}");
 // 把 @media 块整体摘掉，只留基础规则。
-// 不摘的话 .v02-focus 会先匹配到断点里的那条覆盖规则（它在文件里排在前面）。
 const baseSource = source.replace(/@media[^{]*\{(?:[^{}]|\{[^{}]*\})*\}/g, "");
 function ruleOf(src, selector) {
   const match = src.match(new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}"));
@@ -37,55 +40,69 @@ function ruleOf(src, selector) {
 const rule = (selector) => ruleOf(baseSource, selector);
 const MEDIA_520 = (source.match(/@media \(max-width:520px\)\s*\{([\s\S]*?)\n  \}/) || [])[1] || "";
 
-console.log("--- 1. 位置：页面偏底部（中段只留计时器） ---");
+console.log("--- 1. 三段式布局：顶栏 / 缸 / 底栏 ---");
+{
+  chkTrue("底栏是 .app 的直接子元素，且排在 .tank 之后",
+    /<\/main>\s*(?:<!--[\s\S]*?-->\s*)?<footer class="v02-bottombar">/.test(source));
+  chkTrue("顶栏是 .app 的直接子元素，且排在 .tank 之前",
+    /<div class="v02-topbar">[\s\S]{0,2000}?<main class="tank"/.test(source));
+  chkTrue("顶栏不再写在 .tank 内部",
+    !source.slice(source.indexOf('<main class="tank"'), source.indexOf('</main>')).includes('class="v02-topbar"'));
+  chkTrue("统计条住在底栏里",
+    source.slice(source.indexOf('<footer class="v02-bottombar">'), source.indexOf('</footer>')).includes('id="focusStatus"'));
+  const topbar = rule(".v02-topbar");
+  chkTrue("顶栏不再是 fixed（搬家后是普通流式通栏）", !/position:fixed/.test(topbar));
+  chkTrue("顶栏仍是 space-between 左右两端布局", /justify-content:space-between/.test(topbar));
+  chkTrue("顶栏保留 z-index:1000（tank-depth.test.js 读它）", /z-index:1000/.test(topbar));
+  chkTrue(".tank 靠 flex 吃剩余高度",
+    /flex:1 1 auto/.test(rule(".tank")) && /min-height:0/.test(rule(".tank")));
+  chkTrue("底栏与顶栏同级（z-index:1000）", /z-index:1000/.test(rule(".v02-bottombar")));
+}
+
+console.log("\n--- 2. 统计条：底栏里的流式子项 ---");
 {
   const focus = rule(".v02-focus");
-  chkTrue("水平居中", /left:50%/.test(focus) && /transform:translateX\(-50%\)/.test(focus));
-  chkTrue("纵向贴底", /bottom:max\(\d+px,\d+\.?\d*vh\)/.test(focus));
-  // 🔴 同时写 top 和 bottom 时 top 会赢 —— 贴底就会失效，这条是防回退的关键。
-  chkTrue("没有残留的 top（有 top 会把贴底顶掉）", !/(^|[;{])top:/.test(focus));
-  chkTrue("内容改为居中排列（原来是靠右）", /align-items:center/.test(focus));
-  // 反向：旧写法是钉在右上角 / 贴在计时器下面。
+  chkTrue("不再绝对/固定定位（由底栏 flex 居中）", !/position:(absolute|fixed)/.test(focus));
+  chkTrue("不再自己写水平/贴底定位", !/left:50%|translateX\(-50%\)|bottom:/.test(focus));
+  chkTrue("没有残留的 top", !/(^|[;{])top:/.test(focus));
+  chkTrue("内容居中排列", /align-items:center/.test(focus));
+  // 反向：更早的旧写法。
   chkTrue("旧的 right:18px 已消失", !/right:18px/.test(focus));
   chkTrue("旧贴计时器的 calc(53% + …) 已消失", !/53%/.test(focus));
   chkTrue("旧的 align-items:flex-end 已消失", !/align-items:flex-end/.test(focus));
 }
-{
-  const dom = source.slice(source.indexOf('<section class="timer" id="timer">'), source.indexOf('id="completionFlash"'));
-  chkTrue("状态条在 .timer 之后", dom.indexOf('id="focusStatus"') > dom.indexOf("</section>"));
-  chkTrue("状态条在专注完成弹窗之前", dom.indexOf('id="focusStatus"') >= 0 && dom.indexOf('id="focusStatus"') < dom.indexOf('class="completion-flash"'));
-  const topbar = source.slice(source.indexOf('<div class="v02-topbar">'), source.indexOf('<!-- 音频控件已收进'));
-  chkTrue("顶栏区块里确实没有它了", !topbar.includes("focusStatus"));
-}
 
-console.log("\n--- 2. 手机横屏不打架 ---");
+console.log("\n--- 3. 手机横屏不打架 ---");
 {
-  // 横屏下 vw 很大、vh 很小：计时器必须按 vh 取尺寸，否则会撑出屏幕；
-  // 状态条贴底后两者各占一端，不会再叠在一起。
   const landscape = (source.match(/@media \(orientation: landscape\) and \(max-height: 560px\)\s*\{([\s\S]*?)\n  \}/) || [])[1] || "";
   chkTrue("有手机横屏断点", landscape.length > 0);
   const landTimer = (landscape.match(/\.timer\{([^}]*)\}/) || [])[1] || "";
   chkTrue("横屏计时器按视口高度取尺寸（vh，不是 vw）", /min\(\d+px,\d+vh\)/.test(landTimer));
-  chkTrue("横屏计时器不超过视口一半高（上下还留得下顶栏和状态条）",
+  chkTrue("横屏计时器不超过视口一半高（上下还留得下顶栏和底栏）",
     Number((landTimer.match(/min\(\d+px,(\d+)vh\)/) || [])[1] || 100) <= 60);
-  const landFocus = (landscape.match(/\.v02-focus\{([^}]*)\}/) || [])[1] || "";
-  chkTrue("横屏状态条也贴底（且不写 top）", /bottom:\d+px/.test(landFocus) && !/(^|[;{])top:/.test(landFocus));
-  // 520px 断点里不该再留着「跟着计时器偏移」的旧规则。
+  const landBar = (landscape.match(/\.v02-bottombar\{([^}]*)\}/) || [])[1] || "";
+  const landBarMinH = Number((landBar.match(/min-height:(\d+)px/) || [])[1] || 999);
+  chkTrue("横屏底栏压缩档 min-height ≤ 44px", landBarMinH <= 44, `min-height=${landBarMinH}px`);
+  // 520px 断点里不该有 .v02-focus 的偏移规则（搬家后它没有可偏移的定位）。
   chkTrue("520px 断点里没有残留的 .v02-focus 偏移规则", !/\.v02-focus\{/.test(MEDIA_520));
   chkTrue("520px 断点仍然在（小屏计时器尺寸照旧）", /@media \(max-width:520px\)/.test(source) && /min\(230px,62vw\)/.test(MEDIA_520));
 }
 
-console.log("\n--- 3. 层级与交互契约没变 ---");
+console.log("\n--- 4. 层级与交互契约没变 ---");
 {
   const focus = rule(".v02-focus");
-  chkTrue("仍然在毛玻璃罩之上（z-index 1000 > 罩子 50）", /z-index:1000/.test(focus));
   chkTrue("仍然不吃点击（纯展示）", /pointer-events:none/.test(focus));
   chkTrue("hidden 时仍然整块隐藏", /\.v02-focus\[hidden\]\{display:none;\}/.test(compact));
   chkTrue("只读展示四个聚合字段，没引入明细",
     /todayEl\.textContent = `今日专注 \$\{focusStats\.focusCountToday\} 次 · \$\{focusStats\.focusMinutesToday\} 分钟`/.test(source)
     && /totalEl\.textContent = `累计 \$\{focusStats\.focusCount\} 次 · \$\{focusStats\.focusMinutesTotal\} 分钟`/.test(source));
-  chkTrue("没有账号（没令牌）时保持隐藏",
-    /if\(!CLOUD_SYNC_ENABLED \|\| !ACCOUNT_TOKEN\)\{ el\.hidden = true; return; \}/.test(source));
+  chkTrue("没账号时 #focusStatus 隐藏且 #focusHint 显示",
+    /el\.hidden = true;\s*\n\s*if\(hint\) hint\.hidden = false;/.test(source));
+  const retrySlice = source.slice(source.indexOf('getElementById("focusHintRetry")'), source.indexOf('getElementById("focusHintRetry")') + 900);
+  chkTrue("占位可点重试：#focusHintRetry 重新拉账号与统计",
+    /getElementById\("focusHintRetry"\)/.test(source) && /ensureAccount\(\)/.test(retrySlice) && /refreshFocusStats\(\)/.test(retrySlice));
+  chkTrue("启动时渲染一次统计（否则建号失败的玩家看不到占位）",
+    (source.match(/(?<!function )renderFocusStats\(\)/g) || []).length >= 2);
 }
 
 console.log(`\n===== 专注状态条位置测试：${pass} 通过 / ${fail} 失败 =====`);

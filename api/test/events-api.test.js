@@ -1,9 +1,10 @@
 // 事件配置类型的 HTTP 层回归测试（F6 / F7）。
 //
-// 证明三件事：
+// 证明四件事：
 //   1. `events` 已经注册进 server.js 的 types —— 否则后台 CRUD 全是 404，事件系统根本没法配；
 //   2. 保存时走 validateEventConfig：handler 不在白名单 / 概率越界必须在写库前就被拦住；
-//   3. 公开接口 /api/game/events 只下发已发布的事件（草稿不能提前生效）。
+//   3. 公开接口 /api/game/events 只下发已发布的事件（草稿不能提前生效）；
+//   4. DELETE = 下架而不是真删：后台仍看得到、玩家端看不到、能再上架（细节见 config-unpublish.test.js）。
 //
 // 反向验证：把 server.js 的 types 里去掉 "events"，本测试会 FAIL（CRUD 变 404）。
 //
@@ -118,17 +119,34 @@ chk("发布后出现在公开接口", Boolean(publicEvent), true);
 chk("公开接口下发的是 publishedData", publicEvent && publicEvent.data && publicEvent.data.handler, "fish-escape");
 chk("公开接口带上了 params（玩家端 handler 要用）", publicEvent && publicEvent.data && publicEvent.data.params && publicEvent.data.params.minSurvivalMinutes, 1440);
 
-console.log("\n--- 修改 / 删除 ---");
+console.log("\n--- 修改 / 下架 ---");
 const updated = await request("PUT", "/api/admin/events/t-escape", { ...base, maxPerDay: 2 }, auth);
 chk("PUT -> 200", updated.status, 200);
 const afterUpdate = json((await request("GET", "/api/admin/events", null, auth)).body).data.find(record => record.id === "t-escape");
 chk("修改已落库", afterUpdate && afterUpdate.data && afterUpdate.data.maxPerDay, 2);
 chk("修改后变成未发布（草稿）", afterUpdate && afterUpdate.published, false);
 
-const removed = await request("DELETE", "/api/admin/events/t-escape", null, auth);
-chk("DELETE -> 204", removed.status, 204);
-const afterDelete = json((await request("GET", "/api/admin/events", null, auth)).body).data.find(record => record.id === "t-escape");
-chk("删除后列表里没有了", afterDelete, undefined);
+console.log("\n--- 下架（后台的「删除」= 下架，不是真删）---");
+const retired = await request("DELETE", "/api/admin/events/t-escape", null, auth);
+chk("下架 -> 204", retired.status, 204);
+const afterRetire = json((await request("GET", "/api/admin/events", null, auth)).body).data.find(record => record.id === "t-escape");
+chk("下架后后台仍然看得到这一条（行没被真删）", Boolean(afterRetire), true);
+chk("下架后 published=false", afterRetire && afterRetire.published, false);
+chk("下架后没有线上版本（publishedData 为 null）", afterRetire && afterRetire.publishedData, null);
+const gameAfterRetire = json((await request("GET", "/api/game/events")).body);
+chk("下架后玩家端看不到", (gameAfterRetire.data || []).some(record => record.id === "t-escape"), false);
+
+// 上架 = 再调一次 publish，玩家端立刻恢复
+const republished = await request("POST", "/api/admin/events/t-escape/publish", null, auth);
+chk("上架 -> 200", republished.status, 200);
+const gameAfterRepublish = json((await request("GET", "/api/game/events")).body);
+chk("上架后玩家端又能看到", (gameAfterRepublish.data || []).some(record => record.id === "t-escape"), true);
+
+// 幂等：重复下架、下架不存在的 id 都不该报错
+const retiredAgain = await request("DELETE", "/api/admin/events/t-escape", null, auth);
+chk("重复下架 -> 204（幂等）", retiredAgain.status, 204);
+const retiredMissing = await request("DELETE", "/api/admin/events/t-not-exist", null, auth);
+chk("下架不存在的 id -> 204（幂等）", retiredMissing.status, 204);
 
 console.log("\n----");
 console.log(`events-api.test: PASS=${pass} FAIL=${fail}`);
