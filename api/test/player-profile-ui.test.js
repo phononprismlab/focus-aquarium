@@ -207,7 +207,8 @@ console.log("\n--- 4. 运行时：没登录时资料卡隐藏 ---");
   chk("累计次数 = 12", box.els.mineFocusCount.textContent, "12");
   chk("今日分钟 = 50", box.els.mineTodayMinutes.textContent, "50");
   chk("鱼数 = 3", box.els.mineFishCount.textContent, "3");
-  chkTrue("注册时间渲染成日期", /来到水族馆\s2026-09-25/.test(box.els.mineCreatedAt.textContent));
+  // 日期在前、店名在后（dominik 2026-10-07 定的形态）；原来写的是「来到水族馆 2026-09-25」。
+  chkTrue("注册时间渲染成日期（日期在前）", /^2026-09-25 来到鱼儿乐水族$/.test(box.els.mineCreatedAt.textContent));
   chk("昵称没改动时保存按钮禁用", box.els.mineNicknameSave.disabled, true);
 }
 
@@ -243,6 +244,19 @@ console.log("\n--- 5. 反向验证（破掉保护，断言必须变红）---");
   broken.renderMineProfile();
   chkTrue("反向：把 hasCloud 写死成 true，资料卡就会露出来（说明这道闸真的在挡）",
     broken.els.mineProfile.hidden === false);
+}
+
+// ============================================================
+console.log("\n--- 6. 注销区块的文案 ---");
+// ============================================================
+{
+  // 原来是区块标题「危险操作」+ 按钮「注销账号」—— 标题没说什么事、按钮又和标题同名。
+  // 现在标题说清是什么事、按钮说清点下去会去哪（dominik 2026-10-07）。
+  chkTrue("区块标题是「注销账号」", /<div class="account-line">注销账号<\/div>/.test(playerRaw));
+  chkTrue("按钮是「前往注销」（点它才进二次确认）",
+    /<button type="button" id="accountDeleteBtn" class="account-danger">前往注销<\/button>/.test(playerRaw));
+  chk("全站不再出现「危险操作」", /危险操作/.test(playerRaw), false);
+  chkTrue("二次确认弹窗标题仍是「注销账号」", /id="accountDeleteTitle">注销账号</.test(playerRaw));
 }
 
 console.log(`\n===== 「我的」资料卡（前端）测试：${pass} 通过 / ${fail} 失败 =====`);

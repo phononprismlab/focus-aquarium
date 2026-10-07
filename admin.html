@@ -1378,10 +1378,12 @@
 			return state.about;
 		}
 		function aboutSection() { return { title: "", bodyHtml: "" }; }
+		// 「品牌故事」已从玩家端下线（2026-10-07），后台也不再提供编辑入口 ——
+		// 留着只会让人以为改了有用。库里那一段仍然保留（aboutConfig 照旧带着它，
+		// 保存时也不会丢），将来要恢复只需把这一行加回来。
 		const ABOUT_SECTIONS = [
 			{ key: "terms", label: "用户协议" },
 			{ key: "privacy", label: "隐私政策" },
-			{ key: "story", label: "品牌故事" },
 			{ key: "tip", label: "打赏支持", image: true },
 			{ key: "filing", label: "备案信息" }
 		];

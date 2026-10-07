@@ -48,6 +48,8 @@ const files = ["reward.test.js", "focus-session.test.js", "focus-settle-writebac
   "shop-sort.test.js",
   "focus-status-position.test.js",
   "player-tank-ui.test.js",
+  "pellet-lifecycle.test.js",
+  "settings-panel.test.js",
   "admin-pages-ux.test.js",
   "save-export.test.js",
   "save-restore.test.js",

@@ -299,6 +299,34 @@ console.log("\n--- 11. 响应式覆盖的书写位置 ---");
     /\.v02-bubbles\{[^}]*white-space:nowrap/.test(compact));
 }
 
+// ===== 12. 2026-10-07：缸盖/缸底座平面化 + 停止符号与开始符号同号 =====
+console.log("\n--- 12. 顶栏/底栏平面化 + 计时器符号 ---");
+{
+  const topbar = rule(".v02-topbar");
+  const bottombar = rule(".v02-bottombar");
+  const colorOf = (body) => (body.match(/(?:^|;)background:(rgba\([^)]*\))/) || [])[1] || "";
+  // 原来靠三段渐变 + 三条内阴影堆「盖顶受光 / 盖底转折 / 唇边高光」，实测是粗糙的立体感。
+  chkTrue("顶栏不再用渐变（单一平色）", /(?:^|;)background:rgba\(/.test(topbar) && !/linear-gradient/.test(topbar));
+  chkTrue("底栏不再用渐变（单一平色）", /(?:^|;)background:rgba\(/.test(bottombar) && !/linear-gradient/.test(bottombar));
+  chk("顶栏底栏共用同一个平色", colorOf(bottombar), colorOf(topbar));
+  chk("平色 = rgba(6,34,66,0.92)", colorOf(topbar), "rgba(6,34,66,0.92)");
+  chkTrue("顶栏去掉立体内阴影", /box-shadow:none/.test(topbar));
+  chkTrue("底栏去掉立体内阴影", /box-shadow:none/.test(bottombar));
+  chkTrue("仍保留 1px 亮边分界（去掉的是立体感，不是边界）",
+    /border-bottom:1px solid/.test(topbar) && /border-top:1px solid/.test(bottombar));
+  chkTrue("盖/座投在水面上的影变淡（0.34 → 0.20）",
+    /rgba\(4,22,48,0\.20\)/.test(source) && !/rgba\(4,22,48,0\.34\)/.test(source));
+
+  const startGlyph = rule(".start-glyph");
+  const endGlyph = rule(".end-glyph");
+  chk("开始符号 22px", (startGlyph.match(/font-size:(\d+)px/) || [])[1], "22");
+  // 🔴 这里刻意**不是**同字号：■ 字形自带左右边距，同样 22px 时墨迹只有 17×15，
+  //    比 ▶ 的 19×19 小一圈（dominik 2026-10-07 反馈「停止符号过小」）。
+  //    逐像素实测（Segoe UI bold）▶22=19×19 / ■18=14×13 / ■22=17×15 / ■26=20×18，
+  //    26px 是两个符号包围盒最接近的值。真机复验见 fa-batch8-verify.mjs 的 B 段。
+  chk("停止符号 26px（墨迹对齐 ▶ 的 19×19，不是同字号）", (endGlyph.match(/font-size:(\d+)px/) || [])[1], "26");
+}
+
 console.log("----");
 console.log(`player-tank-ui.test: PASS=${pass} FAIL=${fail}`);
 if (fail > 0) process.exit(1);
